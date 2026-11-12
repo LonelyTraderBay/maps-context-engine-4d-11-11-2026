@@ -1,0 +1,97 @@
+package runtime
+
+import (
+	"errors"
+	"io"
+	"os"
+
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
+)
+
+var ErrGitIndexLimit = errors.New("git index size limit exceeded")
+var ErrGitIndexLinked = errors.New("git index has multiple hard links")
+var ErrGitIndexChanged = errors.New("git index changed while reading")
+
+// ReadGitIndex reads only the index in an already authorized metadata root.
+// It neither discovers gitdirs nor follows a .git file. The caller must bind
+// that root to the registered worktree and revalidate authorization. The bytes
+// are untrusted and must not be persisted or exposed without further checks.
+// Stable capture and interpretation of index extensions belong to the
+// inventory/capture owners; this function does not execute Git.
+func ReadGitIndex(metadataRoot *paths.Root, maxBytes int) (data []byte, resultErr error) {
+	if maxBytes <= 0 || maxBytes > 64*1024*1024 {
+		return nil, ErrGitIndexLimit
+	}
+	file, err := metadataRoot.OpenRegular("index")
+	if err != nil {
+		if errors.Is(err, paths.ErrHardLinked) {
+			return nil, ErrGitIndexLinked
+		}
+		return nil, err
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			data = nil
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
+	return readGitIndex(metadataRoot, file, file, maxBytes)
+}
+
+// readGitIndex checks observed file metadata and the current index path before
+// releasing bytes. This is not an atomic snapshot and does not replace capture
+// stability or registered metadata authority.
+func readGitIndex(metadataRoot *paths.Root, file *os.File, reader io.Reader, maxBytes int) ([]byte, error) {
+	data, err := readObservedFile(metadataRoot, "index", file, reader, maxBytes, ErrGitIndexLimit, ErrGitIndexChanged)
+	if errors.Is(err, paths.ErrHardLinked) {
+		return nil, ErrGitIndexLinked
+	}
+	return data, err
+}
+
+func readObservedFile(root *paths.Root, path string, file *os.File, reader io.Reader, maxBytes int, limitErr, changedErr error) ([]byte, error) {
+	if err := paths.VerifyRegularFile(file); err != nil {
+		return nil, err
+	}
+	before, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, int64(maxBytes)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxBytes {
+		return nil, limitErr
+	}
+	if err = paths.VerifyRegularFile(file); err != nil {
+		return nil, err
+	}
+	after, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !sameObservedFile(before, after) {
+		return nil, changedErr
+	}
+	current, err := root.OpenRegular(path)
+	if err != nil {
+		return nil, errors.Join(changedErr, err)
+	}
+	currentInfo, statErr := current.Stat()
+	closeErr := current.Close()
+	if statErr != nil || closeErr != nil {
+		return nil, errors.Join(statErr, closeErr)
+	}
+	if !sameObservedFile(after, currentInfo) {
+		return nil, changedErr
+	}
+	if err = root.Verify(); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func sameObservedFile(a, b os.FileInfo) bool {
+	return os.SameFile(a, b) && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && a.Mode() == b.Mode() && sameFileChangeTime(a, b)
+}

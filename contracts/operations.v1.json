@@ -1,0 +1,126 @@
+{
+  "mce4d_workspace_status": [
+    "StatusRequest",
+    "StatusData"
+  ],
+  "mce4d_locate": [
+    "LocateRequest",
+    "LocateData"
+  ],
+  "mce4d_context_pack": [
+    "PackRequest",
+    "PackData"
+  ],
+  "mce4d_expand_pack": [
+    "ExpandRequest",
+    "PackData"
+  ],
+  "mce4d_validate_pack": [
+    "ValidateRequest",
+    "ValidateData"
+  ],
+  "mce4d_rename_preview": [
+    "RenameRequest",
+    "RenameData"
+  ],
+  "POST /session/bootstrap": [
+    "BootstrapRequest",
+    "BootstrapData"
+  ],
+  "GET /workspace": [
+    "StatusRequest",
+    "StatusData"
+  ],
+  "POST /graph/query": [
+    "GraphQueryRequest",
+    "GraphData"
+  ],
+  "POST /source/read": [
+    "SourceReadRequest",
+    "SourceData"
+  ],
+  "POST /mapping/resolve": [
+    "MappingResolveRequest",
+    "MappingData"
+  ],
+  "POST /flow/query": [
+    "FlowQueryRequest",
+    "FlowData"
+  ],
+  "POST /context/pack": [
+    "PackRequest",
+    "PackData"
+  ],
+  "POST /preview/attach": [
+    "PreviewAttachRequest",
+    "PreviewData"
+  ],
+  "POST /preview/bind": [
+    "PreviewBindRequest",
+    "PreviewData"
+  ],
+  "POST /preview/mode": [
+    "PreviewModeRequest",
+    "PreviewData"
+  ],
+  "POST /preview/ack": [
+    "PreviewAckRequest",
+    "PreviewData"
+  ],
+  "POST /preview/invalidate": [
+    "PreviewInvalidateRequest",
+    "PreviewData"
+  ],
+  "POST /preview/detach": [
+    "PreviewDetachRequest",
+    "PreviewData"
+  ],
+  "POST /mapping/propose": [
+    "MappingProposeRequest",
+    "RecordData"
+  ],
+  "POST /mapping/review": [
+    "MappingReviewRequest",
+    "RecordData"
+  ],
+  "POST /preview/status": [
+    "PreviewStatusRequest",
+    "PreviewStatusData"
+  ],
+  "CLI preview-permission": [
+    "PreviewPermissionAdminRequest",
+    "PreviewPermissionAdminData"
+  ],
+  "CLI group": [
+    "GroupAdminRequest",
+    "GroupAdminData"
+  ],
+  "CLI config": [
+    "RuntimeConfigRequest",
+    "RuntimeConfigData"
+  ],
+  "POST /records/list": [
+    "RecordListRequest",
+    "RecordListData"
+  ],
+  "POST /records/read": [
+    "RecordReadRequest",
+    "RecordReadData"
+  ],
+  "CLI records list": [
+    "RecordListRequest",
+    "RecordListData"
+  ],
+  "CLI records read": [
+    "RecordReadRequest",
+    "RecordReadData"
+  ],
+  "CLI profile set": [
+    "ProfileAdminRequest",
+    "ProfileAdminData"
+  ],
+  "CLI policy set": [
+    "PolicyAdminRequest",
+    "PolicyAdminData"
+  ]
+}
