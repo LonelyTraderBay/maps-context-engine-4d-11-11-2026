@@ -193,6 +193,8 @@ func runGuardedLoaderFixture(t *testing.T, dir string) {
 	runSubpackageOnlyFixture(t, ctx, dir, goRoot, tool)
 	runGuardedBuildSelectionFixture(t, ctx, dir, goRoot, tool)
 	runTypedBindingsFixture(t, ctx, dir, goRoot, tool)
+	runTypedDispatchFixture(t, ctx, dir, goRoot, tool)
+	runCacheDifferentialFixture(t, ctx, dir, goRoot, tool)
 }
 
 func runSubpackageOnlyFixture(t *testing.T, ctx context.Context, parent, goRoot string, tool *runtimeadapter.GoExecutable) {
@@ -234,8 +236,8 @@ func runGuardedLocalImportFixture(t *testing.T, ctx context.Context, parent, goR
 	}
 	contents := map[string]string{
 		"go.mod":         "module example.test/fixture\n\ngo 1.27.4\n",
-		"p.go":           "package fixture\nimport \"example.test/fixture/sub\"\nvar Value = sub.Value\nvar BoxValue = sub.Box[int]{}\nvar FieldValue = BoxValue.Item\nvar Called = BoxValue.Get()\n",
-		"sub/value.go":   "package sub\nvar Value string\ntype Box[T any] struct { Item T }\nfunc (b Box[T]) Get() T { return b.Item }\n",
+		"p.go":           "package fixture\nimport \"example.test/fixture/sub\"\nvar Value = sub.Value\nvar BoxValue = sub.Box[int]{}\nvar FieldValue = BoxValue.Item\nfunc Called() int { return sub.Fn(BoxValue.Get()) }\n",
+		"sub/value.go":   "package sub\nvar Value string\ntype Box[T any] struct { Item T }\nfunc (b Box[T]) Get() T { return b.Item }\nfunc Fn(x int) int { return x }\n",
 		"other/other.go": "package other\nimport _ \"example.invalid/missing\"\n",
 	}
 	for name, value := range contents {
@@ -272,13 +274,13 @@ func runGuardedLocalImportFixture(t *testing.T, ctx context.Context, parent, goR
 	for _, file := range typed.Syntax {
 		if file.Path == "sub/value.go" {
 			for _, symbol := range file.Symbols {
-				if symbol.Kind == "variable" && symbol.Name == "Value" || symbol.Kind == "field" && symbol.Name == "Item" || symbol.Kind == "method" && symbol.Name == "Get" {
+				if symbol.Kind == "variable" && symbol.Name == "Value" || symbol.Kind == "field" && symbol.Name == "Item" || symbol.Kind == "method" && symbol.Name == "Get" || symbol.Kind == "function" && symbol.Name == "Fn" {
 					targets[symbol.Name] = symbol.SymbolID
 				}
 			}
 		}
 	}
-	for _, want := range []struct{ name, fragment, prefix, selection string }{{"Value", "sub.Value", "sub.", ""}, {"Item", "BoxValue.Item", "BoxValue.", "field"}, {"Get", "BoxValue.Get", "BoxValue.", "method_value"}} {
+	for _, want := range []struct{ name, fragment, prefix, selection string }{{"Value", "sub.Value", "sub.", ""}, {"Item", "BoxValue.Item", "BoxValue.", "field"}, {"Get", "BoxValue.Get", "BoxValue.", "method_value"}, {"Fn", "sub.Fn", "sub.", ""}} {
 		wantOffset := strings.Index(contents["p.go"], want.fragment) + len(want.prefix)
 		bound := false
 		for _, occurrence := range typed.Occurrences {
@@ -289,6 +291,39 @@ func runGuardedLocalImportFixture(t *testing.T, ctx context.Context, parent, goR
 		if !bound {
 			t.Fatalf("local dependency reference did not bind: %s", want.name)
 		}
+	}
+	graphRequest := typedRequest
+	graphRequest.MaxOutputBytes = 256 * 1024
+	graph, err := AnalyzeCapturedGraph(ctx, GraphInput{Typed: graphRequest, MaxRelations: 2000, MaxOutputBytes: 256 * 1024})
+	if err != nil {
+		t.Fatalf("cross-package graph: %v", err)
+	}
+	callSite := int64(strings.Index(contents["p.go"], "BoxValue.Get()"))
+	functionSite := int64(strings.Index(contents["p.go"], "sub.Fn("))
+	importSite := int64(strings.Index(contents["p.go"], `"example.test/fixture/sub"`))
+	gotCall, gotFunction, gotImport := false, false, false
+	for _, relation := range graph.Relations {
+		gotCall = gotCall || relation.Kind == "CALLS_DIRECT" && relation.SitePath == "p.go" && relation.Range.StartByte == callSite && relation.TargetSymbolID != nil && *relation.TargetSymbolID == targets["Get"]
+		gotFunction = gotFunction || relation.Kind == "CALLS_DIRECT" && relation.SitePath == "p.go" && relation.Range.StartByte == functionSite && relation.TargetSymbolID != nil && *relation.TargetSymbolID == targets["Fn"]
+		gotImport = gotImport || relation.Kind == "IMPORTS" && relation.SitePath == "p.go" && relation.Range.StartByte == importSite && relation.TargetSymbolID != nil
+	}
+	if !gotCall || !gotFunction || !gotImport {
+		t.Fatalf("captured cross-package graph is missing call/import: method=%v function=%v import=%v", gotCall, gotFunction, gotImport)
+	}
+	runOverviewCapturedGraphFixture(t, ctx, typedRequest, contents)
+	graphRequest.OtherPackages = nil
+	boundary, err := AnalyzeCapturedGraph(ctx, GraphInput{Typed: graphRequest, MaxRelations: 2000, MaxOutputBytes: 256 * 1024})
+	if err != nil {
+		t.Fatalf("unselected dependency graph: %v", err)
+	}
+	unresolvedCall, unresolvedFunction, unresolvedImport := false, false, false
+	for _, relation := range boundary.Relations {
+		unresolvedCall = unresolvedCall || relation.Kind == "UNRESOLVED_CALL" && relation.SitePath == "p.go" && relation.Range.StartByte == callSite && relation.TargetSymbolID == nil
+		unresolvedFunction = unresolvedFunction || relation.Kind == "UNRESOLVED_CALL" && relation.SitePath == "p.go" && relation.Range.StartByte == functionSite && relation.TargetSymbolID == nil
+		unresolvedImport = unresolvedImport || relation.Kind == "UNRESOLVED_REF" && relation.SitePath == "p.go" && relation.Range.StartByte == importSite && relation.TargetSymbolID == nil
+	}
+	if !unresolvedCall || !unresolvedFunction || !unresolvedImport {
+		t.Fatalf("unselected dependency did not remain a boundary: method=%v function=%v import=%v", unresolvedCall, unresolvedFunction, unresolvedImport)
 	}
 	again, err := AnalyzeTypedCaptured(ctx, typedRequest)
 	if err != nil || !reflect.DeepEqual(typed, again) {

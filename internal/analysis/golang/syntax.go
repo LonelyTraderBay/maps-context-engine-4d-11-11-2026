@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"path"
@@ -33,6 +34,7 @@ type SyntaxInput struct {
 	PackageName      string // production package name, without the external _test suffix
 	Variant          string
 	Scanner          *policy.Scanner
+	Cache            *SyntaxCache // optional private parse cache; never stores typed facts
 	MaxManifestBytes int
 	MaxFileBytes     int
 	MaxNodes         int
@@ -80,7 +82,8 @@ type SyntaxResult struct {
 	Imports                []SyntaxImport
 	Tags                   []SyntaxTag
 	Diagnostics            []model.DiagnosticFact
-	BuildSelectionVerified bool // always false until the package loader proves selection
+	Generated              *bool // nil if parsing could not establish the marker
+	BuildSelectionVerified bool  // always false until the package loader proves selection
 }
 
 // AnalyzeSyntaxFile parses one captured Go file under an explicitly supplied
@@ -148,8 +151,19 @@ func AnalyzeSyntaxFile(ctx context.Context, input SyntaxInput) (SyntaxResult, er
 	default:
 		return SyntaxResult{}, ErrInvalidInput
 	}
-	files := token.NewFileSet()
-	parsed, parseErr := parser.ParseFile(files, input.Path, source, parser.ParseComments)
+	key := syntaxCacheKey{worktree: manifest.WorktreeID, profile: manifest.ProfileID, policy: manifest.PolicyDigest, provider: input.Profile.ProviderDigest, toolchain: input.Profile.ToolchainDigest, path: input.Path, content: file.ContentHash(), options: "go-parser-comments-v1"}
+	var files *token.FileSet
+	var parsed *ast.File
+	var parseErr error
+	hit := false
+	var cacheEpoch uint64
+	if input.Cache != nil {
+		files, parsed, hit, cacheEpoch = input.Cache.lookup(key, source)
+	}
+	if !hit {
+		files = token.NewFileSet()
+		parsed, parseErr = parser.ParseFile(files, input.Path, source, parser.ParseComments)
+	}
 	if err := ctx.Err(); err != nil {
 		return SyntaxResult{}, err
 	}
@@ -183,5 +197,19 @@ func AnalyzeSyntaxFile(ctx context.Context, input SyntaxInput) (SyntaxResult, er
 	if parsed == nil || parsed.Name == nil || parsed.Name.Name != expectedName || !utf8.Valid(source) {
 		return SyntaxResult{}, ErrInputMismatch
 	}
-	return collectSyntax(ctx, input, files, parsed, source, result)
+	generated := ast.IsGenerated(parsed)
+	result.Generated = &generated
+	result, err = collectSyntax(ctx, input, files, parsed, source, result)
+	if err != nil {
+		return SyntaxResult{}, err
+	}
+	if input.Cache != nil && !hit {
+		if err := input.Cache.remember(ctx, key, source, files, parsed, input.MaxNodes, cacheEpoch); err != nil {
+			return SyntaxResult{}, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return SyntaxResult{}, err
+	}
+	return result, nil
 }

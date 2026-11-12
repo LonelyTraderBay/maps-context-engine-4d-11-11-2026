@@ -17,7 +17,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/snapshot"
 )
 
-func searchFixture(t *testing.T) (*Store, CaptureWrite, search.Request) {
+func searchFixture(t *testing.T, extra ...model.SymbolFact) (*Store, CaptureWrite, search.Request) {
 	t.Helper()
 	store, _, begin := beginFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -77,6 +77,9 @@ func searchFixture(t *testing.T) (*Store, CaptureWrite, search.Request) {
 		batch.Packages = append(batch.Packages, model.PackageFact{PackageKey: key, ImportPath: fmt.Sprintf("example.invalid/%d", i), ModuleKey: "module", Variant: "production", InputDigest: strings.Repeat("a", 64), SemanticStatus: "partial"})
 		batch.Symbols = append(batch.Symbols, model.SymbolFact{SymbolID: fmt.Sprintf("symbol%d", i), Path: &filename, PackageKey: &key, Kind: "function", Name: "Same", QualifiedName: fmt.Sprintf("pkg%d.Same", i), ScopeKey: key, Range: &model.ByteRange{StartByte: start, EndByte: start + 4}, Signature: "func Same()"})
 	}
+	filename, key := "b/b.go", "pkg1"
+	batch.Symbols = append(batch.Symbols, model.SymbolFact{SymbolID: "file-b", Path: &filename, PackageKey: &key, Kind: "file", Name: "b.go", QualifiedName: "pkg1.b.go", ScopeKey: key, Range: &model.ByteRange{StartByte: 0, EndByte: int64(len(inputs[1].source))}})
+	batch.Symbols = append(batch.Symbols, extra...)
 	stage := StageProviderRequest{Capture: capture, Stream: stream, Batch: batch, MaxFrameBytes: 65536}
 	if _, err := store.StageProviderBatch(ctx, stage); err != nil {
 		t.Fatal(err)
@@ -122,6 +125,17 @@ func TestSearchSymbolsAmbiguityPositionAndPrefix(t *testing.T) {
 	if err != nil || result.Ambiguous || len(result.Symbols) != 1 || result.Symbols[0].Symbol.SymbolID != "symbol1" {
 		t.Fatalf("position: %+v %v", result, err)
 	}
+	request.Position.ByteOffset = 0
+	result, err = store.Search(ctx, request)
+	if err != nil || result.Ambiguous || len(result.Symbols) != 0 {
+		t.Fatalf("non-symbol position selected the file: %+v %v", result, err)
+	}
+	request.Position.ByteOffset = 19
+	result, err = store.Search(ctx, request)
+	if err != nil || result.Ambiguous || len(result.Symbols) != 0 {
+		t.Fatalf("position at exclusive end matched symbol: %+v %v", result, err)
+	}
+	request.Position.ByteOffset = 15
 	request.Position.ContentHash = strings.Repeat("a", 64)
 	result, err = store.Search(ctx, request)
 	if !errors.Is(err, ErrCaptureMismatch) || result.GenerationID != "" {
@@ -132,6 +146,26 @@ func TestSearchSymbolsAmbiguityPositionAndPrefix(t *testing.T) {
 	request.Position.ByteOffset = int64(strings.Index(string(file.Bytes()), "é") + 1)
 	if _, err := store.Search(ctx, request); !errors.Is(err, ErrCaptureMismatch) {
 		t.Fatalf("position split UTF-8: %v", err)
+	}
+}
+
+func TestSearchPositionRetainsOverlappingRealSymbols(t *testing.T) {
+	filename, key := "b/b.go", "pkg1"
+	extra := model.SymbolFact{SymbolID: "symbol1-alternate", Path: &filename, PackageKey: &key, Kind: "function", Name: "Same", QualifiedName: "pkg1.Same", ScopeKey: key, Range: &model.ByteRange{StartByte: 15, EndByte: 19}, Signature: "func Same()"}
+	store, capture, request := searchFixture(t, extra)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	file, _ := capture.Snapshot.File(filename)
+	request.Mode = "position"
+	request.Position = &model.PositionSelector{Kind: "source_position", Path: filename, ContentHash: file.ContentHash(), ByteOffset: 15}
+	result, err := store.Search(ctx, request)
+	if err != nil || !result.Ambiguous || len(result.Symbols) != 2 {
+		t.Fatalf("overlapping real symbols were silently resolved: %+v %v", result, err)
+	}
+	request.Limit = 1
+	result, err = store.Search(ctx, request)
+	if err != nil || !result.Ambiguous || !result.Truncated || len(result.Symbols) != 1 {
+		t.Fatalf("truncated overlap lost ambiguity: %+v %v", result, err)
 	}
 }
 
@@ -243,6 +277,12 @@ func TestSearchPlansUseIndexes(t *testing.T) {
 	plan := explainPlan(t, ctx, store.writer, textSearchSQL, `body : "feature"`, fixtureGeneration, 11)
 	if !strings.Contains(strings.ToUpper(plan), "VIRTUAL TABLE INDEX") {
 		t.Errorf("FTS plan lacks inverted index: %s", plan)
+	}
+	request.Mode, request.Query = "position", ""
+	request.Position = &model.PositionSelector{Kind: "source_position", Path: "b/b.go", ContentHash: strings.Repeat("a", 64), ByteOffset: 15}
+	q, args := symbolSearchQuery(request, fixtureGeneration)
+	if plan := explainPlan(t, ctx, store.writer, q, args...); !strings.Contains(plan, "symbols_range") {
+		t.Errorf("position plan lacks range index: %s", plan)
 	}
 }
 

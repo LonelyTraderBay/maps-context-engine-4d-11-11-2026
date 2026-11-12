@@ -217,6 +217,7 @@ func Điểm(giá int) int {
 	if len(vIDs) != 2 || vIDs[0] == vIDs[1] || len(vScopes) != 2 || vScopes[0] == "" || vScopes[0] == vScopes[1] {
 		t.Fatal("type-switch cases did not get distinct binding identities")
 	}
+	runGraphTypedFixture(t, ctx, request, source, otherSource, methodID, numericID)
 	again, err := AnalyzeTypedCaptured(ctx, request)
 	if err != nil || !reflect.DeepEqual(result, again) {
 		t.Fatalf("separate loads did not produce deterministic source identities: %v", err)

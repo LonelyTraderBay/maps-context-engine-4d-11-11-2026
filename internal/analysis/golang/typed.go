@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"sort"
+	"strings"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"golang.org/x/tools/go/packages"
@@ -17,6 +18,7 @@ type TypedInput struct {
 	PackageKey     string
 	ModuleKey      string
 	OtherPackages  []TypedPackageIdentity
+	SyntaxCache    *SyntaxCache // optional parse-only cache, never typed facts
 	MaxNodes       int
 	MaxDepth       int
 	MaxFacts       int
@@ -44,6 +46,18 @@ type TypedOccurrence struct {
 	ScopeID    string          `json:"scope_id"`
 	Resolution string          `json:"resolution"` // captured, namespace, other_package, external, builtin, unmapped_local
 	Selection  string          `json:"selection"`  // empty, field, method_value, method_expression
+	ObjectKind string          `json:"object_kind"`
+	Dispatch   string          `json:"dispatch"` // empty, concrete, interface
+	Indirect   bool            `json:"indirect"`
+	Candidates []string        `json:"candidates"` // same-load proven method IDs; scoped, not exhaustive
+}
+
+// TypedCallSite distinguishes a function call from a type conversion without
+// publishing go/types objects or an inferred runtime target.
+type TypedCallSite struct {
+	Path  string          `json:"path"`
+	Range model.ByteRange `json:"range"` // callable expression, not arguments
+	Kind  string          `json:"kind"`  // call, conversion, unknown
 }
 
 type TypedResult struct {
@@ -52,6 +66,7 @@ type TypedResult struct {
 	Reasons     []string             `json:"reasons"`
 	Syntax      []SyntaxResult       `json:"syntax"`
 	Occurrences []TypedOccurrence    `json:"occurrences"`
+	Calls       []TypedCallSite      `json:"calls"`
 }
 
 // AnalyzeTypedCaptured consumes compiler identities only inside a single
@@ -91,7 +106,7 @@ func AnalyzeTypedCaptured(ctx context.Context, input TypedInput) (TypedResult, e
 	if err != nil {
 		return TypedResult{}, err
 	}
-	result := TypedResult{Loader: loaded, Status: "partial", Reasons: append([]string(nil), loaded.Reasons...), Syntax: []SyntaxResult{}, Occurrences: []TypedOccurrence{}}
+	result := TypedResult{Loader: loaded, Status: "partial", Reasons: append([]string(nil), loaded.Reasons...), Syntax: []SyntaxResult{}, Occurrences: []TypedOccurrence{}, Calls: []TypedCallSite{}}
 	if loaded.BuildSelectionVerified {
 		if extracted == nil {
 			return TypedResult{}, ErrInputMismatch
@@ -137,23 +152,32 @@ type typedScope struct {
 	depth int
 }
 
+type typedSelection struct {
+	kind, dispatch string
+	indirect       bool
+	candidates     []string
+}
+
 type typedCollector struct {
-	ctx           context.Context
-	input         TypedInput
-	pkg           *packages.Package
-	overlay       *CapturedOverlay
-	selected      map[string]bool
-	localPackages map[string]bool
-	candidates    map[typedSite][]model.SymbolFact
-	caseScopes    map[typedRange]string
-	caseSymbols   map[string][]model.SymbolFact
-	fileScopes    map[string][]typedScope
-	objects       map[types.Object]string
-	output        TypedResult
-	usedBytes     int
-	unmapped      bool
-	crossPending  bool
-	scopeChecks   int
+	ctx             context.Context
+	input           TypedInput
+	pkg             *packages.Package
+	overlay         *CapturedOverlay
+	selected        map[string]bool
+	localPackages   map[string]bool
+	candidates      map[typedSite][]model.SymbolFact
+	caseScopes      map[typedRange]string
+	caseSymbols     map[string][]model.SymbolFact
+	fileScopes      map[string][]typedScope
+	objects         map[types.Object]string
+	output          TypedResult
+	usedBytes       int
+	unmapped        bool
+	crossPending    bool
+	scopeChecks     int
+	candidateTypes  []*types.Named
+	candidateChecks int
+	interfaceSeen   bool
 }
 
 type typedPackage struct {
@@ -192,17 +216,32 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].pkg.PkgPath < units[j].pkg.PkgPath })
 	c := &typedCollector{ctx: ctx, input: input, pkg: pkg, overlay: overlay, selected: map[string]bool{}, localPackages: localPackages, candidates: map[typedSite][]model.SymbolFact{}, caseScopes: map[typedRange]string{}, caseSymbols: map[string][]model.SymbolFact{}, fileScopes: map[string][]typedScope{}, objects: map[types.Object]string{},
-		output: TypedResult{Status: "partial", Reasons: []string{}, Syntax: []SyntaxResult{}, Occurrences: []TypedOccurrence{}}}
+		output: TypedResult{Status: "partial", Reasons: []string{}, Syntax: []SyntaxResult{}, Occurrences: []TypedOccurrence{}, Calls: []TypedCallSite{}}}
 	for _, unit := range units {
 		current := unit.pkg
+		variant, packageName := "production", current.Name
+		if current.ForTest != "" {
+			switch current.PkgPath {
+			case current.ForTest:
+				variant = "internal_test"
+			case current.ForTest + "_test":
+				variant = "external_test"
+				if !strings.HasSuffix(packageName, "_test") {
+					return TypedResult{}, ErrInputMismatch
+				}
+				packageName = strings.TrimSuffix(packageName, "_test")
+			default:
+				return TypedResult{}, ErrInputMismatch
+			}
+		}
 		for _, filename := range unit.files {
 			if c.selected[filename] {
 				return TypedResult{}, ErrInputMismatch
 			}
 			c.selected[filename] = true
 			syntax, err := AnalyzeSyntaxFile(ctx, SyntaxInput{Snapshot: input.Loader.Preflight.Snapshot, Profile: input.Loader.Preflight.Profile, Path: filename, PackageKey: unit.identity.PackageKey,
-				ImportPath: current.PkgPath, ModuleKey: unit.identity.ModuleKey, PackageName: current.Name, Variant: "production", Scanner: input.Loader.Preflight.Scanner,
-				MaxManifestBytes: input.Loader.Preflight.MaxManifestBytes, MaxFileBytes: input.Loader.Preflight.MaxFileBytes, MaxNodes: input.MaxNodes, MaxDepth: input.MaxDepth, MaxFacts: input.MaxFacts, MaxOutputBytes: input.MaxOutputBytes})
+				ImportPath: current.PkgPath, ModuleKey: unit.identity.ModuleKey, PackageName: packageName, Variant: variant, Scanner: input.Loader.Preflight.Scanner,
+				Cache: input.SyntaxCache, MaxManifestBytes: input.Loader.Preflight.MaxManifestBytes, MaxFileBytes: input.Loader.Preflight.MaxFileBytes, MaxNodes: input.MaxNodes, MaxDepth: input.MaxDepth, MaxFacts: input.MaxFacts, MaxOutputBytes: input.MaxOutputBytes})
 			if err != nil || len(syntax.Diagnostics) != 0 {
 				if err != nil {
 					return TypedResult{}, err
@@ -269,7 +308,7 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 			matches := c.matchingSymbols(site, object)
 			if len(matches) != 1 {
 				c.unmapped = true
-				if err := c.appendOccurrence(site, "definition", "", "unmapped_local", "", ""); err != nil {
+				if err := c.appendOccurrence(site, "definition", "", "unmapped_local", "", object, typedSelection{}); err != nil {
 					return TypedResult{}, err
 				}
 				continue
@@ -277,7 +316,7 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 			if err := c.recordObject(object, matches[0].SymbolID); err != nil {
 				return TypedResult{}, err
 			}
-			if err := c.appendOccurrence(site, "definition", matches[0].SymbolID, "captured", matches[0].ScopeKey, ""); err != nil {
+			if err := c.appendOccurrence(site, "definition", matches[0].SymbolID, "captured", matches[0].ScopeKey, object, typedSelection{}); err != nil {
 				return TypedResult{}, err
 			}
 		}
@@ -310,7 +349,7 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 			}
 			if scope == "" || len(matches) != 1 {
 				c.unmapped = true
-				if err := c.appendOccurrence(bindingSite, "definition", "", "unmapped_local", "", ""); err != nil {
+				if err := c.appendOccurrence(bindingSite, "definition", "", "unmapped_local", "", variable, typedSelection{}); err != nil {
 					return TypedResult{}, err
 				}
 				continue
@@ -322,15 +361,84 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 			if err := c.recordObject(variable, symbol.SymbolID); err != nil {
 				return TypedResult{}, err
 			}
-			if err := c.appendOccurrence(bindingSite, "definition", symbol.SymbolID, "captured", symbol.ScopeKey, ""); err != nil {
+			if err := c.appendOccurrence(bindingSite, "definition", symbol.SymbolID, "captured", symbol.ScopeKey, variable, typedSelection{}); err != nil {
 				return TypedResult{}, err
+			}
+		}
+	}
+	seenTypes := map[*types.Named]bool{}
+	for _, unit := range units {
+		for _, object := range unit.pkg.TypesInfo.Defs {
+			name, ok := object.(*types.TypeName)
+			if !ok || name.IsAlias() {
+				continue
+			}
+			named, ok := types.Unalias(name.Type()).(*types.Named)
+			if !ok || seenTypes[named] || named.TypeParams().Len() != 0 {
+				continue
+			}
+			if _, isInterface := named.Underlying().(*types.Interface); isInterface {
+				continue
+			}
+			seenTypes[named] = true
+			c.candidateTypes = append(c.candidateTypes, named)
+			if len(c.candidateTypes) > 512 {
+				return TypedResult{}, ErrSyntaxLimit
 			}
 		}
 	}
 	for _, unit := range units {
 		pkg := unit.pkg
 		c.pkg = pkg
-		selections := make(map[*ast.Ident]string, len(pkg.TypesInfo.Selections))
+		for _, file := range pkg.Syntax {
+			nodes := 0
+			var walkErr error
+			ast.Inspect(file, func(node ast.Node) bool {
+				if node == nil || walkErr != nil {
+					return walkErr == nil
+				}
+				nodes++
+				if nodes > input.MaxNodes {
+					walkErr = ErrSyntaxLimit
+					return false
+				}
+				if nodes%64 == 0 && ctx.Err() != nil {
+					walkErr = ctx.Err()
+					return false
+				}
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				filename, start, end, err := c.positionRange(call.Fun.Pos(), call.Fun.End())
+				if err != nil {
+					walkErr = err
+					return false
+				}
+				kind := "unknown"
+				if value, exists := pkg.TypesInfo.Types[call.Fun]; exists {
+					kind = "call"
+					if value.IsType() {
+						kind = "conversion"
+					}
+				}
+				item := TypedCallSite{Path: filename, Range: model.ByteRange{StartByte: start, EndByte: end}, Kind: kind}
+				if len(c.output.Occurrences)+len(c.output.Calls) >= input.MaxOccurrences {
+					walkErr = ErrSyntaxLimit
+					return false
+				}
+				if err := c.reserve(item); err != nil {
+					walkErr = err
+					return false
+				}
+				c.output.Calls = append(c.output.Calls, item)
+				return true
+			})
+			if walkErr != nil {
+				return TypedResult{}, walkErr
+			}
+		}
+		selections := make(map[*ast.Ident]typedSelection, len(pkg.TypesInfo.Selections))
 		for selector, selection := range pkg.TypesInfo.Selections {
 			if selector == nil || selector.Sel == nil || selection == nil || originObject(pkg.TypesInfo.Uses[selector.Sel]) != originObject(selection.Obj()) {
 				return TypedResult{}, ErrInputMismatch
@@ -346,7 +454,33 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 			default:
 				return TypedResult{}, ErrInputMismatch
 			}
-			selections[selector.Sel] = kind
+			observation := typedSelection{kind: kind, indirect: selection.Indirect()}
+			if selection.Kind() != types.FieldVal {
+				if selection.Recv() == nil {
+					return TypedResult{}, ErrInputMismatch
+				}
+				receiver := types.Unalias(selection.Recv())
+				if pointer, ok := receiver.(*types.Pointer); ok {
+					receiver = types.Unalias(pointer.Elem())
+				}
+				if _, ok := receiver.Underlying().(*types.Interface); ok {
+					observation.dispatch = "interface"
+					c.interfaceSeen = true
+					if _, generic := receiver.(*types.TypeParam); !generic {
+						iface := receiver.Underlying().(*types.Interface)
+						if iface.IsMethodSet() {
+							var err error
+							observation.candidates, err = c.interfaceCandidates(iface, selection.Obj())
+							if err != nil {
+								return TypedResult{}, err
+							}
+						}
+					}
+				} else {
+					observation.dispatch = "concrete"
+				}
+			}
+			selections[selector.Sel] = observation
 		}
 		for ident, object := range pkg.TypesInfo.Uses {
 			if err := ctx.Err(); err != nil {
@@ -379,7 +513,7 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 			if err != nil {
 				return TypedResult{}, err
 			}
-			if err := c.appendOccurrence(site, "use", id, resolution, scope, selections[ident]); err != nil {
+			if err := c.appendOccurrence(site, "use", id, resolution, scope, object, selections[ident]); err != nil {
 				return TypedResult{}, err
 			}
 		}
@@ -390,6 +524,22 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 	if c.crossPending {
 		c.output.Reasons = append(c.output.Reasons, "CROSS_PACKAGE_BINDING_PENDING")
 	}
+	if c.interfaceSeen {
+		c.output.Reasons = append(c.output.Reasons, "INTERFACE_CANDIDATES_SCOPED")
+	}
+	sort.Slice(c.output.Calls, func(i, j int) bool {
+		a, b := c.output.Calls[i], c.output.Calls[j]
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Range.StartByte != b.Range.StartByte {
+			return a.Range.StartByte < b.Range.StartByte
+		}
+		if a.Range.EndByte != b.Range.EndByte {
+			return a.Range.EndByte < b.Range.EndByte
+		}
+		return a.Kind < b.Kind
+	})
 	sort.Slice(c.output.Occurrences, func(i, j int) bool {
 		a, b := c.output.Occurrences[i], c.output.Occurrences[j]
 		if a.Path != b.Path {
@@ -415,6 +565,15 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 		}
 		if a.Selection != b.Selection {
 			return a.Selection < b.Selection
+		}
+		if a.ObjectKind != b.ObjectKind {
+			return a.ObjectKind < b.ObjectKind
+		}
+		if a.Dispatch != b.Dispatch {
+			return a.Dispatch < b.Dispatch
+		}
+		if a.Indirect != b.Indirect {
+			return !a.Indirect
 		}
 		if a.SymbolID == nil || b.SymbolID == nil {
 			return a.SymbolID == nil && b.SymbolID != nil
@@ -532,11 +691,12 @@ func (c *typedCollector) scopeFor(site typedSite) (string, error) {
 	return best, nil
 }
 
-func (c *typedCollector) appendOccurrence(site typedSite, kind, id, resolution, scope, selection string) error {
-	if len(c.output.Occurrences) >= c.input.MaxOccurrences {
+func (c *typedCollector) appendOccurrence(site typedSite, kind, id, resolution, scope string, object types.Object, selection typedSelection) error {
+	if len(c.output.Occurrences)+len(c.output.Calls) >= c.input.MaxOccurrences {
 		return ErrSyntaxLimit
 	}
-	item := TypedOccurrence{Path: site.path, Range: model.ByteRange{StartByte: site.start, EndByte: site.end}, Name: site.name, Kind: kind, ScopeID: scope, Resolution: resolution, Selection: selection}
+	item := TypedOccurrence{Path: site.path, Range: model.ByteRange{StartByte: site.start, EndByte: site.end}, Name: site.name, Kind: kind, ScopeID: scope, Resolution: resolution,
+		Selection: selection.kind, ObjectKind: typedObjectKind(object), Dispatch: selection.dispatch, Indirect: selection.indirect, Candidates: append([]string{}, selection.candidates...)}
 	if id != "" {
 		value := id
 		item.SymbolID = &value
@@ -546,6 +706,68 @@ func (c *typedCollector) appendOccurrence(site typedSite, kind, id, resolution, 
 	}
 	c.output.Occurrences = append(c.output.Occurrences, item)
 	return nil
+}
+
+// Candidates are only methods proven compatible in this load's explicitly
+// selected captured packages. This is never an exhaustive runtime call set.
+func (c *typedCollector) interfaceCandidates(iface *types.Interface, method types.Object) ([]string, error) {
+	if iface == nil || method == nil {
+		return nil, ErrInputMismatch
+	}
+	ids := map[string]bool{}
+	for _, named := range c.candidateTypes {
+		for _, candidate := range []types.Type{named, types.NewPointer(named)} {
+			c.candidateChecks++
+			if c.candidateChecks > 50000 {
+				return nil, ErrSyntaxLimit
+			}
+			if c.candidateChecks%64 == 0 {
+				if err := c.ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
+			if !types.Implements(candidate, iface) {
+				continue
+			}
+			selected := types.NewMethodSet(candidate).Lookup(method.Pkg(), method.Name())
+			if selected == nil {
+				return nil, ErrInputMismatch
+			}
+			if id, exists := c.objects[originObject(selected.Obj())]; exists {
+				ids[id] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func typedObjectKind(object types.Object) string {
+	switch value := object.(type) {
+	case *types.Var:
+		if value.IsField() {
+			return "field"
+		}
+		return "variable"
+	case *types.Func:
+		return "function"
+	case *types.TypeName:
+		return "type"
+	case *types.Const:
+		return "constant"
+	case *types.Builtin, *types.Nil:
+		return "builtin"
+	case *types.PkgName:
+		return "namespace"
+	case *types.Label:
+		return "label"
+	default:
+		return "other"
+	}
 }
 
 func (c *typedCollector) reserve(value any) error {

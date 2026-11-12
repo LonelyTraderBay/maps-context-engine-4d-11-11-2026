@@ -25,6 +25,7 @@ type CapturedLoaderInput struct {
 	ScratchRoot   string
 	WorkspaceRoot string
 	PackageDir    string // capture-relative package directory; empty means "."
+	TestVariant   string // empty, internal_test or external_test; requires TestsEnabled
 	Tool          *runtimeadapter.GoExecutable
 	Stdlib        *TrustedStdlib
 	// VerifyScratch checks authorized, owned, confined directories and that
@@ -40,6 +41,7 @@ type LoadedPackage struct {
 	ImportPath string   `json:"import_path"`
 	Name       string   `json:"name"`
 	Files      []string `json:"files"`
+	Variant    string   `json:"variant"`
 }
 
 type CapturedLoaderResult struct {
@@ -53,10 +55,13 @@ type CapturedLoaderResult struct {
 // LoadCapturedPackages is a narrowly bounded, local-module package-selection
 // primitive. The supplied verifiers must establish real toolchain, scratch and
 // capture closure authority; this method does not provide an OS sandbox.
-// Unapproved imports, cgo, tests, multi-module workspaces and unavailable
-// proof explicitly fall back to partial. Typed compiler objects stay here.
+// Unapproved imports, cgo, multi-module workspaces and unavailable proof
+// explicitly fall back to partial. An explicit test variant additionally
+// requires the toolchain verifier to attest the synthetic test-main roots
+// below and the stdlib authority to attest their full dependency closure.
+// Typed compiler objects stay here; synthetic test-main facts are never used.
 func LoadCapturedPackages(ctx context.Context, input CapturedLoaderInput) (CapturedLoaderResult, error) {
-	if ctx == nil || input.Preflight.Profile == nil || input.MaxOutputBytes < 1024 || input.MaxOutputBytes > 1024*1024 {
+	if ctx == nil || input.Preflight.Profile == nil || input.MaxOutputBytes < 1024 || input.MaxOutputBytes > 1024*1024 || input.TestVariant != "" && input.TestVariant != "internal_test" && input.TestVariant != "external_test" {
 		return CapturedLoaderResult{}, ErrLoaderInput
 	}
 	if _, ok := ctx.Deadline(); !ok {
@@ -110,8 +115,24 @@ func LoadCapturedPackages(ctx context.Context, input CapturedLoaderInput) (Captu
 		return partial("TOOLCHAIN_UNVERIFIED")
 	}
 	profile := input.Preflight.Profile
-	if profile.TestsEnabled {
+	testMode := input.TestVariant != ""
+	if testMode && !profile.TestsEnabled {
+		return CapturedLoaderResult{}, ErrLoaderInput
+	}
+	if profile.TestsEnabled && !testMode {
 		return partial("GO_TEST_VARIANTS_UNVERIFIED")
+	}
+	if testMode {
+		if input.Stdlib == nil {
+			return partial("GO_TEST_STDLIB_UNVERIFIED")
+		}
+		// Go's synthetic test main imports these packages even when the test
+		// source does not. The stdlib authority must prove their full closure.
+		for _, name := range []string{"testing", "testing/internal/testdeps", "os", "reflect"} {
+			if !input.Stdlib.AllowsPackage(name) {
+				return partial("GO_TEST_STDLIB_UNVERIFIED")
+			}
+		}
 	}
 	if len(profile.ModuleRoots) != 1 || profile.ModuleRoots[0] != "." {
 		return partial("MULTI_MODULE_UNVERIFIED")
@@ -141,7 +162,7 @@ func LoadCapturedPackages(ctx context.Context, input CapturedLoaderInput) (Captu
 	}
 	availableDirs := map[string][]model.ManifestFile{}
 	for _, item := range manifest.Files {
-		if strings.HasSuffix(item.Path, ".go") && !strings.HasSuffix(item.Path, "_test.go") {
+		if strings.HasSuffix(item.Path, ".go") && (!strings.HasSuffix(item.Path, "_test.go") || testMode && path.Dir(item.Path) == packageDir) {
 			dir := path.Dir(item.Path)
 			availableDirs[dir] = append(availableDirs[dir], item)
 		}
@@ -150,7 +171,8 @@ func LoadCapturedPackages(ctx context.Context, input CapturedLoaderInput) (Captu
 		return partial("GO_SOURCE_MISSING")
 	}
 	// Inspect only the selected package and its captured local import closure.
-	// Inactive production files remain conservative inputs; tests are disabled.
+	// Inactive files remain conservative inputs. Only the requested package's
+	// tests enter the closure; dependency test packages are not loaded as roots.
 	pending := []string{packageDir}
 	seenDirs := map[string]bool{}
 	queuedDirs := map[string]bool{packageDir: true}
@@ -250,8 +272,8 @@ func LoadCapturedPackages(ctx context.Context, input CapturedLoaderInput) (Captu
 		return nil, ErrInputMismatch
 	})
 	packageDirectory := filepath.Join(input.WorkspaceRoot, filepath.FromSlash(packageDir))
-	loaded, loadErr := packages.Load(&packages.Config{Context: ctx, Dir: packageDirectory, Env: env, BuildFlags: flags, Tests: false, Overlay: bytes, ParseFile: parseFile, Logf: func(string, ...any) {},
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}, ".")
+	loaded, loadErr := packages.Load(&packages.Config{Context: ctx, Dir: packageDirectory, Env: env, BuildFlags: flags, Tests: testMode, Overlay: bytes, ParseFile: parseFile, Logf: func(string, ...any) {},
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps | packages.NeedForTest}, ".")
 	if err := ctx.Err(); err != nil {
 		return CapturedLoaderResult{}, err
 	}
@@ -284,11 +306,33 @@ func LoadCapturedPackages(ctx context.Context, input CapturedLoaderInput) (Captu
 	if post.Status != "eligible_for_guarded_load" || post.SnapshotDigest != plan.SnapshotDigest || post.ProfileID != plan.ProfileID {
 		return partial("CLOSURE_CHANGED")
 	}
-	if loadErr != nil || len(loaded) != 1 || len(loaded[0].Errors) != 0 || loaded[0].Types == nil || loaded[0].TypesInfo == nil {
+	if loadErr != nil {
 		return partial("GO_PACKAGE_LOAD_PARTIAL")
 	}
-	pkg := loaded[0]
-	if pkg.PkgPath != expectedPackage {
+	if !testMode && len(loaded) != 1 || testMode && len(loaded) > 4 {
+		return partial("GO_PACKAGE_LOAD_PARTIAL")
+	}
+	var pkg *packages.Package
+	for _, candidate := range loaded {
+		if candidate == nil {
+			return partial("GO_PACKAGE_LOAD_PARTIAL")
+		}
+		match := !testMode && candidate.PkgPath == expectedPackage && candidate.ForTest == ""
+		if testMode {
+			wantedPath := expectedPackage
+			if input.TestVariant == "external_test" {
+				wantedPath += "_test"
+			}
+			match = candidate.PkgPath == wantedPath && candidate.ForTest == expectedPackage
+		}
+		if match {
+			if pkg != nil {
+				return partial("GO_PACKAGE_LOAD_PARTIAL")
+			}
+			pkg = candidate
+		}
+	}
+	if pkg == nil || len(pkg.Errors) != 0 || pkg.Types == nil || pkg.TypesInfo == nil {
 		return partial("GO_PACKAGE_LOAD_PARTIAL")
 	}
 	files, ok := validateLoadedGraph(pkg, modulePath, overlay, input.Stdlib, input.Preflight.Scanner)
@@ -331,7 +375,11 @@ func LoadCapturedPackages(ctx context.Context, input CapturedLoaderInput) (Captu
 			return partial("CLOSURE_CHANGED")
 		}
 	}
-	selected := LoadedPackage{ImportPath: pkg.PkgPath, Name: pkg.Name, Files: files[pkg]}
+	variant := "production"
+	if testMode {
+		variant = input.TestVariant
+	}
+	selected := LoadedPackage{ImportPath: pkg.PkgPath, Name: pkg.Name, Files: files[pkg], Variant: variant}
 	for _, filename := range selected.Files {
 		if err := input.Preflight.AuthorizePath(ctx, manifest.WorktreeID, filename, manifest.PolicyDigest, input.Preflight.PolicyEpoch); err != nil {
 			return CapturedLoaderResult{}, loaderAuthorityError(ctx)
@@ -391,7 +439,7 @@ func validateLoadedGraph(root *packages.Package, modulePath string, overlay *Cap
 			}
 			continue
 		}
-		local := current.PkgPath == modulePath || strings.HasPrefix(current.PkgPath, modulePath+"/")
+		local := current.PkgPath == modulePath || strings.HasPrefix(current.PkgPath, modulePath+"/") || current.PkgPath == modulePath+"_test" && current.ForTest == modulePath
 		standard := !local && stdlib != nil && stdlib.AllowsPackage(current.PkgPath)
 		if current.ID == "" || !local && !standard || current.Name == "" || len(current.Errors) != 0 || current.Types == nil {
 			return nil, false

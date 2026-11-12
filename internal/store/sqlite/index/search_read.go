@@ -291,7 +291,10 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 			args = append(args, upper)
 		}
 	case "position":
-		where += "s.path=? AND s.start_byte<=? AND s.end_byte>?"
+		// A file symbol covers every byte and is not a concrete declaration at
+		// the selected position. Preserve ambiguity among actual overlapping
+		// symbols rather than choosing an arbitrary nearest declaration.
+		where += "s.path=? AND s.kind<>'file' AND s.start_byte<=? AND s.end_byte>?"
 		args = append(args, request.Position.Path, request.Position.ByteOffset, request.Position.ByteOffset)
 		order = "s.start_byte,s.end_byte,s.symbol_id"
 	}
