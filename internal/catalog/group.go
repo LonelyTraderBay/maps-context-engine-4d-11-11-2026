@@ -28,7 +28,7 @@ func (s *Store) GroupMetadata(ctx context.Context, groupID string) (model.GroupS
 		return model.GroupSummary{}, ErrGroupUnavailable
 	}
 	var output model.GroupSummary
-	err := s.write(ctx, func(tx *sql.Tx) error {
+	err := s.read(ctx, func(tx *sql.Tx) error {
 		var name, status string
 		var revision int64
 		err := tx.QueryRowContext(ctx, `SELECT name,status,revision FROM repo_groups WHERE group_id=? AND length(name)<=256`, groupID).Scan(&name, &status, &revision)

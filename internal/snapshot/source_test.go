@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 )
@@ -39,6 +40,24 @@ func TestCapturedFileHashRangesLinesAndOwnership(t *testing.T) {
 	plain, err := NewFile("a.go", []byte("abc"), 3)
 	if err != nil || plain.ContentHash() != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
 		t.Fatalf("raw SHA-256: %q %v", plain.ContentHash(), err)
+	}
+}
+
+func TestCheckRangeDoesNotCopyLargeCapture(t *testing.T) {
+	data := bytes.Repeat([]byte("x"), 1<<20)
+	file, err := NewFile("large.go", data, len(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allocations := testing.AllocsPerRun(10, func() {
+		if err := file.CheckRange(0, len(data)); err != nil {
+			panic(err)
+		}
+	}); allocations != 0 {
+		t.Fatalf("range verification allocated %v times", allocations)
+	}
+	if err := file.CheckRange(0, len(data)+1); !errors.Is(err, ErrInvalidRange) {
+		t.Fatalf("invalid range accepted: %v", err)
 	}
 }
 

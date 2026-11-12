@@ -1,0 +1,558 @@
+package golang
+
+import (
+	"context"
+	"encoding/json"
+	"go/ast"
+	"go/token"
+	"go/types"
+	"sort"
+
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	"golang.org/x/tools/go/packages"
+)
+
+type TypedInput struct {
+	Loader         CapturedLoaderInput
+	PackageKey     string
+	ModuleKey      string
+	OtherPackages  []TypedPackageIdentity
+	MaxNodes       int
+	MaxDepth       int
+	MaxFacts       int
+	MaxOccurrences int
+	MaxOutputBytes int
+}
+
+// Package identities are supplied by the coordinator, never guessed from
+// a basename. Each entry must identify an already validated local dependency.
+type TypedPackageIdentity struct {
+	ImportPath string
+	PackageKey string
+	ModuleKey  string
+}
+
+// TypedOccurrence is an internal, source-bound binding observation. An empty
+// SymbolID is an explicit boundary, not proof that the reference has no target.
+// Selection distinguishes field/method selection without duplicating its use.
+type TypedOccurrence struct {
+	Path       string          `json:"path"`
+	Range      model.ByteRange `json:"range"`
+	Name       string          `json:"name"`
+	Kind       string          `json:"kind"` // definition or use
+	SymbolID   *string         `json:"symbol_id"`
+	ScopeID    string          `json:"scope_id"`
+	Resolution string          `json:"resolution"` // captured, namespace, other_package, external, builtin, unmapped_local
+	Selection  string          `json:"selection"`  // empty, field, method_value, method_expression
+}
+
+type TypedResult struct {
+	Loader      CapturedLoaderResult `json:"loader"`
+	Status      string               `json:"status"`
+	Reasons     []string             `json:"reasons"`
+	Syntax      []SyntaxResult       `json:"syntax"`
+	Occurrences []TypedOccurrence    `json:"occurrences"`
+}
+
+// AnalyzeTypedCaptured consumes compiler identities only inside a single
+// guarded load. A partial load returns no typed facts; no *types.Object or
+// AST pointer is retained in or returned by TypedResult.
+func AnalyzeTypedCaptured(ctx context.Context, input TypedInput) (TypedResult, error) {
+	if ctx == nil || input.MaxNodes < 1 || input.MaxNodes > 1000000 || input.MaxDepth < 1 || input.MaxDepth > 512 || input.MaxFacts < 1 || input.MaxFacts > 100000 ||
+		input.MaxOccurrences < 1 || input.MaxOccurrences > 100000 || input.MaxOutputBytes < 1024 || input.MaxOutputBytes > 16*1024*1024 || len(input.OtherPackages) > 127 ||
+		len(input.PackageKey) < 1 || len(input.PackageKey) > 192*4 || len(input.ModuleKey) < 1 || len(input.ModuleKey) > 192*4 {
+		return TypedResult{}, ErrLoaderInput
+	}
+	for _, identity := range input.OtherPackages {
+		if len(identity.ImportPath) < 1 || len(identity.ImportPath) > 2048*4 || len(identity.PackageKey) < 1 || len(identity.PackageKey) > 192*4 || len(identity.ModuleKey) < 1 || len(identity.ModuleKey) > 192*4 {
+			return TypedResult{}, ErrLoaderInput
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return TypedResult{}, err
+	}
+	var err error
+	input.Loader.Preflight, err = copyLoaderPreflight(input.Loader.Preflight)
+	if err != nil {
+		return TypedResult{}, err
+	}
+	input.OtherPackages = append([]TypedPackageIdentity(nil), input.OtherPackages...)
+	var extracted *TypedResult
+	loader := input.Loader
+	loader.consumeTypes = func(ctx context.Context, pkg *packages.Package, overlay *CapturedOverlay, files map[*packages.Package][]string) error {
+		result, err := collectTyped(ctx, input, pkg, overlay, files)
+		if err != nil {
+			return err
+		}
+		extracted = &result
+		return nil
+	}
+	loaded, err := LoadCapturedPackages(ctx, loader)
+	if err != nil {
+		return TypedResult{}, err
+	}
+	result := TypedResult{Loader: loaded, Status: "partial", Reasons: append([]string(nil), loaded.Reasons...), Syntax: []SyntaxResult{}, Occurrences: []TypedOccurrence{}}
+	if loaded.BuildSelectionVerified {
+		if extracted == nil {
+			return TypedResult{}, ErrInputMismatch
+		}
+		result = *extracted
+		result.Loader = loaded
+		// Graph construction, coverage and publication are later tasks.
+		result.Reasons = append(result.Reasons, "SEMANTIC_RELATIONS_PENDING")
+		sort.Strings(result.Reasons)
+	}
+	manifest := input.Loader.Preflight.Snapshot.Manifest()
+	for _, syntax := range result.Syntax {
+		if err := input.Loader.Preflight.AuthorizePath(ctx, manifest.WorktreeID, syntax.Path, manifest.PolicyDigest, input.Loader.Preflight.PolicyEpoch); err != nil {
+			return TypedResult{}, loaderAuthorityError(ctx)
+		}
+	}
+	if err := input.Loader.Preflight.AuthorizeScope(ctx, manifest.WorktreeID, manifest.ProfileID, manifest.PolicyDigest, input.Loader.Preflight.PolicyEpoch); err != nil {
+		return TypedResult{}, loaderAuthorityError(ctx)
+	}
+	if err := ctx.Err(); err != nil {
+		return TypedResult{}, err
+	}
+	raw, err := json.Marshal(result)
+	if err != nil || len(raw) > input.MaxOutputBytes {
+		return TypedResult{}, ErrSyntaxLimit
+	}
+	return result, nil
+}
+
+type typedSite struct {
+	path       string
+	start, end int64
+	name       string
+}
+
+type typedRange struct {
+	path       string
+	start, end int64
+}
+
+type typedScope struct {
+	scope Scope
+	depth int
+}
+
+type typedCollector struct {
+	ctx           context.Context
+	input         TypedInput
+	pkg           *packages.Package
+	overlay       *CapturedOverlay
+	selected      map[string]bool
+	localPackages map[string]bool
+	candidates    map[typedSite][]model.SymbolFact
+	caseScopes    map[typedRange]string
+	caseSymbols   map[string][]model.SymbolFact
+	fileScopes    map[string][]typedScope
+	objects       map[types.Object]string
+	output        TypedResult
+	usedBytes     int
+	unmapped      bool
+	crossPending  bool
+	scopeChecks   int
+}
+
+type typedPackage struct {
+	pkg      *packages.Package
+	identity TypedPackageIdentity
+	files    []string
+}
+
+func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, overlay *CapturedOverlay, graph map[*packages.Package][]string) (TypedResult, error) {
+	if pkg == nil || pkg.Types == nil || pkg.TypesInfo == nil || pkg.Fset == nil || overlay == nil || len(graph[pkg]) == 0 || len(graph[pkg]) > 128 {
+		return TypedResult{}, ErrInputMismatch
+	}
+	available := map[string]*packages.Package{}
+	for current, files := range graph {
+		if current == nil || len(files) == 0 || current.Fset != pkg.Fset || current.Types == nil || current.TypesInfo == nil || available[current.PkgPath] != nil {
+			return TypedResult{}, ErrInputMismatch
+		}
+		available[current.PkgPath] = current
+	}
+	identities := map[string]TypedPackageIdentity{pkg.PkgPath: {ImportPath: pkg.PkgPath, PackageKey: input.PackageKey, ModuleKey: input.ModuleKey}}
+	seenKeys := map[string]bool{input.PackageKey: true}
+	for _, identity := range input.OtherPackages {
+		if identity.ImportPath == "" || identity.PackageKey == "" || identity.ModuleKey == "" || identities[identity.ImportPath].ImportPath != "" || available[identity.ImportPath] == nil || seenKeys[identity.PackageKey] {
+			return TypedResult{}, ErrInputMismatch
+		}
+		identities[identity.ImportPath] = identity
+		seenKeys[identity.PackageKey] = true
+	}
+	var units []typedPackage
+	localPackages := make(map[string]bool, len(available))
+	for importPath, current := range available {
+		localPackages[importPath] = true
+		if identity, selected := identities[importPath]; selected {
+			units = append(units, typedPackage{pkg: current, identity: identity, files: graph[current]})
+		}
+	}
+	sort.Slice(units, func(i, j int) bool { return units[i].pkg.PkgPath < units[j].pkg.PkgPath })
+	c := &typedCollector{ctx: ctx, input: input, pkg: pkg, overlay: overlay, selected: map[string]bool{}, localPackages: localPackages, candidates: map[typedSite][]model.SymbolFact{}, caseScopes: map[typedRange]string{}, caseSymbols: map[string][]model.SymbolFact{}, fileScopes: map[string][]typedScope{}, objects: map[types.Object]string{},
+		output: TypedResult{Status: "partial", Reasons: []string{}, Syntax: []SyntaxResult{}, Occurrences: []TypedOccurrence{}}}
+	for _, unit := range units {
+		current := unit.pkg
+		for _, filename := range unit.files {
+			if c.selected[filename] {
+				return TypedResult{}, ErrInputMismatch
+			}
+			c.selected[filename] = true
+			syntax, err := AnalyzeSyntaxFile(ctx, SyntaxInput{Snapshot: input.Loader.Preflight.Snapshot, Profile: input.Loader.Preflight.Profile, Path: filename, PackageKey: unit.identity.PackageKey,
+				ImportPath: current.PkgPath, ModuleKey: unit.identity.ModuleKey, PackageName: current.Name, Variant: "production", Scanner: input.Loader.Preflight.Scanner,
+				MaxManifestBytes: input.Loader.Preflight.MaxManifestBytes, MaxFileBytes: input.Loader.Preflight.MaxFileBytes, MaxNodes: input.MaxNodes, MaxDepth: input.MaxDepth, MaxFacts: input.MaxFacts, MaxOutputBytes: input.MaxOutputBytes})
+			if err != nil || len(syntax.Diagnostics) != 0 {
+				if err != nil {
+					return TypedResult{}, err
+				}
+				return TypedResult{}, ErrInputMismatch
+			}
+			syntax.BuildSelectionVerified = true
+			if err := c.reserve(syntax); err != nil {
+				return TypedResult{}, err
+			}
+			c.output.Syntax = append(c.output.Syntax, syntax)
+			depths := map[string]int{}
+			for _, scope := range syntax.Scopes {
+				depth := 0
+				if scope.ParentID != "" {
+					parentDepth, exists := depths[scope.ParentID]
+					if !exists || scope.Path != filename {
+						return TypedResult{}, ErrInputMismatch
+					}
+					depth = parentDepth + 1
+				} else if scope.Kind != "package" || scope.Path != "" || len(depths) != 0 {
+					return TypedResult{}, ErrInputMismatch
+				}
+				if _, exists := depths[scope.ID]; exists {
+					return TypedResult{}, ErrInputMismatch
+				}
+				depths[scope.ID] = depth
+				c.fileScopes[filename] = append(c.fileScopes[filename], typedScope{scope: scope, depth: depth})
+				if scope.Kind != "case" {
+					continue
+				}
+				key := typedRange{path: filename, start: scope.StartByte, end: scope.EndByte}
+				if c.caseScopes[key] != "" {
+					return TypedResult{}, ErrInputMismatch
+				}
+				c.caseScopes[key] = scope.ID
+			}
+			for _, symbol := range syntax.Symbols {
+				if symbol.Path == nil || symbol.Range == nil || symbol.Kind == "file" || symbol.Kind == "package" || symbol.Kind == "closure" {
+					continue
+				}
+				key := typedSite{path: *symbol.Path, start: symbol.Range.StartByte, end: symbol.Range.EndByte, name: symbol.Name}
+				c.candidates[key] = append(c.candidates[key], symbol)
+				c.caseSymbols[symbol.ScopeKey+"\x00"+symbol.Name] = append(c.caseSymbols[symbol.ScopeKey+"\x00"+symbol.Name], symbol)
+			}
+		}
+	}
+	for _, unit := range units {
+		c.pkg = unit.pkg
+		for ident, object := range unit.pkg.TypesInfo.Defs {
+			if err := ctx.Err(); err != nil {
+				return TypedResult{}, err
+			}
+			if ident == nil || ident.Name == "_" || object == nil {
+				continue
+			}
+			if _, isPackageName := object.(*types.PkgName); isPackageName {
+				continue
+			}
+			site, err := c.identSite(ident)
+			if err != nil {
+				return TypedResult{}, err
+			}
+			matches := c.matchingSymbols(site, object)
+			if len(matches) != 1 {
+				c.unmapped = true
+				if err := c.appendOccurrence(site, "definition", "", "unmapped_local", "", ""); err != nil {
+					return TypedResult{}, err
+				}
+				continue
+			}
+			if err := c.recordObject(object, matches[0].SymbolID); err != nil {
+				return TypedResult{}, err
+			}
+			if err := c.appendOccurrence(site, "definition", matches[0].SymbolID, "captured", matches[0].ScopeKey, ""); err != nil {
+				return TypedResult{}, err
+			}
+		}
+	}
+	for _, unit := range units {
+		c.pkg = unit.pkg
+		for node, object := range unit.pkg.TypesInfo.Implicits {
+			clause, ok := node.(*ast.CaseClause)
+			if !ok {
+				continue
+			}
+			variable, ok := object.(*types.Var)
+			if !ok || variable.Name() == "_" {
+				continue
+			}
+			bindingSite, err := c.identSite(&ast.Ident{NamePos: variable.Pos(), Name: variable.Name()})
+			if err != nil {
+				return TypedResult{}, err
+			}
+			filename, start, end, err := c.positionRange(clause.Pos(), clause.End())
+			if err != nil {
+				return TypedResult{}, err
+			}
+			scope := c.caseScopes[typedRange{path: filename, start: start, end: end}]
+			var matches []model.SymbolFact
+			for _, symbol := range c.caseSymbols[scope+"\x00"+variable.Name()] {
+				if symbol.Kind == "variable" && symbol.Path != nil && symbol.Range != nil {
+					matches = append(matches, symbol)
+				}
+			}
+			if scope == "" || len(matches) != 1 {
+				c.unmapped = true
+				if err := c.appendOccurrence(bindingSite, "definition", "", "unmapped_local", "", ""); err != nil {
+					return TypedResult{}, err
+				}
+				continue
+			}
+			symbol := matches[0]
+			if *symbol.Path != bindingSite.path || symbol.Range.StartByte != bindingSite.start || symbol.Range.EndByte != bindingSite.end {
+				return TypedResult{}, ErrInputMismatch
+			}
+			if err := c.recordObject(variable, symbol.SymbolID); err != nil {
+				return TypedResult{}, err
+			}
+			if err := c.appendOccurrence(bindingSite, "definition", symbol.SymbolID, "captured", symbol.ScopeKey, ""); err != nil {
+				return TypedResult{}, err
+			}
+		}
+	}
+	for _, unit := range units {
+		pkg := unit.pkg
+		c.pkg = pkg
+		selections := make(map[*ast.Ident]string, len(pkg.TypesInfo.Selections))
+		for selector, selection := range pkg.TypesInfo.Selections {
+			if selector == nil || selector.Sel == nil || selection == nil || originObject(pkg.TypesInfo.Uses[selector.Sel]) != originObject(selection.Obj()) {
+				return TypedResult{}, ErrInputMismatch
+			}
+			kind := ""
+			switch selection.Kind() {
+			case types.FieldVal:
+				kind = "field"
+			case types.MethodVal:
+				kind = "method_value"
+			case types.MethodExpr:
+				kind = "method_expression"
+			default:
+				return TypedResult{}, ErrInputMismatch
+			}
+			selections[selector.Sel] = kind
+		}
+		for ident, object := range pkg.TypesInfo.Uses {
+			if err := ctx.Err(); err != nil {
+				return TypedResult{}, err
+			}
+			if ident == nil || object == nil || ident.Name == "_" {
+				continue
+			}
+			site, err := c.identSite(ident)
+			if err != nil {
+				return TypedResult{}, err
+			}
+			id, found := c.objects[originObject(object)]
+			resolution := "captured"
+			if !found {
+				switch {
+				case isPackageObject(object):
+					resolution = "namespace"
+				case object.Pkg() == nil:
+					resolution = "builtin"
+				case object.Pkg() != pkg.Types && c.localPackages[object.Pkg().Path()]:
+					resolution, c.crossPending = "other_package", true
+				case object.Pkg() != pkg.Types:
+					resolution = "external"
+				default:
+					resolution, c.unmapped = "unmapped_local", true
+				}
+			}
+			scope, err := c.scopeFor(site)
+			if err != nil {
+				return TypedResult{}, err
+			}
+			if err := c.appendOccurrence(site, "use", id, resolution, scope, selections[ident]); err != nil {
+				return TypedResult{}, err
+			}
+		}
+	}
+	if c.unmapped {
+		c.output.Reasons = append(c.output.Reasons, "LOCAL_BINDING_UNMAPPED")
+	}
+	if c.crossPending {
+		c.output.Reasons = append(c.output.Reasons, "CROSS_PACKAGE_BINDING_PENDING")
+	}
+	sort.Slice(c.output.Occurrences, func(i, j int) bool {
+		a, b := c.output.Occurrences[i], c.output.Occurrences[j]
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Range.StartByte != b.Range.StartByte {
+			return a.Range.StartByte < b.Range.StartByte
+		}
+		if a.Range.EndByte != b.Range.EndByte {
+			return a.Range.EndByte < b.Range.EndByte
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if a.ScopeID != b.ScopeID {
+			return a.ScopeID < b.ScopeID
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if a.Resolution != b.Resolution {
+			return a.Resolution < b.Resolution
+		}
+		if a.Selection != b.Selection {
+			return a.Selection < b.Selection
+		}
+		if a.SymbolID == nil || b.SymbolID == nil {
+			return a.SymbolID == nil && b.SymbolID != nil
+		}
+		return *a.SymbolID < *b.SymbolID
+	})
+	return c.output, nil
+}
+
+func originObject(object types.Object) types.Object {
+	switch value := object.(type) {
+	case *types.Var:
+		return value.Origin()
+	case *types.Func:
+		return value.Origin()
+	default:
+		return object
+	}
+}
+
+func isPackageObject(object types.Object) bool { _, ok := object.(*types.PkgName); return ok }
+
+func (c *typedCollector) matchingSymbols(site typedSite, object types.Object) []model.SymbolFact {
+	var matches []model.SymbolFact
+	for _, symbol := range c.candidates[site] {
+		valid := false
+		switch object.(type) {
+		case *types.Var:
+			valid = symbol.Kind == "variable" || symbol.Kind == "parameter" || symbol.Kind == "receiver" || symbol.Kind == "result" || symbol.Kind == "field"
+		case *types.Func:
+			valid = symbol.Kind == "function" || symbol.Kind == "method"
+		case *types.TypeName:
+			valid = symbol.Kind == "type" || symbol.Kind == "interface"
+		case *types.Const:
+			valid = symbol.Kind == "constant"
+		}
+		if valid {
+			matches = append(matches, symbol)
+		}
+	}
+	return matches
+}
+
+func (c *typedCollector) recordObject(object types.Object, symbolID string) error {
+	object = originObject(object)
+	if object == nil || symbolID == "" {
+		return ErrInputMismatch
+	}
+	if prior, exists := c.objects[object]; exists && prior != symbolID {
+		return ErrInputMismatch
+	}
+	c.objects[object] = symbolID
+	return nil
+}
+
+func (c *typedCollector) positionRange(start, end token.Pos) (string, int64, int64, error) {
+	file := c.pkg.Fset.File(start)
+	if file == nil || c.pkg.Fset.File(end) != file || start < file.Pos(0) || end < start || end > file.Pos(file.Size()) {
+		return "", 0, 0, ErrInputMismatch
+	}
+	filename, exists := c.overlay.files[file.Name()]
+	if !exists || !c.selected[filename] {
+		return "", 0, 0, ErrInputMismatch
+	}
+	captured, exists := c.input.Loader.Preflight.Snapshot.File(filename)
+	if !exists || file.Size() != captured.Len() {
+		return "", 0, 0, ErrInputMismatch
+	}
+	first, last := int64(file.Offset(start)), int64(file.Offset(end))
+	if captured.CheckRange(int(first), int(last)) != nil {
+		return "", 0, 0, ErrInputMismatch
+	}
+	return filename, first, last, nil
+}
+
+func (c *typedCollector) identSite(ident *ast.Ident) (typedSite, error) {
+	filename, start, end, err := c.positionRange(ident.Pos(), ident.End())
+	if err != nil {
+		return typedSite{}, err
+	}
+	file, _ := c.input.Loader.Preflight.Snapshot.File(filename)
+	text, err := file.Range(int(start), int(end))
+	if err != nil || string(text) != ident.Name {
+		return typedSite{}, ErrInputMismatch
+	}
+	return typedSite{path: filename, start: start, end: end, name: ident.Name}, nil
+}
+
+// The cap bounds worst-case nested-scope lookup until a later indexed graph
+// implementation can demonstrate a larger supported envelope.
+func (c *typedCollector) scopeFor(site typedSite) (string, error) {
+	best, bestDepth := "", -1
+	for _, entry := range c.fileScopes[site.path] {
+		c.scopeChecks++
+		if c.scopeChecks > 2000000 {
+			return "", ErrSyntaxLimit
+		}
+		if c.scopeChecks%1024 == 0 {
+			if err := c.ctx.Err(); err != nil {
+				return "", err
+			}
+		}
+		if entry.scope.Kind != "package" && (entry.scope.StartByte > site.start || entry.scope.EndByte < site.end) {
+			continue
+		}
+		if entry.depth > bestDepth {
+			best, bestDepth = entry.scope.ID, entry.depth
+		} else if entry.depth == bestDepth && best != entry.scope.ID {
+			return "", ErrInputMismatch
+		}
+	}
+	if best == "" {
+		return "", ErrInputMismatch
+	}
+	return best, nil
+}
+
+func (c *typedCollector) appendOccurrence(site typedSite, kind, id, resolution, scope, selection string) error {
+	if len(c.output.Occurrences) >= c.input.MaxOccurrences {
+		return ErrSyntaxLimit
+	}
+	item := TypedOccurrence{Path: site.path, Range: model.ByteRange{StartByte: site.start, EndByte: site.end}, Name: site.name, Kind: kind, ScopeID: scope, Resolution: resolution, Selection: selection}
+	if id != "" {
+		value := id
+		item.SymbolID = &value
+	}
+	if err := c.reserve(item); err != nil {
+		return err
+	}
+	c.output.Occurrences = append(c.output.Occurrences, item)
+	return nil
+}
+
+func (c *typedCollector) reserve(value any) error {
+	raw, err := json.Marshal(value)
+	if err != nil || len(raw)+1 > c.input.MaxOutputBytes-c.usedBytes {
+		return ErrSyntaxLimit
+	}
+	c.usedBytes += len(raw) + 1
+	return nil
+}

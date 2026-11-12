@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -19,6 +20,17 @@ var ErrGitIndexChanged = errors.New("git index changed while reading")
 // Stable capture and interpretation of index extensions belong to the
 // inventory/capture owners; this function does not execute Git.
 func ReadGitIndex(metadataRoot *paths.Root, maxBytes int) (data []byte, resultErr error) {
+	return ReadGitIndexContext(context.Background(), metadataRoot, maxBytes)
+}
+
+// ReadGitIndexContext additionally aborts bounded reads after cancellation.
+func ReadGitIndexContext(ctx context.Context, metadataRoot *paths.Root, maxBytes int) (data []byte, resultErr error) {
+	if ctx == nil {
+		return nil, ErrGitMetadataUnverified
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if maxBytes <= 0 || maxBytes > 64*1024*1024 {
 		return nil, ErrGitIndexLimit
 	}
@@ -35,7 +47,23 @@ func ReadGitIndex(metadataRoot *paths.Root, maxBytes int) (data []byte, resultEr
 			resultErr = errors.Join(resultErr, closeErr)
 		}
 	}()
-	return readGitIndex(metadataRoot, file, file, maxBytes)
+	return readGitIndex(metadataRoot, file, gitContextReader{ctx: ctx, reader: file}, maxBytes)
+}
+
+type gitContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r gitContextReader) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.reader.Read(data)
+	if cancelErr := r.ctx.Err(); cancelErr != nil {
+		return n, cancelErr
+	}
+	return n, err
 }
 
 // readGitIndex checks observed file metadata and the current index path before

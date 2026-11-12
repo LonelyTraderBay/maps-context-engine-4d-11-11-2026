@@ -56,6 +56,14 @@ func (f File) Range(start, end int) ([]byte, error) {
 	return bytes.Clone(f.source[start:end]), nil
 }
 
+// CheckRange verifies UTF-8 byte boundaries without copying the source range.
+func (f File) CheckRange(start, end int) error {
+	if !f.validRange(start, end) {
+		return ErrInvalidRange
+	}
+	return nil
+}
+
 // Lines returns one-based display lines for a valid range. The end line of a
 // nonempty range is the line containing its last byte; empty ranges use start.
 func (f File) Lines(start, end int) (int, int, error) {

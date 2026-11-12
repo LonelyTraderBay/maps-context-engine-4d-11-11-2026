@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 	migration "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/migrations/catalog"
 	_ "modernc.org/sqlite"
 )
@@ -28,6 +29,33 @@ const supportedSchema = 1
 // database it refuses to write. The caller owns database path authorization,
 // connection lifecycle, backup, and cross-process maintenance coordination.
 func Initialize(ctx context.Context, db *sql.DB) (incarnation string, resultErr error) {
+	return initialize(ctx, db, nil, nil, "")
+}
+
+// InitializeLeased requires exclusive maintenance ownership. The caller must
+// retain the OS lease and all handles until the database is closed.
+func InitializeLeased(ctx context.Context, db *sql.DB, lease ports.LifecycleLease, mutation ports.CatalogMutationLease, operationID string) (incarnation string, resultErr error) {
+	if ctx == nil || db == nil || db.Stats().MaxOpenConnections != 1 || lease == nil || mutation == nil || !validUUID(operationID) {
+		return "", ErrUnrecognizedStore
+	}
+	if err := lease.Check(ctx, "catalog", ports.ExclusiveLease); err != nil {
+		return "", err
+	}
+	if err := mutation.CheckCatalogMutation(ctx, operationID); err != nil {
+		return "", err
+	}
+	guard, err := mutation.HoldCatalogMutation(ctx, operationID)
+	if err != nil {
+		return "", err
+	}
+	if guard == nil {
+		return "", ErrCatalogWriterRequired
+	}
+	defer func() { resultErr = errors.Join(resultErr, guard.Close()) }()
+	return initialize(ctx, db, lease, mutation, operationID)
+}
+
+func initialize(ctx context.Context, db *sql.DB, lease ports.LifecycleLease, mutation ports.CatalogMutationLease, operationID string) (incarnation string, resultErr error) {
 	if ctx == nil || db == nil {
 		return "", ErrUnrecognizedStore
 	}
@@ -35,19 +63,31 @@ func Initialize(ctx context.Context, db *sql.DB) (incarnation string, resultErr 
 	if err != nil {
 		return "", err
 	}
+	configured := false
 	defer func() {
-		if closeErr := conn.Close(); closeErr != nil {
+		var closeErr error
+		if lease == nil {
+			closeErr = conn.Close()
+		} else {
+			closeErr = closeCatalogConnection(ctx, conn, configured, false)
+		}
+		if closeErr != nil {
 			incarnation = ""
 			resultErr = errors.Join(resultErr, closeErr)
 		}
 	}()
-	if _, err = conn.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+	if lease == nil {
+		if _, err = conn.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+			return "", err
+		}
+		var fk int
+		if err = conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
+			return "", errors.Join(ErrUnrecognizedStore, err)
+		}
+	} else if err = configureCatalogConnection(ctx, conn, false, false); err != nil {
 		return "", err
 	}
-	var fk int
-	if err = conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
-		return "", errors.Join(ErrUnrecognizedStore, err)
-	}
+	configured = true
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -79,7 +119,18 @@ func Initialize(ctx context.Context, db *sql.DB) (incarnation string, resultErr 
 		if _, err = tx.ExecContext(ctx, `INSERT INTO catalog_identity(singleton,incarnation) VALUES(1,?)`, incarnation); err != nil {
 			return "", err
 		}
+		if lease != nil {
+			if err = lease.Check(ctx, "catalog", ports.ExclusiveLease); err != nil {
+				return "", err
+			}
+			if err = mutation.CheckCatalogMutation(ctx, operationID); err != nil {
+				return "", err
+			}
+		}
 		if err = tx.Commit(); err != nil {
+			if lease != nil {
+				return "", errors.Join(ErrCatalogCommitUnknown, err)
+			}
 			return "", err
 		}
 		committed = true
@@ -108,7 +159,18 @@ func Initialize(ctx context.Context, db *sql.DB) (incarnation string, resultErr 
 	if !validUUID(incarnation) {
 		return "", ErrInvalidIdentity
 	}
+	if lease != nil {
+		if err = lease.Check(ctx, "catalog", ports.ExclusiveLease); err != nil {
+			return "", err
+		}
+		if err = mutation.CheckCatalogMutation(ctx, operationID); err != nil {
+			return "", err
+		}
+	}
 	if err = tx.Commit(); err != nil {
+		if lease != nil {
+			return "", errors.Join(ErrCatalogCommitUnknown, err)
+		}
 		return "", err
 	}
 	committed = true

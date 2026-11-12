@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -78,13 +79,50 @@ func (b *LinkedGitMetadata) Verify() error {
 	return errors.Join(b.worktree.Verify(), b.common.Verify(), b.metadata.Verify())
 }
 
+// VerifyRoots requires the same explicitly authorized roots used when the
+// linked binding was created, then revalidates all reciprocal pointers.
+func (b *LinkedGitMetadata) VerifyRoots(worktree, common *paths.Root) error {
+	if b == nil || b.worktree != worktree || b.common != common {
+		return ErrGitMetadataUnverified
+	}
+	return b.Verify()
+}
+
+// VerifyMetadataRoot binds a separately opened handle to this worktree's
+// metadata directory. It grants no authority to read that directory.
+func (b *LinkedGitMetadata) VerifyMetadataRoot(root *paths.Root) error {
+	if b == nil || root == nil || b.metadata == nil {
+		return ErrGitMetadataUnverified
+	}
+	if err := b.Verify(); err != nil {
+		return err
+	}
+	want, err := b.metadata.CanonicalPath()
+	if err != nil {
+		return errors.Join(ErrGitMetadataUnverified, err)
+	}
+	got, err := root.CanonicalPath()
+	if err != nil || got != want {
+		return errors.Join(ErrGitMetadataUnverified, err)
+	}
+	return errors.Join(b.Verify(), root.Verify())
+}
+
 // ReadIndex checks the binding before and after reading the bounded index.
 // Authorization and index parsing remain the caller's responsibility.
 func (b *LinkedGitMetadata) ReadIndex(maxBytes int) ([]byte, error) {
+	return b.ReadIndexContext(context.Background(), maxBytes)
+}
+
+// ReadIndexContext keeps the explicit linked-root binding around a cancellable read.
+func (b *LinkedGitMetadata) ReadIndexContext(ctx context.Context, maxBytes int) ([]byte, error) {
+	if ctx == nil {
+		return nil, ErrGitMetadataUnverified
+	}
 	if err := b.Verify(); err != nil {
 		return nil, err
 	}
-	data, err := ReadGitIndex(b.metadata, maxBytes)
+	data, err := ReadGitIndexContext(ctx, b.metadata, maxBytes)
 	if err != nil {
 		return nil, err
 	}

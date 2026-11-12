@@ -42,7 +42,7 @@ func (s *Store) PreviewRepoLink(ctx context.Context, worktreeID string) (int64, 
 	}
 	var revision int64
 	var impacts []RepoLinkImpact
-	err := s.write(ctx, func(tx *sql.Tx) error {
+	err := s.read(ctx, func(tx *sql.Tx) error {
 		state, err := readRebindState(ctx, tx, worktreeID)
 		if err != nil {
 			return err
