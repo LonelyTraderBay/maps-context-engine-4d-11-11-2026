@@ -28,7 +28,7 @@ func (s *RuntimeConfigStore) Read(ctx context.Context, maxBytes int) ([]byte, bo
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
-	data, present, err := ReadRuntimeConfigAt(s.root, s.name, maxBytes)
+	data, present, err := readRuntimeConfigContextAt(ctx, s.root, s.name, maxBytes)
 	if err != nil {
 		return nil, false, err
 	}

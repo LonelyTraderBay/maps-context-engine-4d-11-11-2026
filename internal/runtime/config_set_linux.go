@@ -30,6 +30,19 @@ func SetRuntimeConfig(ctx context.Context, root *paths.Root, raw []byte, availab
 // SetRuntimeConfigAt uses an explicitly authorized parent and file name. All
 // config files under the same parent share the bounded lock and pending slot.
 func SetRuntimeConfigAt(ctx context.Context, root *paths.Root, name string, raw []byte, availableCPUs int) (result ConfigWriteResult, resultErr error) {
+	return setRuntimeConfigAt(ctx, root, name, raw, availableCPUs, nil)
+}
+
+// SetRuntimeConfigGuardedAt requires an owner-supplied, non-reentrant check
+// under the config lock before preparing and immediately before committing.
+func SetRuntimeConfigGuardedAt(ctx context.Context, root *paths.Root, name string, raw []byte, availableCPUs int, guard func(context.Context) error) (ConfigWriteResult, error) {
+	if guard == nil {
+		return ConfigWriteResult{State: "not_applied"}, ErrConfigUnsupported
+	}
+	return setRuntimeConfigAt(ctx, root, name, raw, availableCPUs, guard)
+}
+
+func setRuntimeConfigAt(ctx context.Context, root *paths.Root, name string, raw []byte, availableCPUs int, guard func(context.Context) error) (result ConfigWriteResult, resultErr error) {
 	result.State = "not_applied"
 	if ctx == nil || root == nil || !validRuntimeConfigName(name) {
 		return result, ErrConfigUnsupported
@@ -94,6 +107,11 @@ func SetRuntimeConfigAt(ctx context.Context, root *paths.Root, name string, raw 
 	if err = bounded.Err(); err != nil {
 		return result, err
 	}
+	if guard != nil {
+		if err = guard(bounded); err != nil {
+			return result, err
+		}
+	}
 	fd, err := unix.Openat(int(dir.Fd()), runtimeConfigPendingName, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
 	if errors.Is(err, unix.EEXIST) {
 		return result, ErrConfigPending
@@ -143,6 +161,11 @@ func SetRuntimeConfigAt(ctx context.Context, root *paths.Root, name string, raw 
 	}
 	if err = verifyConfigLock(root, lock); err != nil {
 		return result, err
+	}
+	if guard != nil {
+		if err = guard(bounded); err != nil {
+			return result, err
+		}
 	}
 	if !present {
 		err = unix.Renameat2(int(dir.Fd()), runtimeConfigPendingName, int(dir.Fd()), name, unix.RENAME_NOREPLACE)
@@ -256,8 +279,15 @@ func configPendingAt(root *paths.Root, dir *os.File) (bool, error) {
 }
 
 func acquireConfigLock(ctx context.Context, lock *os.File) error {
+	return acquireConfigLockMode(ctx, lock, unix.LOCK_EX)
+}
+
+func acquireConfigLockMode(ctx context.Context, lock *os.File, mode int) error {
 	for {
-		err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := unix.Flock(int(lock.Fd()), mode|unix.LOCK_NB)
 		if err == nil {
 			return nil
 		}

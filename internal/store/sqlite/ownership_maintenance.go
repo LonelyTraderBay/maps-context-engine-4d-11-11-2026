@@ -9,6 +9,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/records"
 )
 
 var ErrMaintenancePartial = errors.New("catalog schema may be initialized; reconcile before retry")
@@ -20,6 +21,20 @@ type MaintenanceOwner struct {
 	lease    *runtime.Lifecycle
 	db       *sql.DB
 	scope    string
+}
+
+// InitializeRecords creates or verifies the frozen durable records store
+// while the caller holds the exclusive worktree lifecycle and writer.
+func (o *MaintenanceOwner) InitializeRecords(ctx context.Context, writer ports.IndexWriterLease, jobID string) (records.Identity, error) {
+	if o == nil || o.lifetime == nil || o.scope == "catalog" {
+		return records.Identity{}, records.ErrInvalidStore
+	}
+	o.lifetime.mu.Lock()
+	defer o.lifetime.mu.Unlock()
+	if o.lifetime.closing || o.lifetime.closed {
+		return records.Identity{}, ErrOwnerClosed
+	}
+	return records.InitializeWithWriter(ctx, o.db, o.scope, o.lease, writer, jobID)
 }
 
 func OpenMaintenanceOwner(ctx context.Context, lease *runtime.Lifecycle, db *sql.DB, scope string) (*MaintenanceOwner, error) {

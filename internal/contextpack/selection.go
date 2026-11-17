@@ -101,6 +101,15 @@ type Selection struct {
 	maxOutput int
 }
 
+// Check revalidates the pinned fact set and source authority without walking
+// the graph again or copying its materialized report.
+func (s *Selection) Check(ctx context.Context) error {
+	if s == nil {
+		return ErrInput
+	}
+	return s.authorize(ctx)
+}
+
 func authorityError(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -195,9 +204,15 @@ func (s *Selection) authorize(ctx context.Context) error {
 // Read returns a defensive copy after checking every contributing path and
 // the generation-bound catalog. Limit gaps mean enumeration is incomplete.
 func (s *Selection) Read(ctx context.Context) (Report, error) {
-	if err := s.authorize(ctx); err != nil {
+	if s == nil || ctx == nil {
+		return Report{}, ErrInput
+	}
+	if err := ctx.Err(); err != nil {
 		return Report{}, err
 	}
+	// Copy only bounded, immutable in-memory data. No source/store read or
+	// caller callback occurs here. The full authority/fact/path check below
+	// must succeed before any part of this copy leaves the method.
 	raw, err := json.Marshal(s.report)
 	if err != nil || len(raw) > s.maxOutput {
 		return Report{}, ErrLimit

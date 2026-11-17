@@ -1,10 +1,14 @@
 package overview
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/contextpack"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	migrations "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/migrations/index"
 	_ "modernc.org/sqlite"
 )
@@ -131,6 +135,44 @@ func TestOverviewAgainstSQLiteSchemaFixture(t *testing.T) {
 		}
 		if len(expected) != group.Count || !reflect.DeepEqual(got, expected) {
 			t.Fatalf("SQLite and expansion disagree: got %d expected %d", len(got), len(expected))
+		}
+		member := model.ScopeMember{WorktreeID: worktree, ProfileID: manifest.ProfileID, GenerationID: generation, SnapshotDigest: manifest.SnapshotDigest, PolicyDigest: manifest.PolicyDigest, PolicyEpoch: 1, BindingRevision: 1, RecordEpoch: 1, IndexIncarnation: generation, RecordsIncarnation: generation}
+		scope := model.ScopeVector{Kind: "single", Members: []model.ScopeMember{member}, CatalogIncarnation: generation, UnavailableMembers: []model.MemberUnavailable{}}
+		scope.VectorDigest, err = model.ComputeScopeVectorDigest(scope, 65536)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var key [32]byte
+		for i := range key {
+			key[i] = byte(i + 1)
+		}
+		codec, err := contextpack.NewCursorCodec(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		binding := contextpack.CursorBinding{Purpose: "list", PrincipalDigest: strings.Repeat("a", 64), BindingDigest: strings.Repeat("b", 64), RequestDigest: strings.Repeat("c", 64), OrderVersion: "overview-group-v1", Scope: scope}
+		allow := func(context.Context, contextpack.CursorBinding) error { return nil }
+		pager, err := NewGroupPager(ctx, report, group.Expand, codec, binding, allow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var signed []string
+		cursor := ""
+		for {
+			page, err := pager.Page(ctx, cursor, binding.PrincipalDigest, allow, 37, 8192)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, site := range page.Sites {
+				signed = append(signed, site.Relation.RelationID)
+			}
+			if page.NextCursor == nil {
+				break
+			}
+			cursor = *page.NextCursor
+		}
+		if !reflect.DeepEqual(signed, expected) {
+			t.Fatalf("signed pagination disagrees with SQLite: got %d expected %d", len(signed), len(expected))
 		}
 	}
 }

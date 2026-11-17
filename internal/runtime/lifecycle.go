@@ -60,6 +60,25 @@ func (l *Lifecycle) Check(ctx context.Context, scope string, required ports.Leas
 	return s.checkLocked(ctx, scope, required)
 }
 
+// CheckRoot verifies that the held lifecycle protects this exact root handle,
+// as well as the scope, mode and current lock identity. Callers using a
+// different handle must acquire their own lifecycle against that handle.
+func (l *Lifecycle) CheckRoot(ctx context.Context, root *paths.Root, scope string, required ports.LeaseMode) error {
+	if l == nil || l.state == nil || root == nil || ctx == nil {
+		return ErrInvalidLease
+	}
+	s := l.state
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.root != root {
+		return ErrInvalidLease
+	}
+	return s.checkLocked(ctx, scope, required)
+}
+
 func (l *lifecycleState) checkLocked(ctx context.Context, scope string, required ports.LeaseMode) error {
 	if err := ctx.Err(); err != nil {
 		return err

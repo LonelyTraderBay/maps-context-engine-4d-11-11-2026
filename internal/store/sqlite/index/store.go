@@ -75,7 +75,12 @@ func readIdentity(ctx context.Context, db *sql.DB, worktreeID string, lease port
 	if err := requireWAL(ctx, conn, false); err != nil {
 		return Identity{}, err
 	}
-	version, identity, err := inspectStore(ctx, conn, worktreeID)
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Identity{}, err
+	}
+	defer tx.Rollback()
+	version, identity, err := inspectStore(ctx, tx, worktreeID)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -86,6 +91,9 @@ func readIdentity(ctx context.Context, db *sql.DB, worktreeID string, lease port
 		return Identity{}, ErrUnrecognizedStore
 	}
 	if err := lease.Check(ctx, worktreeID, ports.SharedLease); err != nil {
+		return Identity{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Identity{}, err
 	}
 	return identity, nil

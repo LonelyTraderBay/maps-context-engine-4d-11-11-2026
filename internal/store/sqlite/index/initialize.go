@@ -164,7 +164,7 @@ func inspectStore(ctx context.Context, db schemaQueryer, expectedWorktree string
 		return 0, Identity{}, nil
 	}
 	var kind string
-	if err := db.QueryRowContext(ctx, `SELECT type FROM sqlite_schema WHERE name='schema_meta'`).Scan(&kind); err != nil || kind != "table" {
+	if err := db.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(type AS BLOB))<=64 THEN type END FROM sqlite_schema WHERE name='schema_meta'`).Scan(&kind); err != nil || kind != "table" {
 		return 0, Identity{}, errors.Join(ErrUnrecognizedStore, err)
 	}
 	var version, minReader int
@@ -181,7 +181,7 @@ func inspectStore(ctx context.Context, db schemaQueryer, expectedWorktree string
 		return 0, Identity{}, err
 	}
 	var identity Identity
-	if err := db.QueryRowContext(ctx, `SELECT worktree_id,incarnation FROM store_identity WHERE singleton=1`).Scan(&identity.WorktreeID, &identity.Incarnation); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(worktree_id AS BLOB))=36 THEN worktree_id END,CASE WHEN length(CAST(incarnation AS BLOB))=36 THEN incarnation END FROM store_identity WHERE singleton=1`).Scan(&identity.WorktreeID, &identity.Incarnation); err != nil {
 		return 0, Identity{}, errors.Join(ErrInvalidIdentity, err)
 	}
 	if !validUUID(identity.WorktreeID) || !validUUID(identity.Incarnation) {

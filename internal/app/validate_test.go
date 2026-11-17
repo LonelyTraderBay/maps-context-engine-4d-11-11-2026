@@ -164,6 +164,38 @@ func TestValidateCapturedWorkspaceNeverPromotesUnknownOrChanged(t *testing.T) {
 	}
 }
 
+func TestValidateCapturedWorkspaceRejectsUnobservedCapture(t *testing.T) {
+	for _, status := range []string{"metadata_only", "read_error"} {
+		t.Run(status, func(t *testing.T) {
+			ctx, input, original := validationFixture(t)
+			manifest := original.Manifest()
+			manifest.Files = append(manifest.Files, model.ManifestFile{Path: "unobserved.go", Status: status})
+			manifest.SnapshotDigest = ""
+			file, ok := original.File("main.go")
+			if !ok {
+				t.Fatal("fixture source missing")
+			}
+			captured, err := snapshot.Freeze(manifest, []snapshot.File{file}, 8192, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope := input.Scope
+			scope.Members = append([]model.ScopeMember(nil), scope.Members...)
+			scope.Members[0].SnapshotDigest = captured.Manifest().SnapshotDigest
+			scope.VectorDigest, err = model.ComputeScopeVectorDigest(scope, 8192)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.Scope = scope
+			input.CurrentScope = func(context.Context) (model.ScopeVector, error) { return scope, nil }
+			input.ResolveCapture = func(context.Context, model.ScopeMember) (*snapshot.Snapshot, error) { return captured, nil }
+			if got, err := ValidateCapturedWorkspace(ctx, input); !errors.Is(err, ErrFreshnessUnknown) || got.Data.EditPreconditionValidated {
+				t.Fatalf("%s capture falsely validated: %v", status, err)
+			}
+		})
+	}
+}
+
 func TestValidateCapturedWorkspaceChecksEveryFederatedMember(t *testing.T) {
 	ctx, input, first := validationFixture(t)
 	manifest := first.Manifest()

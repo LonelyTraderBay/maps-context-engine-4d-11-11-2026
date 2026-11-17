@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 )
 
@@ -32,6 +34,15 @@ func AcquireCatalogMutation(ctx context.Context, lifecycle *Lifecycle, operation
 	return acquireScopedWriter(ctx, lifecycle, operationID, wait, true)
 }
 
+var ErrCatalogLockLegacy = errors.New("catalog uses legacy writer lock; offline migration required")
+
+func writerLockName(scope string) string {
+	if scope == "catalog" {
+		return "catalog.lock"
+	}
+	return "writer.lock"
+}
+
 func acquireScopedWriter(ctx context.Context, lifecycle *Lifecycle, job string, wait time.Duration, catalog bool) (*Writer, error) {
 	if ctx == nil || lifecycle == nil || lifecycle.state == nil || !validLockUUID(job) || wait <= 0 {
 		return nil, ErrInvalidLease
@@ -39,11 +50,23 @@ func acquireScopedWriter(ctx context.Context, lifecycle *Lifecycle, job string, 
 	if catalog && lifecycle.state.scope != "catalog" || !catalog && !validLockUUID(lifecycle.state.scope) {
 		return nil, ErrInvalidLease
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if catalog {
+		legacy, err := lifecycle.state.root.OpenRegular("writer.lock")
+		if err == nil {
+			return nil, errors.Join(ErrCatalogLockLegacy, legacy.Close())
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, ErrCatalogLockLegacy
+		}
+	}
 	hold, err := lifecycle.Hold(ctx)
 	if err != nil {
 		return nil, err
 	}
-	file, err := acquireOwnedLock(ctx, lifecycle.state.root, "writer.lock", true, wait, ErrWorktreeBusy)
+	file, err := acquireOwnedLock(ctx, lifecycle.state.root, writerLockName(lifecycle.state.scope), true, wait, ErrWorktreeBusy)
 	if err != nil {
 		return nil, errorsJoinHold(err, hold)
 	}
@@ -67,6 +90,27 @@ func (w *Writer) CheckWriter(ctx context.Context, worktree, job string) error {
 	return s.checkLocked(ctx, worktree, job)
 }
 
+// CheckWriterRoot binds this writer and its lifecycle to the same root handle
+// used by a state operation, in addition to checking the worktree and job.
+func (w *Writer) CheckWriterRoot(ctx context.Context, root *paths.Root, worktree, job string) error {
+	if w == nil || w.state == nil || ctx == nil || root == nil {
+		return ErrInvalidLease
+	}
+	s := w.state
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.file == nil || s.lease == nil || s.job != job {
+		return ErrInvalidLease
+	}
+	if err := s.lease.CheckRoot(ctx, root, worktree, ports.SharedLease); err != nil {
+		return err
+	}
+	return verifyOwnedLock(root, s.file, writerLockName(worktree))
+}
+
 func (s *writerState) checkLocked(ctx context.Context, worktree, job string) error {
 	if s.file == nil || s.lease == nil || s.job != job {
 		return ErrInvalidLease
@@ -74,7 +118,7 @@ func (s *writerState) checkLocked(ctx context.Context, worktree, job string) err
 	if err := s.lease.Check(ctx, worktree, ports.SharedLease); err != nil {
 		return err
 	}
-	return verifyOwnedLock(s.lease.state.root, s.file, "writer.lock")
+	return verifyOwnedLock(s.lease.state.root, s.file, writerLockName(worktree))
 }
 
 func (w *Writer) HoldWriter(ctx context.Context, worktree, job string) (ports.LeaseGuard, error) {

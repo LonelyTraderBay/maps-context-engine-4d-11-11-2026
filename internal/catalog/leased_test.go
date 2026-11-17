@@ -115,6 +115,48 @@ func TestLeasedCatalogRollsBackOnLostAuthority(t *testing.T) {
 	}
 }
 
+func TestAuthorizedMutationChecksBeforeAndAfterSQL(t *testing.T) {
+	ctx := context.Background()
+	db := leasedCatalogDB(t)
+	if _, err := Initialize(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var mode string
+	if err := db.QueryRow(`PRAGMA journal_mode=WAL`).Scan(&mode); err != nil || mode != "wal" {
+		t.Fatalf("WAL: %q %v", mode, err)
+	}
+	base, err := OpenExistingLeased(ctx, db, &lifecycleFixture{mode: ports.SharedLease})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutation := &mutationFixture{}
+	if _, err := base.WithAuthorizedMutation(ctx, mutation, catalogOperation, nil); !errors.Is(err, ErrCatalogWriterRequired) {
+		t.Fatal("missing authorization was accepted")
+	}
+	checks := 0
+	bound, err := base.WithAuthorizedMutation(ctx, mutation, catalogOperation, func(context.Context) error {
+		checks++
+		if checks == 2 {
+			return errFixtureRevoked
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = bound.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO repo_groups(group_id,name,status,revision,created_at,updated_at) VALUES(?,?,'active',1,'now','now')`, catalogOperation, "fixture")
+		return err
+	})
+	if !errors.Is(err, errFixtureRevoked) || checks != 2 {
+		t.Fatalf("revocation before commit not rejected: %v", err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM repo_groups`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("revoked mutation persisted: %d %v", count, err)
+	}
+}
+
 func TestLeasedCatalogInitializationRollsBackOnLeaseLoss(t *testing.T) {
 	db := leasedCatalogDB(t)
 	lease := &lifecycleFixture{mode: ports.ExclusiveLease, failAt: 2}

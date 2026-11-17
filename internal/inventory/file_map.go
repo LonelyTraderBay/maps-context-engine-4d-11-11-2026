@@ -25,6 +25,7 @@ type FileMapEntry struct {
 
 type FileMap struct {
 	Entries          []FileMapEntry
+	InputDigest      string // opaque digest of verified Git/config/ignore inputs, not source bytes
 	DeniedCount      int
 	InvalidPathCount int
 	IgnoredCount     int

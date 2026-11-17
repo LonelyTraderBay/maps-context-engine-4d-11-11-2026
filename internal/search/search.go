@@ -11,8 +11,10 @@ import (
 
 type Request struct {
 	ProfileID, GenerationID string
-	Mode                    string // exact, prefix, text, or position
+	Mode                    string // exact, prefix, text, file, or position
 	Query                   string
+	Kinds                   []string // exact symbol kinds; empty means all kinds
+	Package                 string   // exact Go import path; empty means all packages
 	Qualified               bool
 	Position                *model.PositionSelector
 	Limit                   int
@@ -22,6 +24,10 @@ type Request struct {
 	AuthorizeGeneration     func(context.Context, string, string, string, int64) error
 	AuthorizePath           func(context.Context, string, string, string, int64) error
 	Scanner                 *policy.Scanner
+	// Keyset orders by immutable item ID rather than the legacy display order.
+	// AfterID is trusted only after the caller verifies a signed continuation.
+	Keyset  bool
+	AfterID string
 }
 
 type SymbolHit struct {
@@ -29,8 +35,8 @@ type SymbolHit struct {
 	Source *model.SourceRef `json:"source"`
 }
 
-// Text hits identify files containing an FTS token phrase. They are lexical
-// evidence only and deliberately carry no inferred semantic relation or site.
+// Text hits identify lexical FTS or path matches; neither implies a semantic
+// relation or source site.
 type TextHit struct {
 	Path         string `json:"path"`
 	ContentHash  string `json:"content_hash"`
@@ -50,6 +56,7 @@ type Result struct {
 	Text             []TextHit   `json:"text"`
 	Truncated        bool        `json:"truncated"`
 	Ambiguous        bool        `json:"ambiguous"`
+	NextKey          string      `json:"-"` // trusted producer signs this key
 }
 
 type Reader interface {

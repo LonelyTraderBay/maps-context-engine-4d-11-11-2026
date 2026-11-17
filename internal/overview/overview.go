@@ -168,10 +168,10 @@ func authorityError(ctx context.Context) error {
 // Read returns a defensive copy after rechecking the scope and all source
 // paths contributing to the summary. Authority remains time-bound.
 func (r *Report) Read(ctx context.Context) (Summary, error) {
-	if r == nil {
+	if r == nil || ctx == nil {
 		return Summary{}, ErrInput
 	}
-	if err := r.authorize(ctx, r.paths); err != nil {
+	if err := ctx.Err(); err != nil {
 		return Summary{}, err
 	}
 	raw, err := json.Marshal(r.summary)

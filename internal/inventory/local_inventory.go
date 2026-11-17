@@ -2,6 +2,9 @@ package inventory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"reflect"
 
@@ -236,5 +239,27 @@ func observeInventory(ctx context.Context, request LocalInventoryRequest, bindin
 	if err := verifyMetadata(); err != nil {
 		return result, err
 	}
+	// Bind input changes even when they happen to produce the same membership
+	// (for example, an ignore comment or unrelated Git-index entry flags).
+	type configInput struct {
+		Root, Path string
+		Present    bool
+		Digest     [32]byte
+		Length     int
+	}
+	inputs := make([]configInput, 0, len(request.Config.observations))
+	for _, observed := range request.Config.observations {
+		root, err := observed.source.Root.CanonicalPath()
+		if err != nil {
+			return result, err
+		}
+		inputs = append(inputs, configInput{root, observed.source.RelativePath, observed.present, observed.digest, observed.length})
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("MCE4D-INVENTORY-INPUTS1\x00"))
+	if err := json.NewEncoder(hash).Encode([]any{inputs, index, sources, files}); err != nil {
+		return result, err
+	}
+	files.InputDigest = hex.EncodeToString(hash.Sum(nil))
 	return localInventoryObservation{index: index, walk: walk, sources: sources, ignored: ignored, files: files}, nil
 }

@@ -159,6 +159,38 @@ func TestInventoryLocalRejectsChangedMembershipBetweenPasses(t *testing.T) {
 	}
 }
 
+func TestInventoryInputDigestBindsIgnoreBytesWithSameMembership(t *testing.T) {
+	f := newGitFixture(t, "sha1")
+	f.write(t, "main.go")
+	ignore := filepath.Join(f.root, ".gitignore")
+	if err := os.WriteFile(ignore, []byte("# first comment\n*.log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := paths.OpenRoot(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	sandbox, _ := ignoreSandbox(t)
+	request := localInventoryFixtureRequest(t, f, root, sandbox)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	first, err := InventoryLocal(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ignore, []byte("# second comment\n*.log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := InventoryLocal(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.InputDigest) != 64 || first.InputDigest == second.InputDigest || !reflect.DeepEqual(first.Entries, second.Entries) {
+		t.Fatal("ignore bytes were not independently bound to identical membership")
+	}
+}
+
 func TestInventoryLocalRequiresVerifiedConfigAndIgnoreAuthority(t *testing.T) {
 	f := newGitFixture(t, "sha1")
 	if err := os.WriteFile(filepath.Join(f.root, ".gitignore"), []byte("*.log\n"), 0600); err != nil {

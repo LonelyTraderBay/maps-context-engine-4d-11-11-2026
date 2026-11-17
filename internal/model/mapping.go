@@ -238,8 +238,18 @@ func DecodeMappingDataJSON(data []byte, maxBytes int) (MappingData, error) {
 		}
 		body.Matches = append(body.Matches, match)
 	}
-	if body.MappingStatus == "exact_in_supported_scope" && len(body.Matches) > 1 {
-		return MappingData{}, fmt.Errorf("exact mapping has multiple visible matches")
+	if body.MappingStatus == "exact_in_supported_scope" {
+		var targetDigest string
+		for _, match := range body.Matches {
+			if match.TargetRef == nil || match.MappingStatus != "exact_in_supported_scope" {
+				return MappingData{}, fmt.Errorf("exact mapping has non-exact visible evidence")
+			}
+			digest, err := GraphRefDigest(match.TargetRef, maxBytes)
+			if err != nil || targetDigest != "" && targetDigest != digest {
+				return MappingData{}, fmt.Errorf("exact mapping has multiple visible targets")
+			}
+			targetDigest = digest
+		}
 	}
 	return body, nil
 }

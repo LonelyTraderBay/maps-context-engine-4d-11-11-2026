@@ -66,17 +66,32 @@ type TaskSlice struct {
 	report          SliceReport
 	rulePaths       []string
 	verifyNoRecords func(context.Context, model.ScopeVector) (bool, error)
+	retentionCheck  func(context.Context) error
 	maxBytes        int
 	policyMaxOutput int64
 }
 
+// PolicyMaxOutput exposes the already validated cap without granting access to
+// the captured selection or its authority callbacks.
+func (s *TaskSlice) PolicyMaxOutput() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.policyMaxOutput
+}
+
 func (s *TaskSlice) authorize(ctx context.Context) error {
-	if s == nil || s.selection == nil {
+	if s == nil || s.selection == nil || ctx == nil {
 		return ErrInput
 	}
-	if err := s.selection.authorize(ctx); err != nil {
-		return err
+	if s.retentionCheck != nil {
+		if err := s.retentionCheck(ctx); err != nil {
+			return err
+		}
 	}
+	// Rule and record callbacks inspect this immutable selection privately.
+	// The complete selection check below brackets every contributing path with
+	// live scope/fact checks after those callbacks and before data can return.
 	for _, path := range s.rulePaths {
 		if err := s.selection.checkPath(ctx, path); err != nil {
 			return err
@@ -92,15 +107,32 @@ func (s *TaskSlice) authorize(ctx context.Context) error {
 			return authorityError(ctx)
 		}
 	}
-	return s.selection.authorize(ctx)
+	for _, path := range s.rulePaths {
+		if err := s.selection.checkPath(ctx, path); err != nil {
+			return err
+		}
+	}
+	if err := s.selection.authorize(ctx); err != nil {
+		return err
+	}
+	if s.retentionCheck != nil {
+		return s.retentionCheck(ctx)
+	}
+	return nil
 }
 
 // Read rechecks the pinned selection, rule paths and epochs before returning a
 // defensive copy. It does not validate the live workspace or authorize edits.
 func (s *TaskSlice) Read(ctx context.Context) (SliceReport, error) {
-	if err := s.authorize(ctx); err != nil {
+	if s == nil || ctx == nil {
+		return SliceReport{}, ErrInput
+	}
+	if err := ctx.Err(); err != nil {
 		return SliceReport{}, err
 	}
+	// Defensive copying touches only this immutable materialization. Recheck
+	// the complete selection/rules/record authority after copying and before
+	// returning; do not cache that proof for another operation.
 	raw, err := json.Marshal(s.report)
 	if err != nil || len(raw) > s.maxBytes {
 		return SliceReport{}, ErrLimit

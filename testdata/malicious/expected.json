@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "scope": "one synthetic local Go module, Linux/WSL2, no cgo or test variants",
+  "rename": {"new_name": "Count", "total_edits": 4, "paths": ["a.go", "b.go"], "applied": false, "source_mutation_count": 0},
+  "context_min_pages": 2,
+  "trusted_constraint_paths": ["AGENTS.md"],
+  "invalid_path_error": "INVALID_ARGUMENT",
+  "replaced_gopls_error": "ACCESS_DENIED",
+  "missing_dependency_error": "UNSUPPORTED_CAPABILITY",
+  "blocked_source_reason": "SECRET_BLOCKED",
+  "secret_marker_in_engine_state_or_output": false,
+  "poisoned_local_endpoint_contacts": 0,
+  "target_content_mode_owner_symlink_changes_by_engine": 0,
+  "limitations": ["finite built-in secret indicators", "trap observes one controlled endpoint, not all network syscalls", "no native Windows junction/ACL claim", "no runtime reflection or serialization safety guarantee"]
+}

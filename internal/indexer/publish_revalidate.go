@@ -35,6 +35,14 @@ type RevalidateRequest struct {
 // observed stability only for this bounded interval, not an atomic filesystem
 // snapshot. The coordinator must hold the worktree writer lease throughout.
 func RevalidateLocal(ctx context.Context, request RevalidateRequest) error {
+	return ObserveCapturedLocal(ctx, request)
+}
+
+// ObserveCapturedLocal performs only source observations. A query owner must
+// pin and independently recheck its generation and authority at both ends. It
+// does not acquire the index writer, publish a generation, or freeze the live
+// filesystem; a concurrent watch may continue indexing while it runs.
+func ObserveCapturedLocal(ctx context.Context, request RevalidateRequest) error {
 	return revalidate(ctx, request, func(ctx context.Context) (inventory.FileMap, error) {
 		return inventory.InventoryLocal(ctx, request.Inventory)
 	})
@@ -42,6 +50,11 @@ func RevalidateLocal(ctx context.Context, request RevalidateRequest) error {
 
 // RevalidateLinked applies the same checks to a verified linked-worktree root.
 func RevalidateLinked(ctx context.Context, request RevalidateRequest, binding *runtime.LinkedGitMetadata, common *paths.Root) error {
+	return ObserveCapturedLinked(ctx, request, binding, common)
+}
+
+// ObserveCapturedLinked is the read-only observation for a verified linked root.
+func ObserveCapturedLinked(ctx context.Context, request RevalidateRequest, binding *runtime.LinkedGitMetadata, common *paths.Root) error {
 	if binding == nil || common == nil {
 		return ErrSnapshotUnverifiable
 	}

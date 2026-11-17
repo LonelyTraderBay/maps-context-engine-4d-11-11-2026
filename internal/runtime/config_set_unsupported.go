@@ -12,10 +12,18 @@ import (
 func runtimeConfigPending(*paths.Root) (bool, error) { return false, paths.ErrUnsupported }
 func verifyRuntimeConfigFile(*os.File) error         { return paths.ErrUnsupported }
 
+func readRuntimeConfigContextAt(_ context.Context, root *paths.Root, name string, maxBytes int) ([]byte, bool, error) {
+	return ReadRuntimeConfigAt(root, name, maxBytes)
+}
+
 func SetRuntimeConfig(context.Context, *paths.Root, []byte, int) (ConfigWriteResult, error) {
 	return ConfigWriteResult{State: "not_applied"}, paths.ErrUnsupported
 }
 
 func SetRuntimeConfigAt(context.Context, *paths.Root, string, []byte, int) (ConfigWriteResult, error) {
+	return ConfigWriteResult{State: "not_applied"}, paths.ErrUnsupported
+}
+
+func SetRuntimeConfigGuardedAt(context.Context, *paths.Root, string, []byte, int, func(context.Context) error) (ConfigWriteResult, error) {
 	return ConfigWriteResult{State: "not_applied"}, paths.ErrUnsupported
 }

@@ -60,9 +60,29 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 	if _, ok := ctx.Deadline(); !ok {
 		return output, ErrInvalidSearch
 	}
+	if !request.Keyset && request.AfterID != "" || request.AfterID != "" && (request.GenerationID == "" || len(request.AfterID) > 768 || !utf8.ValidString(request.AfterID)) {
+		return output, ErrInvalidSearch
+	}
+	if len(request.Kinds) > 16 || (request.Mode == "text" || request.Mode == "file") && (len(request.Kinds) != 0 || request.Package != "") || request.Mode == "file" && !request.Keyset || !utf8.ValidString(request.Package) || len(request.Package) > 2048 || utf8.RuneCountInString(request.Package) > 512 {
+		return output, ErrInvalidSearch
+	}
+	if request.Package != "" {
+		if err := request.Scanner.CheckContent([]byte(request.Package)); err != nil {
+			return output, err
+		}
+	}
+	request.Kinds = append([]string(nil), request.Kinds...)
+	for _, kind := range request.Kinds {
+		if !utf8.ValidString(kind) || len(kind) > 768 || utf8.RuneCountInString(kind) < 1 || utf8.RuneCountInString(kind) > 192 {
+			return output, ErrInvalidSearch
+		}
+		if err := request.Scanner.CheckContent([]byte(kind)); err != nil {
+			return output, err
+		}
+	}
 	switch request.Mode {
-	case "exact", "prefix", "text":
-		if request.Position != nil || len(request.Query) < 1 || len(request.Query) > 2048 || !utf8.ValidString(request.Query) || utf8.RuneCountInString(request.Query) > 512 || strings.TrimSpace(request.Query) == "" || request.Mode == "text" && (len(request.Query) > 512 || request.Qualified) {
+	case "exact", "prefix", "text", "file":
+		if request.Position != nil || len(request.Query) < 1 || len(request.Query) > 2048 || !utf8.ValidString(request.Query) || utf8.RuneCountInString(request.Query) > 512 || strings.TrimSpace(request.Query) == "" || request.Mode == "text" && (len(request.Query) > 512 || request.Qualified) || request.Mode == "file" && request.Qualified {
 			return output, ErrInvalidSearch
 		}
 		for _, r := range request.Query {
@@ -188,11 +208,15 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 		if err := searchTextRows(ctx, tx, generation, entries, request, checkPath, &result); err != nil {
 			return output, err
 		}
+	} else if request.Mode == "file" {
+		if err := searchCapturedFiles(ctx, manifest.Files, request, checkPath, &result); err != nil {
+			return output, err
+		}
 	} else {
 		if err := searchSymbolRows(ctx, tx, generation, entries, request, checkPath, &result); err != nil {
 			return output, err
 		}
-		result.Ambiguous = len(result.Symbols) > 1 || result.Truncated
+		result.Ambiguous = len(result.Symbols) > 1 || result.Truncated || request.Keyset && request.AfterID != ""
 	}
 	paths := make([]string, 0, len(seenPaths))
 	for filename := range seenPaths {
@@ -221,6 +245,59 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 		return output, ErrCaptureLimit
 	}
 	return result, nil
+}
+
+// searchCapturedFiles uses only the verified immutable manifest. It checks
+// every matching path before revealing counts or a continuation, then orders
+// by a short canonical key so long paths never enter signed cursors.
+func searchCapturedFiles(ctx context.Context, files []model.ManifestFile, request search.Request, checkPath func(string) error, result *search.Result) error {
+	type match struct {
+		key, path, hash string
+	}
+	matches := make([]match, 0)
+	seenKeys := make(map[string]string)
+	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !strings.Contains(file.Path, request.Query) {
+			continue
+		}
+		if err := checkPath(file.Path); err != nil {
+			return err
+		}
+		if file.Status != "captured" || file.ContentHash == nil || file.ByteLength == nil {
+			result.Coverage = "partial"
+			continue
+		}
+		if *file.ByteLength > int64(request.MaxFileBytes) {
+			return ErrCaptureLimit
+		}
+		key, err := search.FileLocateKey(file.Path)
+		if err != nil {
+			return ErrCaptureMismatch
+		}
+		if previous, exists := seenKeys[key]; exists && previous != file.Path {
+			return ErrCaptureMismatch
+		}
+		seenKeys[key] = file.Path
+		matches = append(matches, match{key: key, path: file.Path, hash: *file.ContentHash})
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].key < matches[j].key })
+	var last string
+	for _, item := range matches {
+		if item.key <= request.AfterID {
+			continue
+		}
+		if len(result.Text) == request.Limit {
+			result.Truncated = true
+			result.NextKey = last
+			break
+		}
+		result.Text = append(result.Text, search.TextHit{Path: item.path, ContentHash: item.hash, EvidenceKind: "path_match"})
+		last = item.key
+	}
+	return ctx.Err()
 }
 
 func validateSearchPosition(ctx context.Context, tx *sql.Tx, generation string, entries map[string]model.ManifestFile, request search.Request) error {
@@ -298,6 +375,25 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 		args = append(args, request.Position.Path, request.Position.ByteOffset, request.Position.ByteOffset)
 		order = "s.start_byte,s.end_byte,s.symbol_id"
 	}
+	if len(request.Kinds) != 0 {
+		where += " AND s.kind IN (" + strings.TrimSuffix(strings.Repeat("?,", len(request.Kinds)), ",") + ")"
+		for _, kind := range request.Kinds {
+			args = append(args, kind)
+		}
+	}
+	if request.Package != "" {
+		// Package variants share an import path; retain every matching variant
+		// so a filter cannot silently turn an ambiguous match into a unique one.
+		where += " AND EXISTS (SELECT 1 FROM packages p WHERE p.generation_id=s.generation_id AND p.package_key=s.package_key AND p.import_path=?)"
+		args = append(args, request.Package)
+	}
+	if request.Keyset {
+		order = "s.symbol_id COLLATE BINARY"
+		if request.AfterID != "" {
+			where += " AND s.symbol_id COLLATE BINARY>?"
+			args = append(args, request.AfterID)
+		}
+	}
 	args = append(args, request.Limit+1)
 	return `SELECT ` + searchSymbolFields + ` FROM symbols s LEFT JOIN files f ON f.generation_id=s.generation_id AND f.path=s.path WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ?`, args
 }
@@ -367,6 +463,9 @@ func searchSymbolRows(ctx context.Context, tx *sql.Tx, generation string, entrie
 		}
 		if len(result.Symbols) == request.Limit {
 			result.Truncated = true
+			if request.Keyset {
+				result.NextKey = result.Symbols[len(result.Symbols)-1].Symbol.SymbolID
+			}
 			break
 		}
 		hit := search.SymbolHit{Symbol: symbol, Source: ref}
@@ -389,7 +488,13 @@ func searchSymbolRows(ctx context.Context, tx *sql.Tx, generation string, entrie
 
 func searchTextRows(ctx context.Context, tx *sql.Tx, generation string, entries map[string]model.ManifestFile, request search.Request, checkPath func(string) error, result *search.Result) (resultErr error) {
 	phrase := `body : "` + strings.ReplaceAll(request.Query, `"`, `""`) + `"`
-	rows, err := tx.QueryContext(ctx, textSearchSQL, phrase, generation, request.Limit+1)
+	query := textSearchSQL
+	args := []any{phrase, generation, request.Limit + 1}
+	if request.Keyset {
+		query = strings.Replace(textSearchSQL, "ORDER BY d.path,d.item_id LIMIT ?", "AND d.item_id COLLATE BINARY>? ORDER BY d.item_id COLLATE BINARY LIMIT ?", 1)
+		args = []any{phrase, generation, request.AfterID, request.Limit + 1}
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -402,6 +507,7 @@ func searchTextRows(ctx context.Context, tx *sql.Tx, generation string, entries 
 	if used > request.MaxOutputBytes {
 		return ErrCaptureLimit
 	}
+	lastID := ""
 	for rows.Next() {
 		var id, filename, kind, name, qualified, hash, status sql.NullString
 		var length sql.NullInt64
@@ -420,6 +526,9 @@ func searchTextRows(ctx context.Context, tx *sql.Tx, generation string, entries 
 		}
 		if len(result.Text) == request.Limit {
 			result.Truncated = true
+			if request.Keyset {
+				result.NextKey = lastID
+			}
 			break
 		}
 		hit := search.TextHit{Path: filename.String, ContentHash: hash.String, EvidenceKind: "text_match"}
@@ -436,6 +545,7 @@ func searchTextRows(ctx context.Context, tx *sql.Tx, generation string, entries 
 		}
 		used += added
 		result.Text = append(result.Text, hit)
+		lastID = id.String
 	}
 	return rows.Err()
 }

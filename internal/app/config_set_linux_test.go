@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,6 +135,11 @@ func TestRuntimeConfigCASProcessHelper(t *testing.T) {
 	}
 	oldDigest := os.Getenv("MCE4D_CONFIG_TEST_DIGEST")
 	fmt.Println("READY")
+	var start string
+	if _, err := fmt.Fscan(os.Stdin, &start); err != nil || start != "SET" {
+		t.Fatal("missing process barrier", err)
+	}
+	fmt.Println("SETTING")
 	result, err := service.Set(context.Background(), configSetRequest(&oldDigest, 56789))
 	if err == nil && result.State == "applied" {
 		fmt.Println("CAS_RESULT=applied")
@@ -157,9 +163,6 @@ func TestRuntimeConfigCASAcrossProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		t.Fatal(err)
-	}
 	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -167,6 +170,7 @@ func TestRuntimeConfigCASAcrossProcesses(t *testing.T) {
 		cmd    *exec.Cmd
 		stdout *bufio.Reader
 		stderr *bytes.Buffer
+		start  io.WriteCloser
 	}
 	children := make([]child, 0, 2)
 	for i := 0; i < 2; i++ {
@@ -176,17 +180,38 @@ func TestRuntimeConfigCASAcrossProcesses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		start, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
 		stderr := new(bytes.Buffer)
 		cmd.Stderr = stderr
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		children = append(children, child{cmd, bufio.NewReader(out), stderr})
+		children = append(children, child{cmd, bufio.NewReader(out), stderr, start})
 	}
 	for _, c := range children {
 		line, err := c.stdout.ReadString('\n')
 		if err != nil || strings.TrimSpace(line) != "READY" {
 			t.Fatalf("child not ready: %q %v %s", line, err, c.stderr.String())
+		}
+	}
+	// Initialize both readers before taking the writer lock. Reads now
+	// cooperate with setters, so waiting for READY while holding it deadlocks.
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range children {
+		_, err := io.WriteString(c.start, "SET\n")
+		if err = errors.Join(err, c.start.Close()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range children {
+		line, err := c.stdout.ReadString('\n')
+		if err != nil || strings.TrimSpace(line) != "SETTING" {
+			t.Fatalf("child not setting: %q %v %s", line, err, c.stderr.String())
 		}
 	}
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_UN); err != nil {

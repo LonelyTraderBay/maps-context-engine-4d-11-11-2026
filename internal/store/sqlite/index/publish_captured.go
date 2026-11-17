@@ -28,7 +28,7 @@ type publishPlan struct {
 	Revalidate          func(context.Context, *snapshot.Snapshot) error
 	State               string
 	AllowParseErrors    bool
-	ValidateExtra       func(context.Context, *sql.Conn, model.CaptureManifest) error
+	ValidateExtra       func(context.Context, publicationQueryer, model.CaptureManifest) error
 	PersistExtra        func(context.Context, *sql.Tx) error
 }
 
@@ -86,7 +86,7 @@ func (s *Store) PublishCapturedOnly(ctx context.Context, request PublishCaptured
 		s.streamsMu.Unlock()
 	}()
 	plan := publishPlan{Capture: request.Capture, AuthorizeGeneration: request.AuthorizeGeneration, Revalidate: request.Revalidate, State: "READY_PARTIAL",
-		ValidateExtra: func(ctx context.Context, conn *sql.Conn, _ model.CaptureManifest) error {
+		ValidateExtra: func(ctx context.Context, conn publicationQueryer, _ model.CaptureManifest) error {
 			return checkNoSemanticFacts(ctx, conn, request.Capture.GenerationID)
 		},
 		PersistExtra: func(ctx context.Context, tx *sql.Tx) error {
@@ -158,7 +158,20 @@ func (s *Store) publish(ctx context.Context, request publishPlan) (resultErr err
 	if err := requireWAL(ctx, conn, false); err != nil {
 		return err
 	}
-	version, identity, err := inspectStore(ctx, conn, s.identity.WorktreeID)
+	// Structural validation uses an explicit, rollback-only transaction. FTS5's
+	// integrity command is spelled INSERT, so a read-only transaction is not
+	// sufficient. End this transaction before observing source files; the final
+	// publication still compares data_version on this same connection.
+	validation, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := validation.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, err)
+		}
+	}()
+	version, identity, err := inspectStore(ctx, validation, s.identity.WorktreeID)
 	if err != nil {
 		return err
 	}
@@ -168,24 +181,27 @@ func (s *Store) publish(ctx context.Context, request publishPlan) (resultErr err
 	// Validation is deliberately outside the short publish transaction. Detect
 	// commits from other connections before relying on that validation below.
 	var validatedVersion int64
-	if err := conn.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&validatedVersion); err != nil {
+	if err := validation.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&validatedVersion); err != nil {
 		return err
 	}
-	if err := validateCapturedRows(ctx, conn, s.identity.WorktreeID, capture, manifest, request.AllowParseErrors); err != nil {
+	if err := validateCapturedRows(ctx, validation, s.identity.WorktreeID, capture, manifest, request.AllowParseErrors); err != nil {
 		return err
 	}
-	if err := request.ValidateExtra(ctx, conn, manifest); err != nil {
+	if err := request.ValidateExtra(ctx, validation, manifest); err != nil {
 		return err
 	}
-	if err := validateSearchDocuments(ctx, conn, s.identity.WorktreeID, capture, manifest); err != nil {
+	if err := validateSearchDocuments(ctx, validation, s.identity.WorktreeID, capture, manifest); err != nil {
 		return err
 	}
-	if err := checkForeignKeys(ctx, conn); err != nil {
+	if err := checkForeignKeys(ctx, validation); err != nil {
 		return err
 	}
 	// FTS5 rank=1 also compares the external-content index to its table.
-	if _, err := conn.ExecContext(ctx, `INSERT INTO search_fts(search_fts,rank) VALUES('integrity-check',1)`); err != nil {
+	if _, err := validation.ExecContext(ctx, `INSERT INTO search_fts(search_fts,rank) VALUES('integrity-check',1)`); err != nil {
 		return errors.Join(ErrPublishIntegrity, err)
+	}
+	if err := validation.Rollback(); err != nil {
+		return err
 	}
 	if err := request.Revalidate(ctx, capture.Snapshot); err != nil {
 		return err

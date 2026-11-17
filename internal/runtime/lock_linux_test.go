@@ -95,6 +95,46 @@ func TestLifecycleAttachmentsAndWriterScope(t *testing.T) {
 	}
 }
 
+func TestLifecycleAndWriterRequireTheBoundRootHandle(t *testing.T) {
+	parent := t.TempDir()
+	root := lockRoot(t, filepath.Join(parent, "state"))
+	other := lockRoot(t, filepath.Join(parent, "other"))
+	ctx := context.Background()
+	lease, err := AcquireLifecycle(ctx, root, lockFixtureA, ports.SharedLease, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := AcquireWriter(ctx, lease, lockFixtureJob, time.Second)
+	if err != nil {
+		_ = lease.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writer.Close(); _ = lease.Close() })
+	if err := lease.CheckRoot(ctx, root, lockFixtureA, ports.SharedLease); err != nil {
+		t.Fatalf("bound lifecycle rejected: %v", err)
+	}
+	if err := writer.CheckWriterRoot(ctx, root, lockFixtureA, lockFixtureJob); err != nil {
+		t.Fatalf("bound writer rejected: %v", err)
+	}
+	if err := lease.CheckRoot(ctx, other, lockFixtureA, ports.SharedLease); !errors.Is(err, ErrInvalidLease) {
+		t.Fatalf("lifecycle accepted another root: %v", err)
+	}
+	if err := writer.CheckWriterRoot(ctx, other, lockFixtureA, lockFixtureJob); !errors.Is(err, ErrInvalidLease) {
+		t.Fatalf("writer accepted another root: %v", err)
+	}
+	if err := writer.CheckWriterRoot(ctx, root, lockFixtureA, lockFixtureB); !errors.Is(err, ErrInvalidLease) {
+		t.Fatalf("writer accepted another job: %v", err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := lease.CheckRoot(canceled, root, lockFixtureA, ports.SharedLease); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled lifecycle check: %v", err)
+	}
+	if err := writer.CheckWriterRoot(canceled, root, lockFixtureA, lockFixtureJob); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled writer check: %v", err)
+	}
+}
+
 func TestIndexStreamReservationIsSharedByWriterCopies(t *testing.T) {
 	root := lockRoot(t, filepath.Join(t.TempDir(), "stream"))
 	ctx := context.Background()

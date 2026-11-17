@@ -36,7 +36,7 @@ type TrustedStdlibInput struct {
 	DependencyDigest string
 	AllowedPackages  []string
 	Scanner          *policy.Scanner
-	AuthorizePath    func(context.Context, string) error
+	AuthorizePath    func(context.Context, string) error // path relative to SourceRoot, never absolute
 	VerifyAuthority  StdlibAuthority
 	MaxManifestBytes int
 	MaxFileBytes     int

@@ -137,7 +137,7 @@ func initialize(ctx context.Context, db *sql.DB, lease ports.LifecycleLease, mut
 		return incarnation, nil
 	}
 	var metaType string
-	if err = tx.QueryRowContext(ctx, `SELECT type FROM sqlite_schema WHERE name='schema_meta'`).Scan(&metaType); err != nil || metaType != "table" {
+	if err = tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(type AS BLOB))<=64 THEN type END FROM sqlite_schema WHERE name='schema_meta'`).Scan(&metaType); err != nil || metaType != "table" {
 		return "", errors.Join(ErrUnrecognizedStore, err)
 	}
 	var version, minReader int
@@ -153,7 +153,7 @@ func initialize(ctx context.Context, db *sql.DB, lease ports.LifecycleLease, mut
 	if err = validateSchema(ctx, tx); err != nil {
 		return "", err
 	}
-	if err = tx.QueryRowContext(ctx, `SELECT incarnation FROM catalog_identity WHERE singleton=1`).Scan(&incarnation); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(incarnation AS BLOB))=36 THEN incarnation END FROM catalog_identity WHERE singleton=1`).Scan(&incarnation); err != nil {
 		return "", errors.Join(ErrInvalidIdentity, err)
 	}
 	if !validUUID(incarnation) {

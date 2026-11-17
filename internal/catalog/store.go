@@ -25,6 +25,7 @@ type Store struct {
 	lease       ports.LifecycleLease
 	mutation    ports.CatalogMutationLease
 	operationID string
+	authorize   func(context.Context) error
 }
 
 // Open initializes or validates an already-authorized catalog database.
@@ -123,11 +124,19 @@ func (s *Store) transaction(ctx context.Context, writing bool, fn func(*sql.Tx) 
 		return ErrUnrecognizedStore
 	}
 	var current string
-	if err = tx.QueryRowContext(ctx, `SELECT incarnation FROM catalog_identity WHERE singleton=1`).Scan(&current); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(incarnation AS BLOB))=36 THEN incarnation END FROM catalog_identity WHERE singleton=1`).Scan(&current); err != nil {
 		return errors.Join(ErrInvalidIdentity, err)
 	}
 	if current != s.incarnation {
 		return ErrCatalogChanged
+	}
+	if writing && s.authorize != nil {
+		if s.lease == nil || s.mutation == nil {
+			return ErrCatalogWriterRequired
+		}
+		if err = s.authorize(ctx); err != nil {
+			return err
+		}
 	}
 	if err = fn(tx); err != nil {
 		return err
@@ -142,6 +151,11 @@ func (s *Store) transaction(ctx context.Context, writing bool, fn func(*sql.Tx) 
 			}
 		}
 	}
+	if writing && s.authorize != nil {
+		if err = s.authorize(ctx); err != nil {
+			return err
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		if s.lease != nil && writing {
 			return errors.Join(ErrCatalogCommitUnknown, err)
@@ -154,11 +168,11 @@ func (s *Store) transaction(ctx context.Context, writing bool, fn func(*sql.Tx) 
 
 func requireRegistered(ctx context.Context, tx *sql.Tx, worktreeID string) error {
 	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM worktrees WHERE worktree_id=?`, worktreeID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(status AS BLOB))<=32 THEN status END FROM worktrees WHERE worktree_id=?`, worktreeID).Scan(&status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrWorktreeUnavailable
 		}
-		return err
+		return errors.Join(ErrUnrecognizedStore, err)
 	}
 	if status != "registered" {
 		return ErrWorktreeUnavailable

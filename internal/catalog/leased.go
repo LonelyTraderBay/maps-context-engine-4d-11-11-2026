@@ -56,7 +56,7 @@ func OpenExistingLeased(ctx context.Context, db *sql.DB, lease ports.LifecycleLe
 		return nil, err
 	}
 	var incarnation string
-	if err := tx.QueryRowContext(ctx, `SELECT incarnation FROM catalog_identity WHERE singleton=1`).Scan(&incarnation); err != nil || !validUUID(incarnation) {
+	if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(incarnation AS BLOB))=36 THEN incarnation END FROM catalog_identity WHERE singleton=1`).Scan(&incarnation); err != nil || !validUUID(incarnation) {
 		return nil, errors.Join(ErrInvalidIdentity, err)
 	}
 	if err := lease.Check(ctx, "catalog", ports.SharedLease); err != nil {
@@ -98,6 +98,22 @@ func (s *Store) WithMutation(ctx context.Context, mutation ports.CatalogMutation
 		return nil, err
 	}
 	return &Store{db: s.db, incarnation: s.incarnation, lease: s.lease, mutation: mutation, operationID: operationID}, nil
+}
+
+// WithAuthorizedMutation binds an additional caller-owned authorization check
+// to the transaction while the catalog mutation guard is held. It runs before
+// the SQL mutation and immediately before commit; it must not reenter this
+// catalog pool. A revocation causes rollback, not a partial mutation.
+func (s *Store) WithAuthorizedMutation(ctx context.Context, mutation ports.CatalogMutationLease, operationID string, authorize func(context.Context) error) (*Store, error) {
+	if authorize == nil {
+		return nil, ErrCatalogWriterRequired
+	}
+	bound, err := s.WithMutation(ctx, mutation, operationID)
+	if err != nil {
+		return nil, err
+	}
+	bound.authorize = authorize
+	return bound, nil
 }
 
 func configureCatalogConnection(ctx context.Context, conn *sql.Conn, requireWAL, readOnly bool) error {

@@ -105,7 +105,7 @@ func (s *Store) PublishProvider(ctx context.Context, request PublishProviderRequ
 			}
 			return verify(ctx, captured)
 		},
-		ValidateExtra: func(ctx context.Context, conn *sql.Conn, current model.CaptureManifest) error {
+		ValidateExtra: func(ctx context.Context, conn publicationQueryer, current model.CaptureManifest) error {
 			if err := checkProviderRowBudget(ctx, conn, capture.GenerationID, request.MaxFacts); err != nil {
 				return err
 			}

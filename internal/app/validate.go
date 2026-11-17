@@ -49,6 +49,20 @@ type CapturedValidation struct {
 	Freshness model.Freshness    `json:"freshness"`
 }
 
+// WorkspaceCaptureComparable rejects captured-scope entries whose contents
+// have no comparable bytes. The caller must also verify manifest identity and
+// independently establish policy, membership and dependency authority.
+func WorkspaceCaptureComparable(manifest model.CaptureManifest) bool {
+	for _, file := range manifest.Files {
+		switch file.Status {
+		case "captured", "excluded", "missing":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // ValidateCapturedWorkspace is an internal coordinator for an already
 // authenticated, purpose-bound pack/result token. CurrentScope must read the
 // actual current catalog/group/policy/record/binding epochs. ResolveCapture
@@ -130,6 +144,9 @@ func ValidateCapturedWorkspace(ctx context.Context, input ValidateCapturedInput)
 		manifest := captured.Manifest()
 		if model.VerifyCaptureDigest(manifest, input.MaxManifestBytes) != nil || manifest.WorktreeID != member.WorktreeID || manifest.ProfileID != member.ProfileID || manifest.PolicyDigest != member.PolicyDigest || manifest.SnapshotDigest != member.SnapshotDigest {
 			return CapturedValidation{}, ErrValidationPrecondition
+		}
+		if !WorkspaceCaptureComparable(manifest) {
+			return CapturedValidation{}, ErrFreshnessUnknown
 		}
 		captures[i] = captured
 	}
