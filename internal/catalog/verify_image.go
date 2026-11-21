@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 )
 
 // VerifyReadOnlyImage validates an already authenticated immutable image. The
-// caller owns capture/receipt/path authority and its exclusive lifecycle lease.
+// caller owns capture/receipt/path authority and its lifecycle lease.
 // This function cannot initialize/migrate a schema or create a writable Store.
 func VerifyReadOnlyImage(ctx context.Context, db *sql.DB) (string, error) {
 	if ctx == nil || db == nil || db.Stats().MaxOpenConnections != 1 {
@@ -55,4 +57,24 @@ func VerifyReadOnlyImage(ctx context.Context, db *sql.DB) (string, error) {
 		return "", err
 	}
 	return incarnation, ctx.Err()
+}
+
+// OpenAuthenticatedImage opens a read-only view of an already authenticated
+// checkpoint image. Its owner must verify the physical WAL image and head,
+// supply an immutable pool, and retain the shared lifecycle lease.
+func OpenAuthenticatedImage(ctx context.Context, db *sql.DB, lease ports.LifecycleLease) (*Store, error) {
+	if ctx == nil || lease == nil {
+		return nil, ErrUnrecognizedStore
+	}
+	if err := lease.Check(ctx, "catalog", ports.SharedLease); err != nil {
+		return nil, err
+	}
+	incarnation, err := VerifyReadOnlyImage(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	if err := lease.Check(ctx, "catalog", ports.SharedLease); err != nil {
+		return nil, err
+	}
+	return &Store{db: db, incarnation: incarnation, lease: lease, image: true}, nil
 }

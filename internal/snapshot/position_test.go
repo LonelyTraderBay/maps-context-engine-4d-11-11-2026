@@ -6,12 +6,12 @@ import (
 )
 
 func TestPositionRoundTripAcrossEncodingsAndLineEndings(t *testing.T) {
-	file, err := NewFile("unicode.go", []byte("Aລ😀\r\nB\rC\n"), 128)
+	file, err := NewFile("unicode.go", []byte("Aລ😀\r\nB\rC\nTên\r\n"), 128)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, encoding := range []PositionEncoding{UTF8, UTF16, UTF32} {
-		for _, offset := range []int{0, 1, 4, 8, 10, 11, 12, 13, 14} {
+		for _, offset := range []int{0, 1, 4, 8, 10, 11, 12, 13, 14, 15, 17, 18, 20} {
 			position, err := file.PositionAt(offset, encoding)
 			if err != nil {
 				t.Fatalf("%s byte %d: %v", encoding, offset, err)

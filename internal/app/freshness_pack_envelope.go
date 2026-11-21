@@ -86,13 +86,9 @@ func RestoreFreshnessEnvelope(ctx context.Context, raw []byte, in FreshnessPackR
 	if err != nil || in.Pack.Codec == nil {
 		return nil, ErrValidationInput
 	}
-	retention, err := in.Pack.Codec.InspectPackArchive(envelope.Archive, in.Pack.MaxArchiveBytes)
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(retention.Metadata, envelope.Request) {
-		return nil, ErrValidationInput
-	}
+	// RestorePagedPack checks this copy against the authenticated metadata
+	// while decoding the archive for use.
+	in.Pack.ExpectedMetadata = envelope.Request
 	in.Archive, in.RequestJSON = envelope.Archive, envelope.Request
 	return RestoreFreshnessPack(ctx, in)
 }

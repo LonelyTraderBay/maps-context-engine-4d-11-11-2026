@@ -6,6 +6,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/app"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/contextpack"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
 )
 
 // WithCLIPackRetention returns a separate backend configured to use an
@@ -42,11 +43,11 @@ func (b *CoreBackend) cliPackStoreWithinLimits() bool {
 	return ok && limits.WithinRetentionLimits(b.Reader.WorktreeID, b.limits.QueryResultCacheBytes, b.limits.MaxRetainedQueryResults)
 }
 
-func (b *CoreBackend) cliSymbolRetention(principal app.CorePrincipal) (*app.SymbolPackRetention, error) {
+func (b *CoreBackend) cliSymbolRetention(principal app.CorePrincipal, captured *index.PublishedGraph) (*app.SymbolPackRetention, error) {
 	if !b.cliPackStoreWithinLimits() {
 		return nil, app.ErrCoreUnsupported
 	}
-	factory, err := b.SymbolRestoreFactory(principal)
+	factory, err := b.symbolRestoreFactory(principal, captured, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +89,7 @@ func (b *CoreBackend) loadCLIPack(ctx context.Context, principal app.CorePrincip
 	}
 	switch kind {
 	case "symbol":
-		retention, err := b.cliSymbolRetention(principal)
+		retention, err := b.cliSymbolRetention(principal, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -155,6 +156,9 @@ func (b *CoreBackend) expandCLIPack(ctx context.Context, principal app.CorePrinc
 	if err := handle.Recheck(ctx); err != nil {
 		return nil, coreStoreError(err)
 	}
+	if symbol, ok := handle.(*app.RetainedSymbolPack); ok {
+		app.RememberSymbolPackDelivery(ctx, symbol)
+	}
 	return page.Blocks, nil
 }
 
@@ -189,6 +193,9 @@ func (b *CoreBackend) validateCLIPack(ctx context.Context, principal app.CorePri
 	}
 	if err := handle.Recheck(ctx); err != nil {
 		return nil, coreStoreError(err)
+	}
+	if symbol, ok := handle.(*app.RetainedSymbolPack); ok {
+		app.RememberSymbolPackDelivery(ctx, symbol)
 	}
 	response := baseResponse(options, observation.Vector)
 	response.Freshness, response.Data = validation.Freshness, validation.Data

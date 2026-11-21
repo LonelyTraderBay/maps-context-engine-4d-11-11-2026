@@ -31,6 +31,9 @@ func run(ctx context.Context, args []string) int {
 	if handled, code := sqlite.RunProtectedWorker(ctx, args, os.Stdout); handled {
 		return code
 	}
+	if handled, code := runPlatformProfile(ctx, args); handled {
+		return code
+	}
 	if len(args) < 1 {
 		return 2
 	}

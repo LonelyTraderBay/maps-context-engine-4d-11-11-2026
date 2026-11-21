@@ -186,7 +186,7 @@ def exercise(root, command, setup, worktree, profile, request, fixture):
         # The caller alone adds/restores fake secret-bearing inputs.
         marker = 'LOCALTESTONLY_' + 'Z'*32
         for name, body in fixture['secret_files'].items():
-            path = root/'target'/name; path.write_text(body.replace('{MARKER}', marker)); os.chown(path, 1001, 1001)
+            path = root/'target'/name; path.write_text(body.replace('{MARKER}', marker));path.chmod(0o644);os.chown(path, 1001, 1001)
         mutated = tree(root/'target')
         result = command('/mce4d', ['index', '--worktree-id', worktree, '--profile-id', profile], extra=poison)
         assert result.returncode == 0 and marker not in result.stdout+result.stderr
@@ -244,7 +244,8 @@ def exercise(root, command, setup, worktree, profile, request, fixture):
         git_config.write_bytes(original_config); unchanged()
         print('C026_UNTRUSTED_DOCUMENT_AND_GIT_CONFIG_NO_EXEC_C046_REPLACED_GOPLS_DENIED_PASS', flush=True)
 
-        outside = root/'outside'; outside.mkdir(); (outside/'private.go').write_bytes(b'package private\n// OUTSIDE_CANARY_ONLY\n')
+        outside = root/'outside';outside.mkdir();outside.chmod(0o755)
+        (outside/'private.go').write_bytes(b'package private\n// OUTSIDE_CANARY_ONLY\n');(outside/'private.go').chmod(0o644)
         link = root/'target/escape.go'; link.symlink_to('/outside/private.go')
         mutated = tree(root/'target')
         escape = command('/mce4d', ['index', '--worktree-id', worktree, '--profile-id', profile])

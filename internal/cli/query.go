@@ -8,6 +8,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/contracts"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/app"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 )
 
 var ErrBindingDenied = errors.New("bound service access denied")
@@ -80,8 +81,17 @@ func executeQuery(ctx context.Context, action string, raw []byte, cpus int, conf
 		if ctx.Err() != nil {
 			return contextFailure(fail, ctx.Err())
 		}
+		if errors.Is(err, app.ErrCoreStoreRecovery) {
+			return fail("STORE_RECOVERY_REQUIRED", "A scoped store requires explicit recovery.", "recover_store", false, 3)
+		}
+		if errors.Is(err, runtime.ErrStoreMaintenance) {
+			return fail("STORE_MAINTENANCE", "The scoped store is busy with maintenance.", "retry_bounded", true, 4)
+		}
 		if errors.Is(err, ErrBindingDenied) || errors.Is(err, os.ErrPermission) || errors.Is(err, app.ErrCoreAuthentication) {
 			return fail("ACCESS_DENIED", "The requested binding is not authorized.", "review_policy", false, 3)
+		}
+		if errors.Is(err, app.ErrCoreLimit) {
+			return fail("RESOURCE_LIMIT", "The bound service exceeds its configured capacity.", "retry_bounded", true, 4)
 		}
 		return fail("INTERNAL_ERROR", "The bound service is unavailable.", "none", false, 5)
 	}

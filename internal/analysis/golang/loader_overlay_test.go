@@ -14,10 +14,10 @@ import (
 func overlayFixture(t *testing.T, source string) (*CapturedOverlay, string) {
 	t.Helper()
 	input := loaderPreflightFixture(t, map[string]string{"go.mod": "module example.test/fixture\n", "p.go": source})
-	root := filepath.Join(string(filepath.Separator), "synthetic", "owned-fixture")
+	root := filepath.Join(t.TempDir(), "owned-fixture")
 	request := CapturedOverlayInput{Snapshot: input.Snapshot, Profile: input.Profile, SyntheticRoot: root, PolicyEpoch: input.PolicyEpoch, Scanner: input.Scanner, AuthorizeScope: input.AuthorizeScope, AuthorizePath: input.AuthorizePath, MaxManifestBytes: input.MaxManifestBytes, MaxFileBytes: input.MaxFileBytes, MaxOverlayBytes: 1024 * 1024}
 	overlay, err := NewCapturedOverlay(preflightContext(t), request)
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		if !errors.Is(err, ErrLoaderUnsupported) {
 			t.Fatalf("unverified platform accepted: %v", err)
 		}
@@ -113,9 +113,9 @@ func TestCapturedOverlayConcurrentParsing(t *testing.T) {
 
 func TestCapturedOverlayRejectsBudgetAndProfileMismatch(t *testing.T) {
 	input := loaderPreflightFixture(t, map[string]string{"go.mod": "module example.test/fixture\n", "p.go": "package fixture\n"})
-	request := CapturedOverlayInput{Snapshot: input.Snapshot, Profile: input.Profile, SyntheticRoot: filepath.Join(string(filepath.Separator), "synthetic"), PolicyEpoch: input.PolicyEpoch, Scanner: input.Scanner, AuthorizeScope: input.AuthorizeScope, AuthorizePath: input.AuthorizePath, MaxManifestBytes: input.MaxManifestBytes, MaxFileBytes: input.MaxFileBytes, MaxOverlayBytes: 1}
+	request := CapturedOverlayInput{Snapshot: input.Snapshot, Profile: input.Profile, SyntheticRoot: t.TempDir(), PolicyEpoch: input.PolicyEpoch, Scanner: input.Scanner, AuthorizeScope: input.AuthorizeScope, AuthorizePath: input.AuthorizePath, MaxManifestBytes: input.MaxManifestBytes, MaxFileBytes: input.MaxFileBytes, MaxOverlayBytes: 1}
 	ctx := preflightContext(t)
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		if _, err := NewCapturedOverlay(ctx, request); !errors.Is(err, ErrLoaderUnsupported) {
 			t.Fatal(err)
 		}

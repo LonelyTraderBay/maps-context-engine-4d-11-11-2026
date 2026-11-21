@@ -5,6 +5,7 @@ import (
 	"errors"
 	"go/ast"
 	"go/token"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -48,11 +49,12 @@ func TestTypedPartialAndCancellationReturnNoFacts(t *testing.T) {
 }
 
 func TestTypedScopeLookupBoundsAndNesting(t *testing.T) {
-	collector := typedCollector{ctx: context.Background(), fileScopes: map[string][]typedScope{"p.go": {
-		{scope: Scope{ID: "package", Kind: "package"}, depth: 0},
-		{scope: Scope{ID: "function", Kind: "function", Path: "p.go", StartByte: 10, EndByte: 50}, depth: 1},
-		{scope: Scope{ID: "nested", Kind: "block", Path: "p.go", StartByte: 20, EndByte: 30}, depth: 2},
-	}}}
+	var scopes typedFileScopes
+	scopes.add(Scope{ID: "package", Kind: "package"}, 0)
+	scopes.add(Scope{ID: "function", Kind: "function", StartByte: 10, EndByte: 50}, 1)
+	scopes.add(Scope{ID: "nested", Kind: "block", StartByte: 20, EndByte: 30}, 2)
+	scopes.index()
+	collector := typedCollector{ctx: context.Background(), fileScopes: map[string]typedFileScopes{"p.go": scopes}}
 	if scope, err := collector.scopeFor(typedSite{path: "p.go", start: 22, end: 23}); err != nil || scope != "nested" {
 		t.Fatalf("nested scope: %q %v", scope, err)
 	}
@@ -65,5 +67,36 @@ func TestTypedScopeLookupBoundsAndNesting(t *testing.T) {
 	collector.scopeChecks = 2000000
 	if _, err := collector.scopeFor(typedSite{path: "p.go", start: 22, end: 23}); !errors.Is(err, ErrSyntaxLimit) {
 		t.Fatalf("scope lookup budget ignored: %v", err)
+	}
+	collector.scopeChecks = 0
+	scopes.add(Scope{ID: "overlap", Kind: "block", StartByte: 19, EndByte: 30}, 2)
+	scopes.index()
+	collector.fileScopes["p.go"] = scopes
+	if _, err := collector.scopeFor(typedSite{path: "p.go", start: 22, end: 23}); !errors.Is(err, ErrInputMismatch) {
+		t.Fatalf("ambiguous scope accepted: %v", err)
+	}
+}
+
+func TestTypedScopeLookupManySiblings(t *testing.T) {
+	const count = 1025
+	var scopes typedFileScopes
+	scopes.add(Scope{ID: "package", Kind: "package"}, 0)
+	for i := count - 1; i >= 0; i-- {
+		start := int64(i * 20)
+		id := strconv.Itoa(i)
+		scopes.add(Scope{ID: "func" + id, StartByte: start, EndByte: start + 20}, 1)
+		scopes.add(Scope{ID: "body" + id, StartByte: start + 10, EndByte: start + 20}, 2)
+	}
+	scopes.index()
+	collector := typedCollector{ctx: context.Background(), fileScopes: map[string]typedFileScopes{"p.go": scopes}}
+	for i := 0; i < count; i++ {
+		start := int64(i*20 + 11)
+		got, err := collector.scopeFor(typedSite{path: "p.go", start: start, end: start + 1})
+		if want := "body" + strconv.Itoa(i); err != nil || got != want {
+			t.Fatalf("scope %d: wanted %q, got %q: %v", i, want, got, err)
+		}
+	}
+	if collector.scopeChecks != 2*count {
+		t.Fatalf("lookups inspected unrelated scopes: %d", collector.scopeChecks)
 	}
 }

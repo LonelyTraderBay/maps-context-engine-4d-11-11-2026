@@ -45,6 +45,9 @@ func openNativeScope(ctx context.Context, installation, selected, worktree, prof
 	if err != nil {
 		return nil, err
 	}
+	if err := n.state.CheckWorktreeMaintenance(ctx, worktree); err != nil {
+		return nil, err
+	}
 	n.config, err = protectedConfig(ctx, n.state, selected, cpus)
 	if err != nil {
 		return nil, err

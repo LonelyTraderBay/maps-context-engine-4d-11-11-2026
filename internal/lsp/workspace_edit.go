@@ -166,6 +166,10 @@ func capturedDocuments(ctx context.Context, root string, documents []CapturedDoc
 	if ctx == nil || !filepath.IsAbs(root) || filepath.Clean(root) != root || !utf8.ValidString(root) || len(documents) == 0 || len(documents) > 10000 || maxBytes < 1 || maxBytes > int(resultHardBytes) {
 		return nil, ErrWorkspaceEdit
 	}
+	volume := filepath.VolumeName(root)
+	if volume != "" && (len(volume) != 2 || volume[1] != ':') {
+		return nil, ErrWorkspaceEdit
+	}
 	for _, r := range root {
 		if unicode.IsControl(r) {
 			return nil, ErrWorkspaceEdit
@@ -190,7 +194,11 @@ func capturedDocuments(ctx context.Context, root string, documents []CapturedDoc
 			version := *doc.Version
 			doc.Version = &version
 		}
-		uri := (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(root, filepath.FromSlash(doc.File.Path())))}).String()
+		filePath := filepath.ToSlash(filepath.Join(root, filepath.FromSlash(doc.File.Path())))
+		if volume != "" {
+			filePath = "/" + filePath
+		}
+		uri := (&url.URL{Scheme: "file", Path: filePath}).String()
 		if _, exists := docs[uri]; exists {
 			return nil, ErrWorkspaceEdit
 		}

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"os"
 	"path"
+	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/policy"
@@ -39,7 +41,8 @@ func CaptureDirectoryIgnoreSources(ctx context.Context, root *paths.Root, walk C
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if path.Base(candidate.Path) != ".gitignore" {
+		leaf := path.Base(candidate.Path)
+		if leaf != ".gitignore" && !(runtime.GOOS == "windows" && strings.EqualFold(leaf, ".gitignore")) {
 			continue
 		}
 		if seen[candidate.Path] {

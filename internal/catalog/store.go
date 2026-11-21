@@ -21,6 +21,7 @@ var (
 // and must authorize each administrative operation before invoking it.
 type Store struct {
 	db          *sql.DB
+	image       bool
 	incarnation string
 	lease       ports.LifecycleLease
 	mutation    ports.CatalogMutationLease
@@ -57,7 +58,7 @@ func (s *Store) transaction(ctx context.Context, writing bool, fn func(*sql.Tx) 
 		if s.db.Stats().MaxOpenConnections != 1 {
 			return ErrUnrecognizedStore
 		}
-		if writing && s.mutation == nil {
+		if writing && (s.image || s.mutation == nil) {
 			return ErrCatalogWriterRequired
 		}
 		if writing {
@@ -94,7 +95,7 @@ func (s *Store) transaction(ctx context.Context, writing bool, fn func(*sql.Tx) 
 		if err = conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
 			return errors.Join(ErrUnrecognizedStore, err)
 		}
-	} else if err = configureCatalogConnection(ctx, conn, true, !writing); err != nil {
+	} else if err = configureCatalogConnection(ctx, conn, !s.image, !writing); err != nil {
 		return err
 	}
 	configured = true

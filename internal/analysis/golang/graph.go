@@ -38,6 +38,7 @@ func AnalyzeCapturedGraph(ctx context.Context, input GraphInput) (GraphResult, e
 		return GraphResult{}, err
 	}
 	input.Typed.OtherPackages = append([]TypedPackageIdentity(nil), input.Typed.OtherPackages...)
+	input.Typed.OtherPackageCandidates = append([]TypedPackageIdentity(nil), input.Typed.OtherPackageCandidates...)
 	if input.Typed.MaxOutputBytes > input.MaxOutputBytes {
 		input.Typed.MaxOutputBytes = input.MaxOutputBytes
 	}

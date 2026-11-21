@@ -15,6 +15,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/policy"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/search"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/snapshot"
+	sqliteowner "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/records"
 )
@@ -346,6 +347,8 @@ func encodeResponse(response model.Response) ([][]byte, error) {
 
 func coreStoreError(err error) error {
 	switch {
+	case errors.Is(err, sqliteowner.ErrStoreRecoveryRequired):
+		return app.ErrCoreStoreRecovery
 	case err == nil:
 		return nil
 	case errors.Is(err, ErrScopeChanged), errors.Is(err, model.ErrScopeChanged):
@@ -358,6 +361,8 @@ func coreStoreError(err error) error {
 		return app.ErrCoreInput
 	case errors.Is(err, overview.ErrLimit):
 		return app.ErrCoreLimit
+	case errors.Is(err, ErrScopeSnapshotExpired):
+		return app.ErrCoreSnapshotExpired
 	case errors.Is(err, index.ErrSnapshotUnavailable):
 		return app.ErrCoreIndexMissing
 	case errors.Is(err, packstore.ErrMissing):

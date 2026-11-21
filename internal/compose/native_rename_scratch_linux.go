@@ -86,7 +86,7 @@ type nativeRenameScratch struct {
 	closed               bool
 }
 
-func newNativeRenameScratch(ctx context.Context, n *nativeScope, captured *snapshot.Snapshot, goRootPath string, serverRoot *paths.Root) (_ *nativeRenameScratch, resultErr error) {
+func newNativeRenameScratch(ctx context.Context, n *nativeScope, captured *snapshot.Snapshot, goRootPath string, additionalProtected ...*paths.Root) (_ *nativeRenameScratch, resultErr error) {
 	root, _, protected, err := n.stores.CacheResources(ctx)
 	if err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ func newNativeRenameScratch(ctx context.Context, n *nativeScope, captured *snaps
 	if err != nil {
 		return nil, err
 	}
-	s.protected = append(append([]*paths.Root{}, protected...), s.goRoot, serverRoot)
+	s.protected = append(append(append([]*paths.Root{}, protected...), s.goRoot), additionalProtected...)
 	if err := runtime.CheckCleanupRoot(s.root, s.protected); err != nil {
 		return nil, err
 	}

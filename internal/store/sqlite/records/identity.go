@@ -43,6 +43,7 @@ type StateAuthorizer func(context.Context, Identity) error
 
 type Store struct {
 	db       *sql.DB
+	image    bool
 	lease    ports.LifecycleLease
 	identity Identity
 }
@@ -158,13 +159,23 @@ func InitializeWithWriter(ctx context.Context, db *sql.DB, worktree string, leas
 // Open verifies a recognized durable store under a shared lifecycle lease. It
 // takes no ownership of the pool or lease and never initializes a missing DB.
 func Open(ctx context.Context, db *sql.DB, worktree string, lease ports.LifecycleLease) (*Store, error) {
+	return open(ctx, db, worktree, lease, false)
+}
+
+// OpenAuthenticatedImage borrows a receipt-verified immutable SQLite pool.
+// The owner retains the lifecycle lease until the pool closes.
+func OpenAuthenticatedImage(ctx context.Context, db *sql.DB, worktree string, lease ports.LifecycleLease) (*Store, error) {
+	return open(ctx, db, worktree, lease, true)
+}
+
+func open(ctx context.Context, db *sql.DB, worktree string, lease ports.LifecycleLease, image bool) (*Store, error) {
 	if ctx == nil || db == nil || db.Stats().MaxOpenConnections != 1 || lease == nil || !uuid(worktree) {
 		return nil, ErrInvalidStore
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		return nil, ErrInvalidStore
 	}
-	store := &Store{db: db, lease: lease, identity: Identity{WorktreeID: worktree}}
+	store := &Store{db: db, lease: lease, identity: Identity{WorktreeID: worktree}, image: image}
 	identity, _, err := store.readIdentity(ctx)
 	if err != nil {
 		return nil, err
@@ -187,7 +198,7 @@ func (s *Store) readIdentity(ctx context.Context) (identity Identity, epoch int6
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	if err := wal(ctx, conn, false); err != nil {
+	if err := s.requireReadJournal(ctx, conn); err != nil {
 		return Identity{}, 0, err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

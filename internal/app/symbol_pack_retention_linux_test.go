@@ -107,6 +107,15 @@ func TestSymbolRetentionRefusesDeliveryAfterEviction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx := context.WithValue(f.ctx, symbolPackDeliveryKey{}, new(symbolPackDelivery))
+	RememberSymbolPackDelivery(ctx, handle)
+	principal := f.input.Binding.PrincipalDigest
+	if SymbolPackForDelivery(ctx, handle.Token(), principal) != handle ||
+		SymbolPackForDelivery(f.ctx, handle.Token(), principal) != nil ||
+		SymbolPackForDelivery(ctx, "another-token", principal) != nil ||
+		SymbolPackForDelivery(ctx, handle.Token(), "another-principal") != nil {
+		t.Fatal("retained delivery handle escaped its request binding")
+	}
 	claims, err := f.input.Codec.VerifyPrincipal(f.ctx, handle.Token(), "pack", f.input.Binding.PrincipalDigest, f.input.Guard)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +132,9 @@ func TestSymbolRetentionRefusesDeliveryAfterEviction(t *testing.T) {
 	page, err := handle.First(f.ctx, options)
 	if removeErr != nil || !errors.Is(err, packstore.ErrMissing) || len(page.Blocks) != 0 {
 		t.Fatalf("evicted result delivered: remove=%v err=%v", removeErr, err)
+	}
+	if err := SymbolPackForDelivery(ctx, handle.Token(), principal).Recheck(ctx); !errors.Is(err, packstore.ErrMissing) {
+		t.Fatalf("retained delivery handle ignored eviction: %v", err)
 	}
 }
 

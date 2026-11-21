@@ -13,7 +13,7 @@ import (
 // The caller must independently authorize catalog scope and postcheck before
 // exposing the observation; this is not an atomic cross-store snapshot.
 func (s *Store) ActiveGenerationAbsent(ctx context.Context, profileID string, authorize func(context.Context, Identity, string) error) (absent bool, resultErr error) {
-	if s == nil || ctx == nil || s.lease == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) || !validHash(profileID) || authorize == nil {
+	if ctx == nil || !s.readable() || !validHash(profileID) || authorize == nil {
 		return false, ErrInvalidStore
 	}
 	if _, ok := ctx.Deadline(); !ok {
@@ -32,7 +32,7 @@ func (s *Store) ActiveGenerationAbsent(ctx context.Context, profileID string, au
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	if err := requireWAL(ctx, conn, false); err != nil {
+	if err := requireReadJournal(ctx, conn, s.image); err != nil {
 		return false, err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

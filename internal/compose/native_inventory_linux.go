@@ -191,23 +191,21 @@ func openNativeInventory(ctx context.Context, n *nativeScope, create bool) (_ *n
 	return i, nil
 }
 
-func nativeTextPath(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".go", ".mod", ".sum", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".xml", ".html", ".css", ".js", ".jsx", ".ts", ".tsx", ".sql", ".sh":
-		return true
-	}
-	switch strings.ToLower(filepath.Base(name)) {
-	case "readme", "license", "makefile", "dockerfile", ".gitignore", ".gitattributes", ".editorconfig":
-		return true
-	}
-	return false
-}
-
 func (i *nativeInventory) Observe(ctx context.Context) (inventory.FileMap, error) {
+	var result inventory.FileMap
+	var err error
 	if i.linked != nil {
-		return inventory.InventoryLinked(ctx, i.request, i.linked, i.scope.common)
+		result, err = inventory.InventoryLinked(ctx, i.request, i.linked, i.scope.common)
+	} else {
+		result, err = inventory.InventoryLocal(ctx, i.request)
 	}
-	return inventory.InventoryLocal(ctx, i.request)
+	// A truncated inventory cannot be published. Keep the specific cause for
+	// the owner while surfacing a controlled resource refusal at CLI/MCP.
+	if errors.Is(err, inventory.ErrWalkBudget) || errors.Is(err, inventory.ErrIndexBudget) ||
+		errors.Is(err, inventory.ErrIgnoreBudget) || errors.Is(err, runtime.ErrGitIndexLimit) {
+		return inventory.FileMap{}, errors.Join(app.ErrCoreLimit, err)
+	}
+	return result, err
 }
 
 func (i *nativeInventory) Close() error {

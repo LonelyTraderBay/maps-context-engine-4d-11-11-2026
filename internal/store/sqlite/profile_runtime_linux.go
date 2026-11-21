@@ -77,7 +77,10 @@ func OpenProtectedState(ctx context.Context, root string) (_ *ProtectedState, re
 	if err != nil || digest != p.manifest.BootstrapExecutableSHA256 {
 		return nil, ErrProfileDenied
 	}
-	return o, p.Check(ctx)
+	if err := p.Check(ctx); err != nil {
+		return nil, err
+	}
+	return o, nil
 }
 
 func (o *ProtectedState) Check(ctx context.Context) error {
@@ -85,6 +88,28 @@ func (o *ProtectedState) Check(ctx context.Context) error {
 		return ErrProfileDenied
 	}
 	return o.profile.Check(ctx)
+}
+
+// An early metadata fence, before catalog/config pools are opened for a bound
+// command. Absence of an installed slot grants nothing; ordinary catalog and
+// worktree authorization must still run. The actual store rechecks the gate
+// throughout its lifetime after admission.
+func (o *ProtectedState) CheckWorktreeMaintenance(ctx context.Context, worktree string) (resultErr error) {
+	if err := o.Check(ctx); err != nil {
+		return err
+	}
+	if _, err := profileUUIDBytes(worktree); err != nil {
+		return err
+	}
+	control, err := o.profile.root.OpenDirectory("control/worktrees/" + worktree)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, control.Close()) }()
+	return checkMaintenanceGate(ctx, control, o.profile.manifest.ProfileID, worktree, "")
 }
 func (o *ProtectedState) InstallationID() string { return o.profile.manifest.ProfileID }
 func (o *ProtectedState) ExecutableDigest() string {

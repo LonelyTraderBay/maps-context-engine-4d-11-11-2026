@@ -25,6 +25,15 @@ func RunProtectedWorker(ctx context.Context, args []string, output io.Writer) (b
 		return false, 0
 	}
 	role := args[0]
+	if strings.HasPrefix(role, restoreWorkerRole) {
+		if len(args) != 2 || output == nil || HardenProtectedProfileWorker() != nil {
+			return true, 3
+		}
+		if serveRestoreWorker(ctx, args[1], role, os.Stdin, output) != nil {
+			return true, 5
+		}
+		return true, 0
+	}
 	if role != "__capture-server-v1" && role != "__bootstrap-profile-v1" && role != "__check-profile-v1" && role != "__capture-catalog-v1" && !strings.HasPrefix(role, "__bootstrap-worktree-v1:") && !strings.HasPrefix(role, "__capture-store-v1:") {
 		return false, 0
 	}

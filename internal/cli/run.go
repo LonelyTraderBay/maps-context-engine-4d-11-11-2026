@@ -20,16 +20,21 @@ import (
 // Dependencies are owned by the caller. An absent owner leaves the
 // corresponding capability unavailable; no paths or principals are inferred.
 type Dependencies struct {
-	CPUs             int
-	OpenConfig       func(context.Context, string) (ConfigOwner, func() error, error)
-	OpenCore         OpenCore
-	OpenRetainedCore OpenCore
-	OpenAdmin        OpenAdmin
-	ProbeConfig      func(context.Context, string) error
-	SQLiteProbe      func(context.Context) (string, bool, error)
-	LookupExecutable func(string) (string, error)
-	AddRepo          func(context.Context, string, string) (RegisteredRepo, error)
-	Index            RunIndex
+	CPUs                int
+	OpenConfig          func(context.Context, string) (ConfigOwner, func() error, error)
+	OpenCore            OpenCore
+	OpenRetainedCore    OpenCore
+	OpenAdmin           OpenAdmin
+	ProbeConfig         func(context.Context, string) error
+	SQLiteProbe         func(context.Context) (string, bool, error)
+	LookupExecutable    func(string) (string, error)
+	AddRepo             func(context.Context, string, string) (RegisteredRepo, error)
+	Index               RunIndex
+	LocalInventory      bool
+	StoreGC             RunStoreGC
+	StoreBackup         RunStoreBackup
+	StoreRecoveryReport RunStoreRecoveryReport
+	StoreRestore        RunStoreRestore
 }
 
 const help = `mce4d (development build)
@@ -73,8 +78,27 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 			text = strings.Replace(text, "Query context|expand|validate|rename-preview are recognized but unavailable.", "Query context|expand|validate|rename-preview require their authorized retained-result owner.\nRename preview additionally requires an approved provider and verified typed inputs; it never applies edits.", 1)
 		}
 		if deps.Index != nil {
-			text = strings.Replace(text, "  mce4d repo add --root <approved-absolute-path>\n", "  mce4d repo add --root <approved-absolute-path>\n  mce4d index --worktree-id <id> --profile-id <id> [--full]\n  mce4d watch --worktree-id <id> --profile-id <id>\n", 1)
-			text += "Index/watch run in the foreground and require a policy-pinned Git executable.\nProgress goes to stderr; source is never executed or changed.\n"
+			repoLine := "  mce4d repo add --root <approved-absolute-path>\n"
+			commands := "  mce4d index --worktree-id <id> --profile-id <id> [--full]\n  mce4d watch --worktree-id <id> --profile-id <id>\n"
+			if deps.LocalInventory {
+				text += "Index/watch capture approved files in a supported local SHA-1 repository. Watch runs in the foreground.\n"
+			} else {
+				text += "Index/watch run in the foreground and require a policy-pinned Git executable.\n"
+			}
+			text = strings.Replace(text, repoLine, repoLine+commands, 1)
+			text += "Index progress goes to stderr. Source is read-only.\n"
+		}
+		if deps.StoreGC != nil {
+			text += "  mce4d store gc --worktree-id <id> --profile-id <id> [--report-only | --apply --confirm]\nGC defaults to a read-only report; each applied generation is a separate transaction.\n"
+		}
+		if deps.StoreBackup != nil {
+			text += "  mce4d store backup --target catalog --output <approved-new-private-directory>\n  mce4d store backup --target worktree --worktree-id <id> --output <approved-new-private-directory>\nBackup writes fresh artifacts below the selected store's private backups directory.\n"
+		}
+		if deps.StoreRecoveryReport != nil {
+			text += "  mce4d store recover --target catalog [--report-only]\n  mce4d store recover --target worktree --worktree-id <id> [--report-only]\nRecovery defaults to a metadata report; it does not verify or change database files.\n"
+		}
+		if deps.StoreRestore != nil {
+			text += "  mce4d store restore --manifest <approved-local-file> --confirm --wait-ms <1..30000>\n  mce4d store recover --target catalog|worktree [--worktree-id <id>] --apply --confirm --wait-ms <1..30000>\nRestore and recovery apply require the installed profile administrator.\n"
 		}
 		if n, err := io.WriteString(stdout, text); err != nil || n != len(text) {
 			return diagnostic("output unavailable", 5)
@@ -117,6 +141,15 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 	if len(args) == 2 && args[0] == "doctor" && args[1] == "--json" {
 		return writeJSON(stdout, stderr, doctor(ctx, deps, configPath))
 	}
+	if len(args) > 0 && args[0] == "store" {
+		if len(args) > 1 && (args[1] == "restore" || args[1] == "recover" && containsFlag(args[2:], "--apply")) {
+			return runStoreRestore(ctx, args, configPath, stdout, stderr, deps.StoreRestore)
+		}
+		if len(args) > 1 && args[1] == "recover" {
+			return runStoreRecoveryReport(ctx, args, configPath, stdout, stderr, deps.StoreRecoveryReport)
+		}
+		return runStore(ctx, args, configPath, stdout, stderr, deps.StoreGC, deps.StoreBackup)
+	}
 	if len(args) == 4 && args[0] == "repo" && args[1] == "add" && args[2] == "--root" {
 		if !filepath.IsAbs(args[3]) || filepath.Clean(args[3]) != args[3] {
 			return diagnostic("invalid repository root", 2)
@@ -128,6 +161,9 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		if err != nil {
 			if ctx.Err() != nil {
 				return diagnostic("registration cancelled", 4)
+			}
+			if errors.Is(err, app.ErrCoreStoreRecovery) {
+				return diagnostic("STORE_RECOVERY_REQUIRED; inspect store recovery before retrying registration", 3)
 			}
 			return diagnostic("registration unavailable; inspect state before retrying", 3)
 		}
@@ -155,6 +191,15 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 			}
 			if errors.Is(err, ErrBindingDenied) {
 				return diagnostic("authorized bound service unavailable", 3)
+			}
+			if errors.Is(err, app.ErrCoreStoreRecovery) {
+				return diagnostic("STORE_RECOVERY_REQUIRED; use explicit store recovery", 3)
+			}
+			if errors.Is(err, fsruntime.ErrStoreMaintenance) {
+				return diagnostic("STORE_MAINTENANCE", 4)
+			}
+			if errors.Is(err, app.ErrCoreLimit) {
+				return diagnostic("RESOURCE_LIMIT; bound service exceeds configured capacity", 4)
 			}
 			return diagnostic("bound service unavailable", 5)
 		}

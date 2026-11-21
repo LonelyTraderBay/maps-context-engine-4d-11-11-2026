@@ -53,7 +53,7 @@ func (s *Store) ReadPublishedFile(ctx context.Context, request PublishedFileRequ
 // readPublishedFile optionally reads additional typed data before releasing
 // the same read transaction; only package-owned code may supply the callback.
 func (s *Store) readPublishedFile(ctx context.Context, request PublishedFileRequest, readFacts func(context.Context, *sql.Tx, PublishedFile) error) (output PublishedFile, resultErr error) {
-	if s == nil || ctx == nil || s.lease == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) ||
+	if ctx == nil || !s.readable() ||
 		!validHash(request.ProfileID) || request.GenerationID != "" && !validUUID(request.GenerationID) ||
 		request.AuthorizeGeneration == nil || request.AuthorizePath == nil || request.Scanner == nil ||
 		request.MaxManifestBytes < 1 || request.MaxManifestBytes > 64*1024*1024 || request.MaxFileBytes < 1 || request.MaxFileBytes > 64*1024*1024 {
@@ -81,7 +81,7 @@ func (s *Store) readPublishedFile(ctx context.Context, request PublishedFileRequ
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	if err := requireWAL(ctx, conn, false); err != nil {
+	if err := requireReadJournal(ctx, conn, s.image); err != nil {
 		return PublishedFile{}, err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

@@ -28,7 +28,7 @@ type GenerationObservation struct {
 // caller must authorize the scope before invoking it and recheck catalog and
 // records independently before returning any result.
 func (s *Store) ReadGeneration(ctx context.Context, profileID, generationID string, authorize GenerationAuthorizer, maxManifestBytes int) (output GenerationObservation, resultErr error) {
-	if s == nil || ctx == nil || s.lease == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) || !validHash(profileID) || generationID != "" && !validUUID(generationID) || authorize == nil || maxManifestBytes < 1 || maxManifestBytes > 64*1024*1024 {
+	if ctx == nil || !s.readable() || !validHash(profileID) || generationID != "" && !validUUID(generationID) || authorize == nil || maxManifestBytes < 1 || maxManifestBytes > 64*1024*1024 {
 		return GenerationObservation{}, ErrInvalidStore
 	}
 	if _, ok := ctx.Deadline(); !ok {
@@ -47,7 +47,7 @@ func (s *Store) ReadGeneration(ctx context.Context, profileID, generationID stri
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	if err := requireWAL(ctx, conn, false); err != nil {
+	if err := requireReadJournal(ctx, conn, s.image); err != nil {
 		return GenerationObservation{}, err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

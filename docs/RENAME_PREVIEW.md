@@ -70,6 +70,19 @@ Nó không đổi các digest recipe của wire. Sau lần hash đầy đủ, ow
 mọi inode/change stamp, kể cả membership của directory; proof dựa trên quyền
 root quản lý, không bảo vệ trước administrator/kernel rollback độc hại.
 
+## Chuẩn bị native Windows
+
+Dùng protected profile NTFS đã kích hoạt, với vai trò engine, client và LSP
+AppContainer riêng. Phê duyệt đúng Go/gopls và kích hoạt profile theo
+[hướng dẫn Windows của state-profile](../tools/state_profile/README.md#windows-profile-preparation).
+CLI và MCP dùng cùng worktree UUID và profile digest. Bằng chứng S21 E828–E829
+bao gồm rename, xác nhận token và vô hiệu token sau worktree restore qua
+runtime Windows đóng gói và Codex đã cài, trên module giả cục bộ.
+Phản hồi `FRESHNESS_UNKNOWN` khi hết hạn xác nhận token có nghĩa là chưa
+đủ bằng chứng để dùng kết quả cho edit. Thời hạn truy vấn mặc định là 10
+giây. Fixture T040 cũng kiểm cấu hình khởi động `runtime.json` riêng của
+controller với thời hạn 25 giây sau khi các lượt mặc định chạm giới hạn.
+
 ## Thu thập và kiểm tra kết quả
 
 1. Chọn worktree/profile rõ ràng, đọc status và locate để lấy đúng vị trí byte

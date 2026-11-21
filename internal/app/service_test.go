@@ -330,6 +330,24 @@ func TestCoreServiceRejectsMalformedRequestsAndCancellation(t *testing.T) {
 	}
 }
 
+func TestCoreServiceReportsUnknownCountsWhenContextCannotContinue(t *testing.T) {
+	service, _, backend, _ := coreServiceFixture(t)
+	backend.err = contextpack.ErrContinuationUnavailable
+	const name = "mce4d_context_pack"
+	raw := []byte(`{"selector":{"kind":"symbol","symbol_id":"target"},"task_kind":"behavior_change"}`)
+	result, err := service.Call(context.Background(), name, raw, coreTestOptions())
+	if err != nil || !result.IsError || backend.lastName != "pack" {
+		t.Fatalf("incomplete context was not returned as an error: %v", err)
+	}
+	response := decodeCoreResult(t, name, result)
+	p := response.Pagination
+	if response.Error.Code != "CONTEXT_INCOMPLETE" || response.Data != nil || p.EnumerationComplete ||
+		!p.Truncated || p.RequiredPending != nil || p.OptionalPending != nil || p.NextCursor != nil ||
+		p.LimitReason == nil || *p.LimitReason != "CONTINUATION_UNAVAILABLE" {
+		t.Fatalf("incomplete traversal claimed an enumerated result: %+v", response)
+	}
+}
+
 func TestCoreServiceRejectsExpiredResultBeforeDelivery(t *testing.T) {
 	service, _, backend, _ := coreServiceFixture(t)
 	backend.response = func(o CoreCallOptions) ([][]byte, error) {

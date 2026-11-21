@@ -50,6 +50,7 @@ type protectedProfileManifest struct {
 type protectedProfile struct {
 	rootPath              string
 	root, state, control  *paths.Root
+	maintenanceControl    *paths.Root
 	targets               []*paths.Root
 	domain, journalDomain *stateDomain
 	manifest              protectedProfileManifest
@@ -58,6 +59,7 @@ type protectedProfile struct {
 	captureOnce           sync.Once
 	captureClient         *profileCaptureClient
 	captureError          error
+	maintenanceOperation  string // Only a private offline worker may set this.
 }
 
 func profileStatePath(root string) string {
@@ -215,6 +217,10 @@ func openProtectedProfile(ctx context.Context, path, stage string) (_ *protected
 	if err != nil {
 		return nil, ErrProfileDenied
 	}
+	p.maintenanceControl, err = p.root.OpenDirectory("control")
+	if err != nil {
+		return nil, ErrProfileDenied
+	}
 	keyRoot, err := p.root.OpenDirectory("control")
 	if err != nil {
 		return nil, ErrProfileDenied
@@ -250,6 +256,12 @@ func (p *protectedProfile) Check(ctx context.Context) error {
 	m, digest, err := readProfileManifest(ctx, p.root)
 	if err != nil || digest != p.manifestHash || m.Stage != p.manifest.Stage {
 		return ErrProfileDenied
+	}
+	if err := checkMaintenanceGate(ctx, p.control, p.manifest.ProfileID, "catalog", p.maintenanceOperation); err != nil {
+		return err
+	}
+	if err := checkMaintenanceGate(ctx, p.maintenanceControl, p.manifest.ProfileID, "catalog", p.maintenanceOperation); err != nil {
+		return err
 	}
 	return ctx.Err()
 }
@@ -318,7 +330,7 @@ func (p *protectedProfile) Close() error {
 	if p.journalDomain != nil {
 		err = errors.Join(err, p.journalDomain.root.Close())
 	}
-	for _, root := range []*paths.Root{p.control, p.state, p.root} {
+	for _, root := range []*paths.Root{p.control, p.maintenanceControl, p.state, p.root} {
 		if root != nil {
 			err = errors.Join(err, root.Close())
 		}

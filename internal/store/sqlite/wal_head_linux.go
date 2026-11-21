@@ -5,9 +5,7 @@ package sqlite
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -18,17 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const (
-	walHeadName       = "wal-head.log"
-	walHeadRecordSize = 192
-	walHeadMaxBytes   = walAuthorityMaxBytes / walAuthorityRecordSize * walHeadRecordSize
-	linuxAppendFlag   = 0x20 // FS_APPEND_FL, Linux UAPI
-)
-
-type walJournalPosition struct {
-	Size   int64
-	SHA256 [32]byte
-}
+const linuxAppendFlag = 0x20 // FS_APPEND_FL, Linux UAPI
 
 // walHeadAuthority is a separate, administrator-provisioned append-only file.
 // Its name and all ancestor directories are root-managed; the unprivileged
@@ -206,20 +194,7 @@ func (h *walHeadAuthority) advance(ctx context.Context, expected, next walJourna
 }
 
 func (h *walHeadAuthority) encode(next walJournalPosition) []byte {
-	raw := make([]byte, walHeadRecordSize)
-	copy(raw[:8], "MCEHEAD1")
-	binary.BigEndian.PutUint64(raw[8:16], uint64(next.Size/walAuthorityRecordSize))
-	copy(raw[16:32], h.identity.Authority[:])
-	copy(raw[32:64], h.identity.Store[:])
-	copy(raw[64:80], h.identity.Incarnation[:])
-	binary.BigEndian.PutUint64(raw[80:88], uint64(next.Size))
-	copy(raw[88:120], next.SHA256[:])
-	copy(raw[120:152], h.chain[:])
-	mac := hmac.New(sha256.New, h.key[:])
-	_, _ = mac.Write([]byte("MCE4D-WAL-HEAD1\x00"))
-	_, _ = mac.Write(raw[:160])
-	copy(raw[160:], mac.Sum(nil))
-	return raw
+	return encodeWALHeadRecord(h.identity, h.key, h.chain, next)
 }
 
 func (h *walHeadAuthority) Close() error {

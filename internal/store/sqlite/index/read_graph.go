@@ -68,7 +68,7 @@ func (s *Store) graphTransaction(ctx context.Context, r PublishedGraphRequest, v
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, releaseConfigured(ctx, conn, true)) }()
-	if err := requireWAL(ctx, conn, false); err != nil {
+	if err := requireReadJournal(ctx, conn, s.image); err != nil {
 		return err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -122,7 +122,7 @@ func (s *Store) graphTransaction(ctx context.Context, r PublishedGraphRequest, v
 // again afterward. This is a bounded internal adapter, not a live freshness or
 // cross-store authority proof.
 func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest) (*PublishedGraph, error) {
-	if s == nil || ctx == nil || s.lease == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) ||
+	if ctx == nil || !s.readable() ||
 		r.AuthorizeGeneration == nil || r.AuthorizePath == nil || r.Scanner == nil || !validHash(r.VectorDigest) ||
 		r.MaxManifestBytes < 1024 || r.MaxManifestBytes > 64*1024*1024 || r.MaxFileBytes < 1 || r.MaxFileBytes > 64*1024*1024 ||
 		r.MaxSourceBytes < 1 || r.MaxSourceBytes > 512*1024*1024 || r.MaxFactBytes < 1024 || r.MaxFactBytes > 16*1024*1024 || r.MaxFacts < 1 || r.MaxFacts > 100000 {

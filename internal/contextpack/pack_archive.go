@@ -112,6 +112,7 @@ type PackRestoreInput struct {
 	VerifyFacts             func(context.Context, model.ScopeMember, string) error
 	VerifyNoApprovedRecords func(context.Context, model.ScopeVector) (bool, error)
 	MaxArchiveBytes         int
+	ExpectedMetadata        []byte
 }
 
 // ArchiveRetention is authenticated with the cursor key, including Metadata.
@@ -189,6 +190,9 @@ func RestorePagedPack(ctx context.Context, raw []byte, in PackRestoreInput) (*Pa
 	a, err := decodePackArchive(in.Codec, raw, in.MaxArchiveBytes)
 	if err != nil {
 		return nil, err
+	}
+	if in.ExpectedMetadata != nil && !bytes.Equal(a.Metadata, in.ExpectedMetadata) {
+		return nil, ErrCursorInvalid
 	}
 	if a.Token != in.Token || !reflect.DeepEqual(a.Binding, claims.Binding) || a.Binding.ResultID == "" || a.SliceLimit < 1024 || a.SliceLimit > 16*1024*1024 || a.SelectionLimit < 1024 || a.SelectionLimit > 16*1024*1024 || a.PolicyMaxOutput < 4096 || a.PolicyMaxOutput > 131072 || a.CheckRecords && in.VerifyNoApprovedRecords == nil || a.ExpiresAt <= claims.IssuedAt || a.ExpiresAt > claims.ExpiresAt {
 		return nil, ErrCursorInvalid

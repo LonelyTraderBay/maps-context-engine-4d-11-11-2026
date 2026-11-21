@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -44,20 +43,6 @@ type nativeRenameOwner struct {
 	limiter             *lsp.SessionLimiter
 	active              int
 	closed              bool
-}
-
-func nativeRenameExecutable(policy model.PolicyConfig, name string) (model.AllowedExecutable, bool) {
-	var selected model.AllowedExecutable
-	for _, executable := range policy.AllowedExecutables {
-		if filepath.Base(executable.Path) != name {
-			continue
-		}
-		if selected.Path != "" || !filepath.IsAbs(executable.Path) || filepath.Clean(executable.Path) != executable.Path || !hash(executable.SHA256) {
-			return model.AllowedExecutable{}, false
-		}
-		selected = executable
-	}
-	return selected, selected.Path != ""
 }
 
 // Construction reads no source/toolchain and starts no process. Approvals come
@@ -421,23 +406,4 @@ func (o *nativeRenameOwner) Open(ctx context.Context, p app.CorePrincipal, scope
 	}
 	transferred = true
 	return lsp.SessionConfig{ServerBinRoot: o.serverRoot, ExpectedSHA256: o.lspBinary.SHA256, Environment: runtime.GoEnvironmentInput{GoRoot: o.goRoot, ScratchRoot: scratch.path, WorkspaceRoot: filepath.Join(scratch.path, "input"), GOOS: profile.Goos, GOARCH: profile.Goarch, BuildTags: append([]string{}, profile.BuildTags...)}, Documents: documents, Check: check, Limiter: o.limiter, StartupTimeoutMs: o.n.effective.Core.LspStartupTimeoutMs, RenameTimeoutMs: o.n.effective.Core.RenameTimeoutMs}, closeSession, nil
-}
-
-// The loader defensively copies stage slices; nil and empty both mean no
-// stages. Compare their contents while retaining every membership/config flag.
-func sameNativeLoaderInventory(a, b inventory.FileMap) bool {
-	if a.InputDigest != b.InputDigest || a.DeniedCount != b.DeniedCount || a.InvalidPathCount != b.InvalidPathCount || a.IgnoredCount != b.IgnoredCount || len(a.Entries) != len(b.Entries) {
-		return false
-	}
-	for i, entry := range a.Entries {
-		other := b.Entries[i]
-		if !slices.Equal(entry.Stages, other.Stages) {
-			return false
-		}
-		entry.Stages, other.Stages = nil, nil
-		if !reflect.DeepEqual(entry, other) {
-			return false
-		}
-	}
-	return true
 }

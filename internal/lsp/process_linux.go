@@ -3,11 +3,7 @@
 package lsp
 
 import (
-	"bufio"
-	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,31 +17,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var ErrLSPProcess = errors.New("LSP process failed or could not be contained")
-
-type outboundFrame struct {
-	data []byte
-	done chan error
-}
-
 // managedProcess owns exactly one child process group and its protocol pipes.
 // It accepts an already opened executable; it does not authorize the binary,
 // environment or working directory. Those are the session's responsibility.
 type managedProcess struct {
+	*processPipes
 	cmd        *exec.Cmd
-	stdin      *os.File
-	stdout     *os.File
-	stderr     *os.File
-	incoming   chan inboundFrame
-	writes     chan outboundFrame
-	stop       chan struct{}
-	done       chan struct{} // observed with WNOWAIT; PID remains reserved
 	reaped     chan struct{}
 	observeErr error
 	waitErr    error
 	once       sync.Once
 	reapOnce   sync.Once
-	workers    sync.WaitGroup
 }
 
 func startManaged(executable *os.File, args []string, cwd string, env []string) (*managedProcess, error) {
@@ -108,11 +90,8 @@ func startManaged(executable *os.File, args []string, cwd string, env []string) 
 		_ = errRead.Close()
 		return nil, ErrLSPProcess
 	}
-	p := &managedProcess{cmd: cmd, stdin: inWrite, stdout: outRead, stderr: errRead, incoming: make(chan inboundFrame, 1), writes: make(chan outboundFrame), stop: make(chan struct{}), done: make(chan struct{}), reaped: make(chan struct{})}
-	p.workers.Add(3)
-	go p.readLoop()
-	go p.writeLoop()
-	go p.stderrLoop()
+	p := &managedProcess{cmd: cmd, reaped: make(chan struct{}),
+		processPipes: newProcessPipes(inWrite, outRead, errRead, func() { _ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL) })}
 	go func() {
 		var info unix.Siginfo
 		for {
@@ -124,108 +103,6 @@ func startManaged(executable *os.File, args []string, cwd string, env []string) 
 		close(p.done)
 	}()
 	return p, nil
-}
-
-func (p *managedProcess) readLoop() {
-	defer p.workers.Done()
-	defer close(p.incoming)
-	reader := bufio.NewReaderSize(p.stdout, 8192)
-	var total int64
-	for {
-		data, err := readLSPFrame(reader, int(resultHardBytes))
-		total += int64(len(data))
-		if total > 128*1024*1024 {
-			err = ErrLSPFrame
-		}
-		select {
-		case p.incoming <- inboundFrame{data: data, err: err}:
-		case <-p.stop:
-			return
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-func (p *managedProcess) writeLoop() {
-	defer p.workers.Done()
-	for {
-		select {
-		case <-p.stop:
-			return
-		case frame := <-p.writes:
-			data := frame.data
-			var err error
-			for len(data) > 0 && err == nil {
-				var n int
-				n, err = p.stdin.Write(data)
-				if n == 0 && err == nil {
-					err = io.ErrShortWrite
-				}
-				data = data[n:]
-			}
-			frame.done <- err
-		}
-	}
-}
-
-func (p *managedProcess) stderrLoop() {
-	defer p.workers.Done()
-	buffer := make([]byte, 8192)
-	var total int64
-	for {
-		n, err := p.stderr.Read(buffer)
-		total += int64(n)
-		if total > 1024*1024 {
-			// Do not retain or print provider output, which can contain source.
-			_ = unix.Kill(-p.cmd.Process.Pid, unix.SIGKILL)
-			return
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-func (p *managedProcess) send(ctx context.Context, value any) error {
-	if p == nil || ctx == nil {
-		return ErrLSPProcess
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return ErrLSPProtocol
-	}
-	data, err = encodeLSPFrame(data, int(resultHardBytes))
-	if err != nil {
-		return err
-	}
-	frame := outboundFrame{data: data, done: make(chan error, 1)}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-p.stop:
-		return ErrLSPProcess
-	case <-p.done:
-		return ErrLSPProcess
-	case p.writes <- frame:
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-p.stop:
-		return ErrLSPProcess
-	case <-p.done:
-		return ErrLSPProcess
-	case err := <-frame.done:
-		if err != nil {
-			return ErrLSPProcess
-		}
-		return ctx.Err()
-	}
 }
 
 // close stops only this process group and waits for its pipe workers to exit.

@@ -44,7 +44,7 @@ func (b *CoreBackend) PlanRestoreFactory(principal app.CorePrincipal) (app.PlanR
 			return empty, ErrScopeChanged
 		}
 		var graph *index.PublishedGraph
-		symbolFactory, err := b.symbolRestoreFactory(principal, func(value *index.PublishedGraph) { graph = value })
+		symbolFactory, err := b.symbolRestoreFactory(principal, nil, func(value *index.PublishedGraph) { graph = value })
 		if err != nil {
 			return empty, err
 		}

@@ -19,10 +19,10 @@ import (
 // stores already supplied to the backend. It reopens only the generation in a
 // verified token; it does not enable a CLI route or open any state itself.
 func (b *CoreBackend) SymbolRestoreFactory(principal app.CorePrincipal) (app.SymbolRestoreFactory, error) {
-	return b.symbolRestoreFactory(principal, nil)
+	return b.symbolRestoreFactory(principal, nil, nil)
 }
 
-func (b *CoreBackend) symbolRestoreFactory(principal app.CorePrincipal, captureGraph func(*index.PublishedGraph)) (app.SymbolRestoreFactory, error) {
+func (b *CoreBackend) symbolRestoreFactory(principal app.CorePrincipal, captured *index.PublishedGraph, captureGraph func(*index.PublishedGraph)) (app.SymbolRestoreFactory, error) {
 	if !b.valid() || principal.ID == "" || principal.Digest == "" || principal.BindingDigest == "" {
 		return nil, app.ErrCoreInput
 	}
@@ -77,9 +77,23 @@ func (b *CoreBackend) symbolRestoreFactory(principal app.CorePrincipal, captureG
 			}
 			return b.Authority.path(ctx, principal, observation.Binding.Policy, name)
 		}
-		graph, err := b.Reader.Index.ReadPublishedGraph(ctx, index.PublishedGraphRequest{Member: member, VectorDigest: pinned.VectorDigest, AuthorizeGeneration: authorizeGeneration, AuthorizePath: authorizePath, Scanner: scanner, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFileBytes: int(maxFile), MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000})
-		if err != nil {
-			return empty, coreStoreError(err)
+		graph := captured
+		if graph == nil {
+			graph, err = b.Reader.Index.ReadPublishedGraph(ctx, index.PublishedGraphRequest{Member: member, VectorDigest: pinned.VectorDigest, AuthorizeGeneration: authorizeGeneration, AuthorizePath: authorizePath, Scanner: scanner, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFileBytes: int(maxFile), MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000})
+			if err != nil {
+				return empty, coreStoreError(err)
+			}
+		} else {
+			// Save may restore its new archive using the catalog read earlier
+			// in this same call. Recheck its digest, lease and all captured paths.
+			if err := graph.VerifyCatalog(ctx, member); err != nil {
+				return empty, coreStoreError(err)
+			}
+			for _, entry := range graph.Snapshot.Manifest().Files {
+				if err := authorizePath(ctx, member.WorktreeID, entry.Path, member.PolicyDigest, member.PolicyEpoch); err != nil {
+					return empty, err
+				}
+			}
 		}
 		scopeAuth := func(ctx context.Context, scope model.ScopeVector, requested model.ScopeMember) error {
 			if !reflect.DeepEqual(requested, member) || model.ComparePinnedScope(scope, pinned, 32768) != nil {

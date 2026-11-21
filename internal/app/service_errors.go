@@ -20,6 +20,10 @@ func (s *CoreService) failure(ctx context.Context, name string, options CoreCall
 	code, message, action, retry := coreError(name, err)
 	zero := int64(0)
 	response := model.Response{SchemaVersion: 1, RequestID: options.RequestID, Status: "error", Freshness: model.Freshness{Status: "not_checked", Scope: "none", BufferScope: "disk_only", Consistency: "captured_bytes_with_observed_stability", SourceView: "indexed_snapshot"}, Coverage: model.Coverage{Status: "unknown", Capabilities: []model.Capability{}, Gaps: []model.Gap{}, ScopeDescription: "No source context was returned."}, Readiness: "blocked", Pagination: model.Pagination{EnumerationComplete: true, RequiredPending: &zero, OptionalPending: &zero}, Budget: model.Budget{MaxOutputBytes: options.MaxOutputBytes, DeliveryMode: options.DeliveryMode}, Warnings: []model.Gap{}, Error: &model.ErrorInfo{Code: code, Message: message, Retryable: retry, SuggestedAction: action, Details: []model.Gap{}}}
+	if code == "CONTEXT_INCOMPLETE" && errors.Is(err, contextpack.ErrContinuationUnavailable) {
+		reason := "CONTINUATION_UNAVAILABLE"
+		response.Pagination = model.Pagination{Truncated: true, LimitReason: &reason}
+	}
 	return marshalCoreResponse(response, name, s.registry)
 }
 
@@ -42,8 +46,12 @@ func coreError(name string, err error) (code, message, action string, retry bool
 		return "CURSOR_INVALID", "The pinned scope has changed.", "recreate_pack", false
 	case errors.Is(err, ErrCoreIndexMissing):
 		return "INDEX_MISSING", "No published index is available for this scope.", "explicit_index", false
+	case errors.Is(err, ErrCoreSnapshotExpired):
+		return "SNAPSHOT_EXPIRED", "The pinned snapshot is no longer retained.", "recreate_pack", false
 	case errors.Is(err, ErrCoreStoreChanged):
 		return "STORE_REPLACED", "A required store was replaced.", "recover_store", false
+	case errors.Is(err, ErrCoreStoreRecovery):
+		return "STORE_RECOVERY_REQUIRED", "A scoped store requires explicit recovery.", "recover_store", false
 	case errors.Is(err, ErrCoreAmbiguous):
 		return "AMBIGUOUS_SYMBOL", "The selector matches multiple symbols.", "review_candidates", false
 	case errors.Is(err, ErrFreshnessChanged), errors.Is(err, ErrValidationPrecondition):

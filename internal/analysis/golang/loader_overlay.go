@@ -49,7 +49,7 @@ type CapturedOverlayInput struct {
 }
 
 func NewCapturedOverlay(ctx context.Context, input CapturedOverlayInput) (*CapturedOverlay, error) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		return nil, ErrLoaderUnsupported
 	}
 	if ctx == nil || input.Snapshot == nil || input.Profile == nil || input.Scanner == nil || input.AuthorizeScope == nil || input.AuthorizePath == nil ||
@@ -72,6 +72,7 @@ func NewCapturedOverlay(ctx context.Context, input CapturedOverlayInput) (*Captu
 		return nil, loaderAuthorityError(ctx)
 	}
 	paths := make(map[string]string, len(manifest.Files))
+	pathKeys := make(map[string]bool, len(manifest.Files))
 	var total int64
 	for _, item := range manifest.Files {
 		if err := ctx.Err(); err != nil {
@@ -92,9 +93,22 @@ func NewCapturedOverlay(ctx context.Context, input CapturedOverlayInput) (*Captu
 		}
 		absolute := filepath.Join(input.SyntheticRoot, filepath.FromSlash(item.Path))
 		relative, err := filepath.Rel(input.SyntheticRoot, absolute)
-		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) || paths[absolute] != "" {
+		if err != nil || filepath.ToSlash(relative) != item.Path || !filepath.IsLocal(relative) {
 			return nil, ErrInputMismatch
 		}
+		key := absolute
+		if runtime.GOOS == "windows" {
+			for _, part := range strings.Split(item.Path, "/") {
+				if !filepath.IsLocal(part) || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+					return nil, ErrInputMismatch
+				}
+			}
+			key = strings.ToUpper(key)
+		}
+		if pathKeys[key] {
+			return nil, ErrInputMismatch
+		}
+		pathKeys[key] = true
 		size := int64(len(absolute)) + int64(file.Len())
 		if size > input.MaxOverlayBytes-total {
 			return nil, ErrSyntaxLimit

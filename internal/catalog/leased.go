@@ -88,7 +88,7 @@ func closeCatalogConnection(ctx context.Context, conn *sql.Conn, configured, rea
 // WithMutation binds a short-lived catalog mutation lock to a store view.
 // The original view remains unbound and cannot perform transactional calls.
 func (s *Store) WithMutation(ctx context.Context, mutation ports.CatalogMutationLease, operationID string) (*Store, error) {
-	if s == nil || s.lease == nil || ctx == nil || mutation == nil || !validUUID(operationID) {
+	if s == nil || s.image || s.lease == nil || ctx == nil || mutation == nil || !validUUID(operationID) {
 		return nil, ErrCatalogWriterRequired
 	}
 	if err := s.lease.Check(ctx, "catalog", ports.SharedLease); err != nil {

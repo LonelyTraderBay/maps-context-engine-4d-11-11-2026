@@ -5,7 +5,6 @@ package lsp
 import (
 	"context"
 	"crypto/sha256"
-	"debug/buildinfo"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -74,22 +73,8 @@ func verifyGoplsFile(ctx context.Context, file *os.File, expected string) error 
 	if hex.EncodeToString(hash.Sum(nil)) != expected {
 		return ErrLSPAuthority
 	}
-	info, err := buildinfo.Read(file)
-	if err != nil || info.GoVersion != "go1.27.4" || info.Path != "golang.org/x/tools/gopls" || info.Main.Path != "golang.org/x/tools/gopls" || info.Main.Version != "v0.24.0" || info.Main.Sum != "h1:nPO/LffYa4sP62Ueuema5PPnZPGaZjGl+vZGvbTek4g=" {
-		return ErrLSPAuthority
-	}
-	asm := false
-	for _, dependency := range info.Deps {
-		if dependency.Path == "github.com/segmentio/asm" {
-			asm = dependency.Version == "v1.2.1" && dependency.Replace != nil && dependency.Replace.Path == "github.com/segmentio/asm" && dependency.Replace.Version == "v1.1.3" && dependency.Replace.Sum == "h1:WM03sfUOENvvKexOLp+pCqgb/WDjsi7EK8gIsICtzhc="
-		}
-	}
-	settings := map[string]string{}
-	for _, setting := range info.Settings {
-		settings[setting.Key] = setting.Value
-	}
-	if !asm || settings["GOOS"] != "linux" || settings["GOARCH"] != "amd64" || settings["CGO_ENABLED"] != "0" {
-		return ErrLSPAuthority
+	if err := verifyGoplsBuild(file, "linux"); err != nil {
+		return err
 	}
 	after, err := stat()
 	if err != nil || before.Dev != after.Dev || before.Ino != after.Ino || before.Mode != after.Mode || before.Uid != after.Uid || before.Gid != after.Gid || before.Nlink != after.Nlink || before.Size != after.Size || before.Mtim != after.Mtim || before.Ctim != after.Ctim {

@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/app"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/contextpack"
@@ -23,6 +24,9 @@ func (b *CoreBackend) packGuard(principal app.CorePrincipal) contextpack.CursorG
 			return err
 		}
 		_, err := b.Reader.Recheck(ctx, principal, binding.Scope)
+		if errors.Is(err, ErrScopeSnapshotExpired) {
+			return app.ErrCoreSnapshotExpired
+		}
 		return err
 	}
 }
@@ -233,7 +237,7 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 		return nil, app.ErrCoreLimit
 	}
 	if options.DeliveryMode == "cli" {
-		retention, err := b.cliSymbolRetention(principal)
+		retention, err := b.cliSymbolRetention(principal, graph)
 		if err != nil {
 			return nil, coreStoreError(err)
 		}
@@ -251,6 +255,7 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 		}
 		// First has just checked the installed bytes, TTL and full live
 		// authority after preparing the private page; no callback runs here.
+		app.RememberSymbolPackDelivery(ctx, handle)
 		return page.Blocks, nil
 	}
 	if err := b.packCache.Admit(ctx, pack, token, principal.Digest, guard, int64(len(extra))); err != nil {

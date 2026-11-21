@@ -227,6 +227,17 @@ func (c *nativeConn) statementAuthority(ctx context.Context, query string) error
 
 func (c *nativeConn) IsValid() bool { return !c.closed && !c.poisoned }
 
+// A successful rollback leaves the native connection reusable. Advertising
+// that to database/sql keeps a cancelled transaction from asynchronously
+// discarding a healthy borrowed connection while its owner is closing the
+// pool. Every subsequent transaction still rechecks the store authority.
+func (c *nativeConn) ResetSession(context.Context) error {
+	if !c.IsValid() || c.active != nil {
+		return driver.ErrBadConn
+	}
+	return nil
+}
+
 // Only fixed, connection-local configuration and read-only mode probes may
 // run outside a transaction. Never accept journal_mode=..., checkpoint,
 // attach, vacuum, extensions or arbitrary SQL at this boundary.
@@ -420,5 +431,6 @@ var _ driver.ConnPrepareContext = (*nativeConn)(nil)
 var _ driver.ExecerContext = (*nativeConn)(nil)
 var _ driver.QueryerContext = (*nativeConn)(nil)
 var _ driver.Validator = (*nativeConn)(nil)
+var _ driver.SessionResetter = (*nativeConn)(nil)
 var _ driver.StmtExecContext = (*nativeStmt)(nil)
 var _ driver.StmtQueryContext = (*nativeStmt)(nil)

@@ -130,4 +130,24 @@ func TestInvalidationSyntheticGitMembershipAndHeadChanges(t *testing.T) {
 	if !reflect.DeepEqual(changes, []string{"added.go:removed", "main.go:modified", "moved.go:added"}) || plan.Action != "rebuild" {
 		t.Fatalf("delete/rename membership missed: %+v", changes)
 	}
+	runGit("switch", "-q", "-c", "fixture-alternate")
+	runGit("update-index", "--no-assume-unchanged", "--", "main.go")
+	runGit("add", "--all")
+	runGit("commit", "-q", "-m", "alternate bytes")
+	alternate := capture()
+	moved, ok := alternate.File("moved.go")
+	if !ok || string(moved.Bytes()) != "package added\n" {
+		t.Fatal("alternate branch did not capture the moved source")
+	}
+	runGit("reset", "--hard", "HEAD^")
+	reset := capture()
+	restored, ok := reset.File("main.go")
+	original, originalOK := committed.File("main.go")
+	if !ok || !originalOK || restored.ContentHash() != original.ContentHash() || reset.Manifest().SnapshotDigest != committed.Manifest().SnapshotDigest {
+		t.Fatal("reset did not recapture the original source identity")
+	}
+	request.Before, request.After = alternate, reset
+	if plan, err := PlanInvalidation(ctx, request); err != nil || plan.Action != "rebuild" {
+		t.Fatalf("reset to older bytes reused current facts: %+v %v", plan, err)
+	}
 }

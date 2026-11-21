@@ -8,19 +8,6 @@ import (
 	"encoding/binary"
 )
 
-// walCommitPrefixReceipt is an experimental value supplied by an independent
-// authority after a commit. The authority must authenticate the latest receipt
-// for the exact store and incarnation; this value does not establish that
-// authority or prove that an acknowledged receipt has not itself been lost.
-type walCommitPrefixReceipt struct {
-	MainSize        int64
-	MainSHA256      [sha256.Size]byte
-	WALPrefixSize   int64
-	WALPrefixSHA256 [sha256.Size]byte
-	WALCommitFrame  uint32
-	WALCommitPages  uint32
-}
-
 // verifyWALCommitPrefix checks an acknowledged commit against one immutable
 // main/WAL capture. A valid uncommitted or incomplete WAL tail may follow the
 // receipt. A later committed frame is not covered by the receipt and is

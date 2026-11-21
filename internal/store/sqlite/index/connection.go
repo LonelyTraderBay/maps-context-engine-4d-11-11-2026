@@ -67,6 +67,15 @@ func discardConnection(conn *sql.Conn) error {
 	return err
 }
 
+func requireReadJournal(ctx context.Context, conn *sql.Conn, image bool) error {
+	if image {
+		// The filesystem owner verified the WAL-mode header and receipt
+		// before supplying this immutable VFS image with no live sidecars.
+		return ctx.Err()
+	}
+	return requireWAL(ctx, conn, false)
+}
+
 func requireWAL(ctx context.Context, conn *sql.Conn, enable bool) error {
 	query := "PRAGMA journal_mode"
 	if enable {

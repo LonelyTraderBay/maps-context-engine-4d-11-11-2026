@@ -69,7 +69,14 @@ func TestCursorKeyRejectsUnsafeState(t *testing.T) {
 		want  error
 	}{
 		{"shared directory", func(dir string) error { return os.Chmod(dir, 0755) }, ErrCursorKeyUnsafe},
-		{"shared key", func(dir string) error { return os.WriteFile(filepath.Join(dir, cursorKeyName), bytesOf(7, 32), 0644) }, ErrCursorKeyUnsafe},
+		{"shared key", func(dir string) error {
+			name := filepath.Join(dir, cursorKeyName)
+			if err := os.WriteFile(name, bytesOf(7, 32), 0600); err != nil {
+				return err
+			}
+			// Set the unsafe mode explicitly, independent of inherited umask.
+			return os.Chmod(name, 0644)
+		}, ErrCursorKeyUnsafe},
 		{"short key", func(dir string) error { return os.WriteFile(filepath.Join(dir, cursorKeyName), bytesOf(7, 31), 0600) }, ErrCursorKeyUnsafe},
 		{"zero key", func(dir string) error { return os.WriteFile(filepath.Join(dir, cursorKeyName), bytesOf(0, 32), 0600) }, ErrCursorKeyUnsafe},
 		{"pending recovery", func(dir string) error {

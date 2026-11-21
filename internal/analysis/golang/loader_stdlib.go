@@ -72,7 +72,7 @@ type TrustedStdlib struct {
 }
 
 func NewTrustedStdlib(ctx context.Context, in TrustedStdlibInput) (*TrustedStdlib, error) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		return nil, ErrLoaderUnsupported
 	}
 	if ctx == nil || in.SourceRoot == nil || in.Profile == nil || in.Snapshot == nil || in.Scanner == nil || in.AuthorizePath == nil || in.VerifyAuthority == nil ||

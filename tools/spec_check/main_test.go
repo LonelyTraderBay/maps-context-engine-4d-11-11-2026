@@ -128,6 +128,25 @@ func TestBatchBoundariesAndTaskOrder(t *testing.T) {
 	if !strings.Contains(strings.Join(tailErrors, "\n"), "authority") {
 		t.Fatalf("unauthorized final tail was not rejected: %v", tailErrors)
 	}
+	for _, status := range []string{"TODO", "VERIFY", "BLOCKED", "DEFERRED", "CANCELLED"} {
+		tasks["T006"] = task{id: "T006", status: status}
+		var errs []string
+		checkBatch(makeSpec(10, "null"), "", tasks, func(format string, args ...any) {
+			errs = append(errs, fmt.Sprintf(format, args...))
+		})
+		if !strings.Contains(strings.Join(errs, "\n"), "unfinished task T006") {
+			t.Fatalf("%s still counted toward the batch: %v", status, errs)
+		}
+	}
+	tasks["T006"] = task{id: "T006", status: "DONE"}
+	duplicate := strings.Replace(makeSpec(10, "null"), "T004, T006]", "T004, T004]", 1)
+	var duplicateErrors []string
+	checkBatch(duplicate, "", tasks, func(format string, args ...any) {
+		duplicateErrors = append(duplicateErrors, fmt.Sprintf(format, args...))
+	})
+	if !strings.Contains(strings.Join(duplicateErrors, "\n"), "duplicate or unfinished task T004") {
+		t.Fatalf("duplicate task counted toward the batch: %v", duplicateErrors)
+	}
 }
 
 func TestPolicyMissingAndModifiedRejected(t *testing.T) {
@@ -161,6 +180,101 @@ func TestPolicyMissingAndModifiedRejected(t *testing.T) {
 	}
 	if errs := validate(string(data), temp); !strings.Contains(strings.Join(errs, "\n"), "is missing") {
 		t.Fatalf("missing policy not rejected: %v", errs)
+	}
+}
+
+func TestPolicyAliasesDuplicatesAndLineEndings(t *testing.T) {
+	root := filepath.Join("..", "..")
+	spec, err := os.ReadFile(filepath.Join(root, "Maps-Context-Engine-4D_SPEC.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	temp := t.TempDir()
+	docs := filepath.Join(temp, "docs")
+	if err := os.Mkdir(docs, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"AI_RULES.md", "AI_RULES_STORAGE_SUPPLEMENT.md", "PROJECT_BOOTSTRAP_PROMPT.txt"} {
+		data, err := os.ReadFile(filepath.Join(root, "docs", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(docs, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath, alias := filepath.Join(docs, "AI_RULES.md"), filepath.Join(docs, "AI_RULES(8).md")
+	original, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(mainPath, alias); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want string) {
+		t.Helper()
+		var problems []string
+		checkPolicies(string(spec), temp, func(format string, args ...any) {
+			problems = append(problems, fmt.Sprintf(format, args...))
+		})
+		if want == "" && len(problems) != 0 || want != "" && !strings.Contains(strings.Join(problems, "\n"), want) {
+			t.Fatalf("policy diagnostics %v, expected %q", problems, want)
+		}
+	}
+	check("")
+	if _, err := os.Stat(mainPath); !os.IsNotExist(err) {
+		t.Fatal("checking the alias recreated the preferred path")
+	}
+	lineEndings := strings.ReplaceAll(string(original), "\r\n", "\n")
+	if lineEndings == string(original) {
+		lineEndings = strings.ReplaceAll(lineEndings, "\n", "\r\n")
+	}
+	if err := os.WriteFile(alias, []byte(lineEndings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+	if err := os.WriteFile(mainPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+	if err := os.WriteFile(alias, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+	changed := strings.Replace(lineEndings, "3.1", "3.2", 1)
+	if changed == lineEndings {
+		t.Fatal("fixture has no version marker")
+	}
+	if err := os.WriteFile(alias, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check("AI_RULES(8).md hash or content mismatch")
+	got, err := os.ReadFile(alias)
+	if err != nil || string(got) != changed {
+		t.Fatal("checking conflicting policy candidates changed the source")
+	}
+}
+
+func TestDocsOnlyMetadataKeepsImplementationTracker(t *testing.T) {
+	root := filepath.Join("..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, "Maps-Context-Engine-4D_SPEC.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := string(raw)
+	resume := section(original, "S22", "S23")
+	mode := yamlScalar(resume, "last_request_mode")
+	explicit := strings.Replace(original, "  last_request_mode: "+mode, "  last_request_mode: docs_only", 1)
+	if errs := validate(explicit, root); len(errs) != 0 {
+		t.Fatalf("docs-only metadata should coexist with the implementation tracker: %v", errs)
+	}
+	if section(explicit, "S19", "S20") != section(original, "S19", "S20") ||
+		yamlScalar(section(explicit, "S22", "S23"), "active_task") != yamlScalar(resume, "active_task") {
+		t.Fatal("docs-only metadata changed implementation state")
+	}
+	inferred := strings.Replace(explicit, "  last_request_mode: docs_only", "  last_request_mode: bootstrap_detected", 1)
+	if errs := validate(inferred, root); !strings.Contains(strings.Join(errs, "\n"), "unknown task mode") {
+		t.Fatalf("bootstrap presence accepted as an assignment mode: %v", errs)
 	}
 }
 

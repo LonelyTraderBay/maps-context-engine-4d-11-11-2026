@@ -299,6 +299,9 @@ func packContextError(ctx context.Context, err error) error {
 func sanitizedPackGuard(guard contextpack.CursorGuard) contextpack.CursorGuard {
 	return func(ctx context.Context, binding contextpack.CursorBinding) error {
 		if err := guard(ctx, binding); err != nil {
+			if errors.Is(err, ErrCoreSnapshotExpired) {
+				return packContextError(ctx, ErrCoreSnapshotExpired)
+			}
 			return packContextError(ctx, ErrValidationAuthority)
 		}
 		return validationContextError(ctx)

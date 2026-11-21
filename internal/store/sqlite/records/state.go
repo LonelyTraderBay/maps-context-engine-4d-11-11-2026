@@ -35,7 +35,7 @@ func (s *Store) ReadState(ctx context.Context, maxHeads int, authorize StateAuth
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	if err := wal(ctx, conn, false); err != nil {
+	if err := s.requireReadJournal(ctx, conn); err != nil {
 		return State{}, err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

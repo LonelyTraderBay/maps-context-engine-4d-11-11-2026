@@ -8,8 +8,9 @@ import (
 
 func TestLoaderEnvironmentBindsEffectiveProfile(t *testing.T) {
 	input := loaderPreflightFixture(t, map[string]string{"go.mod": "module example.test/x\n", "x.go": "package x\n"})
-	root := filepath.Join(string(filepath.Separator), "owned-scratch")
-	goRoot := filepath.Join(string(filepath.Separator), "approved-go")
+	base := t.TempDir()
+	root := filepath.Join(base, "owned-scratch")
+	goRoot := filepath.Join(base, "approved-go")
 	if env, flags, err := LoaderEnvironment(input.Profile, goRoot, root, filepath.Join(root, "input")); err != nil || len(env) == 0 || len(flags) == 0 {
 		t.Fatalf("valid profile: %v", err)
 	}

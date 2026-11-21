@@ -27,10 +27,19 @@ func TestIndexAndWatchRequireBoundOwnerAndKeepProgressOffStdout(t *testing.T) {
 			t.Fatal("foreground command outcome", code, out.String(), stderr.String())
 		}
 	}
-	for _, err := range []error{ErrIndexRecovery, context.DeadlineExceeded, errors.New("private source path must not leak")} {
+	for _, failure := range []struct {
+		err  error
+		code int
+	}{
+		{errors.Join(ErrIndexRecovery, context.DeadlineExceeded), 3},
+		{errors.Join(ErrBindingDenied, context.DeadlineExceeded), 4},
+		{errors.New("private source path must not leak"), 5},
+	} {
 		var out, stderr bytes.Buffer
-		code := Run(context.Background(), []string{"index", "--worktree-id", worktree, "--profile-id", profile}, io.NopCloser(strings.NewReader("")), &out, &stderr, Dependencies{CPUs: 4, Index: func(context.Context, string, string, string, bool, bool, func(IndexProgress) error) error { return err }})
-		if code == 0 || out.Len() != 0 || strings.Contains(stderr.String(), "private source") {
+		code := Run(context.Background(), []string{"index", "--worktree-id", worktree, "--profile-id", profile}, io.NopCloser(strings.NewReader("")), &out, &stderr, Dependencies{CPUs: 4, Index: func(context.Context, string, string, string, bool, bool, func(IndexProgress) error) error {
+			return failure.err
+		}})
+		if code != failure.code || out.Len() != 0 || strings.Contains(stderr.String(), "private source") {
 			t.Fatal("unsafe command failure", code, stderr.String())
 		}
 	}

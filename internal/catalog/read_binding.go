@@ -51,58 +51,62 @@ func (s *Store) ReadBinding(ctx context.Context, worktreeID, profileID string, a
 	}
 	var result Binding
 	err := s.read(ctx, func(tx *sql.Tx) error {
-		if err := requireRegistered(ctx, tx, worktreeID); err != nil {
-			return err
-		}
-		var policyJSON, profileJSON, toolchain, provider string
-		// CASE prevents oversized corrupt values from being materialized in Go.
-		err := tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(w.repo_id AS BLOB))=36 THEN w.repo_id END,CASE WHEN length(CAST(w.canonical_root AS BLOB)) BETWEEN 1 AND 16384 THEN w.canonical_root END,CASE WHEN length(CAST(w.filesystem_identity AS BLOB)) BETWEEN 1 AND 4096 THEN w.filesystem_identity END,CASE WHEN length(CAST(r.common_dir AS BLOB)) BETWEEN 1 AND 16384 THEN r.common_dir END,CASE WHEN length(CAST(r.filesystem_identity AS BLOB)) BETWEEN 1 AND 4096 THEN r.filesystem_identity END,w.binding_revision,CASE WHEN length(CAST(h.policy_digest AS BLOB))=64 THEN h.policy_digest END,h.policy_epoch,CASE WHEN length(CAST(p.config_json AS BLOB)) BETWEEN 1 AND 1048576 THEN p.config_json END FROM worktrees AS w JOIN repositories AS r ON r.repo_id=w.repo_id JOIN worktree_policy_heads AS h ON h.worktree_id=w.worktree_id JOIN policies AS p ON p.worktree_id=h.worktree_id AND p.policy_digest=h.policy_digest WHERE w.worktree_id=?`, worktreeID).Scan(&result.RepoID, &result.CanonicalRoot, &result.RootIdentity, &result.CommonDirectory, &result.CommonIdentity, &result.BindingRevision, &result.PolicyDigest, &result.PolicyEpoch, &policyJSON)
-		if err != nil {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(config_json AS BLOB)) BETWEEN 1 AND 1048576 THEN config_json END,CASE WHEN length(CAST(toolchain_digest AS BLOB))=64 THEN toolchain_digest END,CASE WHEN length(CAST(provider_digest AS BLOB))=64 THEN provider_digest END FROM profiles WHERE worktree_id=? AND profile_id=?`, worktreeID, profileID).Scan(&profileJSON, &toolchain, &provider)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrProfileUnavailable
-		}
-		if err != nil {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		if !validUUID(result.RepoID) || !bindingHash(result.PolicyDigest) || !filepath.IsAbs(result.CanonicalRoot) || !filepath.IsAbs(result.CommonDirectory) || !utf8.ValidString(result.CanonicalRoot) || !utf8.ValidString(result.CommonDirectory) || !utf8.ValidString(result.RootIdentity) || !utf8.ValidString(result.CommonIdentity) || result.BindingRevision < 1 || result.BindingRevision > maxExactRevision || result.PolicyEpoch < 1 || result.PolicyEpoch > maxExactRevision {
-			return ErrUnrecognizedStore
-		}
-		result.Policy, err = model.DecodePolicyConfigJSON([]byte(policyJSON), maxAdminBytes)
-		if err != nil {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		policyDigest, err := model.PolicyDigest(result.Policy, maxAdminBytes)
-		if err != nil || policyDigest != result.PolicyDigest {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		profile, err := model.DecodeEffectiveProfileJSON([]byte(profileJSON), maxAdminBytes)
-		if err != nil {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		result.Profile, _ = profile.(*model.GoProfile)
-		if result.Profile == nil {
-			return ErrUnsupportedProfile
-		}
-		digest, err := model.ProfileDigest(result.Profile, maxAdminBytes)
-		if err != nil || digest != profileID || result.Profile.ToolchainDigest != toolchain || result.Profile.ProviderDigest != provider {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		if err := authorize(ctx, worktreeID, profileID); err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		result.CatalogIncarnation, result.WorktreeID, result.ProfileID = s.incarnation, worktreeID, profileID
-		return nil
+		return readBindingRow(ctx, tx, s.incarnation, worktreeID, profileID, authorize, &result)
 	})
 	if err != nil {
 		return Binding{}, err
 	}
 	return result, nil
+}
+
+func readBindingRow(ctx context.Context, tx *sql.Tx, incarnation, worktreeID, profileID string, authorize BindingAuthorizer, result *Binding) error {
+	if err := requireRegistered(ctx, tx, worktreeID); err != nil {
+		return err
+	}
+	var policyJSON, profileJSON, toolchain, provider string
+	// CASE prevents oversized corrupt values from being materialized in Go.
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(w.repo_id AS BLOB))=36 THEN w.repo_id END,CASE WHEN length(CAST(w.canonical_root AS BLOB)) BETWEEN 1 AND 16384 THEN w.canonical_root END,CASE WHEN length(CAST(w.filesystem_identity AS BLOB)) BETWEEN 1 AND 4096 THEN w.filesystem_identity END,CASE WHEN length(CAST(r.common_dir AS BLOB)) BETWEEN 1 AND 16384 THEN r.common_dir END,CASE WHEN length(CAST(r.filesystem_identity AS BLOB)) BETWEEN 1 AND 4096 THEN r.filesystem_identity END,w.binding_revision,CASE WHEN length(CAST(h.policy_digest AS BLOB))=64 THEN h.policy_digest END,h.policy_epoch,CASE WHEN length(CAST(p.config_json AS BLOB)) BETWEEN 1 AND 1048576 THEN p.config_json END FROM worktrees AS w JOIN repositories AS r ON r.repo_id=w.repo_id JOIN worktree_policy_heads AS h ON h.worktree_id=w.worktree_id JOIN policies AS p ON p.worktree_id=h.worktree_id AND p.policy_digest=h.policy_digest WHERE w.worktree_id=?`, worktreeID).Scan(&result.RepoID, &result.CanonicalRoot, &result.RootIdentity, &result.CommonDirectory, &result.CommonIdentity, &result.BindingRevision, &result.PolicyDigest, &result.PolicyEpoch, &policyJSON)
+	if err != nil {
+		return errors.Join(ErrUnrecognizedStore, err)
+	}
+	err = tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(config_json AS BLOB)) BETWEEN 1 AND 1048576 THEN config_json END,CASE WHEN length(CAST(toolchain_digest AS BLOB))=64 THEN toolchain_digest END,CASE WHEN length(CAST(provider_digest AS BLOB))=64 THEN provider_digest END FROM profiles WHERE worktree_id=? AND profile_id=?`, worktreeID, profileID).Scan(&profileJSON, &toolchain, &provider)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrProfileUnavailable
+	}
+	if err != nil {
+		return errors.Join(ErrUnrecognizedStore, err)
+	}
+	if !validUUID(result.RepoID) || !bindingHash(result.PolicyDigest) || !filepath.IsAbs(result.CanonicalRoot) || !filepath.IsAbs(result.CommonDirectory) || !utf8.ValidString(result.CanonicalRoot) || !utf8.ValidString(result.CommonDirectory) || !utf8.ValidString(result.RootIdentity) || !utf8.ValidString(result.CommonIdentity) || result.BindingRevision < 1 || result.BindingRevision > maxExactRevision || result.PolicyEpoch < 1 || result.PolicyEpoch > maxExactRevision {
+		return ErrUnrecognizedStore
+	}
+	result.Policy, err = model.DecodePolicyConfigJSON([]byte(policyJSON), maxAdminBytes)
+	if err != nil {
+		return errors.Join(ErrUnrecognizedStore, err)
+	}
+	policyDigest, err := model.PolicyDigest(result.Policy, maxAdminBytes)
+	if err != nil || policyDigest != result.PolicyDigest {
+		return errors.Join(ErrUnrecognizedStore, err)
+	}
+	profile, err := model.DecodeEffectiveProfileJSON([]byte(profileJSON), maxAdminBytes)
+	if err != nil {
+		return errors.Join(ErrUnrecognizedStore, err)
+	}
+	result.Profile, _ = profile.(*model.GoProfile)
+	if result.Profile == nil {
+		return ErrUnsupportedProfile
+	}
+	digest, err := model.ProfileDigest(result.Profile, maxAdminBytes)
+	if err != nil || digest != profileID || result.Profile.ToolchainDigest != toolchain || result.Profile.ProviderDigest != provider {
+		return errors.Join(ErrUnrecognizedStore, err)
+	}
+	if err := authorize(ctx, worktreeID, profileID); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	result.CatalogIncarnation, result.WorktreeID, result.ProfileID = incarnation, worktreeID, profileID
+	return nil
 }
 
 func bindingHash(value string) bool {

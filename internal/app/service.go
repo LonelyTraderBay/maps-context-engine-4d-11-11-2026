@@ -137,6 +137,9 @@ func (s *CoreService) Call(ctx context.Context, name string, raw []byte, options
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
+	if options.DeliveryMode == "cli" {
+		ctx = context.WithValue(ctx, symbolPackDeliveryKey{}, new(symbolPackDelivery))
+	}
 	if options.DeliveryMode == "mcp_structured_verified" {
 		if err := s.checkHost(ctx, options); err != nil {
 			return CoreCallResult{}, err
@@ -395,15 +398,17 @@ func coreRequestError(ctx context.Context, request model.Request, fallback error
 }
 
 var (
-	ErrCoreInput          = errors.New("invalid core service input")
-	ErrCoreAuthentication = errors.New("core authentication unavailable")
-	ErrCoreUnsupported    = errors.New("core capability unavailable")
-	ErrCoreBackend        = errors.New("invalid core backend response")
-	ErrCoreIndexMissing   = errors.New("published index unavailable")
-	ErrCoreResultExpired  = errors.New("retained result unavailable")
-	ErrCoreStoreChanged   = errors.New("store identity changed")
-	ErrCoreLimit          = errors.New("core resource limit reached")
-	ErrCoreAmbiguous      = errors.New("symbol selection is ambiguous")
+	ErrCoreInput           = errors.New("invalid core service input")
+	ErrCoreAuthentication  = errors.New("core authentication unavailable")
+	ErrCoreUnsupported     = errors.New("core capability unavailable")
+	ErrCoreBackend         = errors.New("invalid core backend response")
+	ErrCoreIndexMissing    = errors.New("published index unavailable")
+	ErrCoreSnapshotExpired = errors.New("pinned snapshot expired")
+	ErrCoreResultExpired   = errors.New("retained result unavailable")
+	ErrCoreStoreChanged    = errors.New("store identity changed")
+	ErrCoreStoreRecovery   = errors.New("store recovery required")
+	ErrCoreLimit           = errors.New("core resource limit reached")
+	ErrCoreAmbiguous       = errors.New("symbol selection is ambiguous")
 )
 
 // marshalCoreResponse is used only for bounded, sanitized service errors.

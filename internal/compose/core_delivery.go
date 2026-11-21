@@ -133,11 +133,15 @@ func (b *CoreBackend) verifyPackDelivery(ctx context.Context, principal app.Core
 			return coreStoreError(err)
 		}
 		defer release()
-		handle, err := b.loadCLIPack(ctx, principal, token)
-		if err != nil {
-			return coreStoreError(err)
+		if handle := app.SymbolPackForDelivery(ctx, token, principal.Digest); handle != nil {
+			recheck = handle.Recheck
+		} else {
+			handle, err := b.loadCLIPack(ctx, principal, token)
+			if err != nil {
+				return coreStoreError(err)
+			}
+			recheck = handle.Recheck
 		}
-		recheck = handle.Recheck
 	} else {
 		recheck = func(ctx context.Context) error {
 			_, err := b.packCache.GetRetained(ctx, token, principal.Digest, guard)

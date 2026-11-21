@@ -4,11 +4,9 @@ package compose
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -55,15 +53,6 @@ type NativeCatalogAdmin struct {
 	store          *catalog.Store
 	mutation       *runtime.Writer
 	kind, worktree string
-}
-
-func nativeOperationID() (string, error) {
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return "", err
-	}
-	id[6], id[8] = id[6]&15|64, id[8]&63|128
-	return fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:]), nil
 }
 
 func OpenNativeAdmin(ctx context.Context, installation, selected, kind, worktree string) (_ *NativeCatalogAdmin, release func() error, resultErr error) {
@@ -195,6 +184,9 @@ func openNativeCore(ctx context.Context, installation, selected, worktree, profi
 	defer cancel()
 	n, err := openNativeScope(bounded, installation, selected, worktree, profile, cpus)
 	if err != nil {
+		if errors.Is(err, sqliteowner.ErrCacheCapacity) {
+			return nil, nil, errors.Join(app.ErrCoreLimit, err)
+		}
 		return nil, nil, err
 	}
 	release = n.Close

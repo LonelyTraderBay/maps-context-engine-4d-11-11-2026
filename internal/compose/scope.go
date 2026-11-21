@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	ErrScopeInput   = errors.New("invalid scope composition input")
-	ErrScopeChanged = errors.New("scope changed during observation")
+	ErrScopeInput           = errors.New("invalid scope composition input")
+	ErrScopeChanged         = errors.New("scope changed during observation")
+	ErrScopeSnapshotExpired = errors.New("pinned generation is no longer available")
 )
 
 // ScopeAccess is a caller-owned authentication and authorization boundary.
@@ -68,10 +69,16 @@ func (r *ScopeReader) Resolve(ctx context.Context, principal app.CorePrincipal, 
 	}
 	first, err := r.observe(ctx, principal, generationID)
 	if err != nil {
+		if generationID != "" && errors.Is(err, index.ErrSnapshotUnavailable) {
+			return ScopeObservation{}, ErrScopeSnapshotExpired
+		}
 		return ScopeObservation{}, err
 	}
 	second, err := r.observe(ctx, principal, first.Generation.GenerationID)
 	if err != nil {
+		if errors.Is(err, index.ErrSnapshotUnavailable) {
+			return ScopeObservation{}, ErrScopeSnapshotExpired
+		}
 		return ScopeObservation{}, err
 	}
 	if model.ComparePinnedScope(first.Vector, second.Vector, 32768) != nil || !reflect.DeepEqual(first.Binding, second.Binding) || first.Generation != second.Generation || first.Records != second.Records {
@@ -150,6 +157,9 @@ func (r *ScopeReader) Recheck(ctx context.Context, principal app.CorePrincipal, 
 	}
 	current, err := r.observe(ctx, principal, pinned.Members[0].GenerationID)
 	if err != nil {
+		if errors.Is(err, index.ErrSnapshotUnavailable) {
+			return ScopeObservation{}, ErrScopeSnapshotExpired
+		}
 		return ScopeObservation{}, err
 	}
 	if model.ComparePinnedScope(pinned, current.Vector, 32768) != nil {

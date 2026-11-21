@@ -44,6 +44,45 @@ func TestStateDomainRejectsOrdinaryUserState(t *testing.T) {
 	}
 }
 
+func TestStateDomainPlatformFilesystemFixture(t *testing.T) {
+	native, other := os.Getenv("MCE4D_PLATFORM_EXT4_FIXTURE"), os.Getenv("MCE4D_PLATFORM_DRVFS_FIXTURE")
+	if native == "" && other == "" {
+		t.Skip("requires explicit Linux and DrvFS fixture directories")
+	}
+	if !filepath.IsAbs(native) || !filepath.IsAbs(other) || native == other || os.Geteuid() != 0 {
+		t.Fatal("fixture requires two absolute directories and a root-owned Linux control")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, tc := range []struct {
+		name, path string
+		ext4       bool
+		want       error
+	}{
+		{"ext4", native, true, nil},
+		{"drvfs", other, false, ErrStateUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var fs unix.Statfs_t
+			if err := unix.Statfs(tc.path, &fs); err != nil {
+				t.Fatal(err)
+			}
+			if (uint64(fs.Type) == uint64(unix.EXT4_SUPER_MAGIC)) != tc.ext4 {
+				t.Fatalf("wrong fixture filesystem: %#x", fs.Type)
+			}
+			root, err := paths.OpenRoot(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			if err := rootManagedAncestors(ctx, root, true); !errors.Is(err, tc.want) {
+				t.Fatalf("filesystem %#x: got %v, want %v", fs.Type, err, tc.want)
+			}
+			t.Logf("kernel filesystem magic %#x", fs.Type)
+		})
+	}
+}
+
 const protectedFixtureStatePath = "/managed/home/.local/state/mce4d"
 
 type protectedKernelFixture struct {

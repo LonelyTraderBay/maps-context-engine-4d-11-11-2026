@@ -5,44 +5,22 @@ package compose
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"path"
-	"strings"
 	"time"
 
-	golanganalysis "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/analysis/golang"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/app"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/indexer"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/inventory"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
-	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/overview"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/policy"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/snapshot"
 	sqliteowner "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
-	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/module"
 )
-
-type NativeIndexProgress struct {
-	GenerationID, SnapshotDigest string
-	Files                        int
-	Unchanged                    bool
-}
-
-func nativeMilliseconds(value int64) (time.Duration, error) {
-	if value < 1 || value > int64((1<<63-1)/time.Millisecond) {
-		return 0, app.ErrCoreInput
-	}
-	return time.Duration(value) * time.Millisecond, nil
-}
 
 // RunNativeIndex is an explicit foreground command. Watch owns one worktree
 // writer, takes short SQL transactions, and releases every resource on return.
-// It runs only the embedded syntax analyzer and policy-pinned Git metadata tools.
+// It publishes captured syntax and any bounded, independently verified Go facts.
 func RunNativeIndex(ctx context.Context, installation, selected, worktree, profile string, cpus int, full, watch bool, progress func(NativeIndexProgress) error) (resultErr error) {
 	startup, cancel := context.WithTimeout(ctx, 15*time.Second)
 	n, err := openNativeScope(startup, installation, selected, worktree, profile, cpus)
@@ -87,6 +65,10 @@ func RunNativeIndex(ctx context.Context, installation, selected, worktree, profi
 	for {
 		bounded, cancel := context.WithTimeout(ctx, deadline)
 		result, err := n.indexOnce(bounded, writer, job, full)
+		if err != nil {
+			// A nested authority check can refuse access when its context expires.
+			err = errors.Join(err, bounded.Err())
+		}
 		cancel()
 		if err != nil {
 			return err
@@ -295,115 +277,45 @@ func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job
 			resultErr = errors.Join(resultErr, store.ReleaseProviderStage(cleanup, write, stream, authorize))
 		}
 	}()
-	classes := make([]index.FileClassification, len(manifest.Files))
-	for j, file := range manifest.Files {
-		kind := "text"
-		generated := false
-		if strings.HasSuffix(file.Path, ".go") {
-			kind = "go"
-			if source, ok := captured.snapshot.File(file.Path); ok {
-				parsed, _ := parser.ParseFile(token.NewFileSet(), file.Path, source.Bytes(), parser.PackageClauseOnly|parser.ParseComments)
-				generated = parsed != nil && ast.IsGenerated(parsed)
-			}
-		}
-		classes[j] = index.FileClassification{Path: file.Path, Kind: kind, Generated: generated}
-	}
-	for offset := 0; offset < len(classes); offset += 256 {
-		end := min(offset+256, len(classes))
-		if err := store.StageFiles(ctx, index.StageFilesRequest{Capture: write, Offset: offset, Files: classes[offset:end]}); err != nil {
-			return NativeIndexProgress{}, err
-		}
+	if err := stageNativeFiles(ctx, store, write, authorize); err != nil {
+		return NativeIndexProgress{}, err
 	}
 	stream, err = store.BeginProviderStage(ctx, write, authorize)
 	if err != nil {
 		return NativeIndexProgress{}, err
 	}
 	started = true
-	sequence := int64(1)
-	packages := map[string]bool{}
-	analyzed := map[string]string{}
-	modules := nativeSyntaxModules(captured.snapshot, n.binding.Profile)
-	var unavailableModules int64
-	for _, file := range manifest.Files {
-		if file.Status != "captured" || !strings.HasSuffix(file.Path, ".go") || strings.HasSuffix(file.Path, "_test.go") && !n.binding.Profile.TestsEnabled {
-			continue
-		}
-		source, _ := captured.snapshot.File(file.Path)
-		parsed, _ := parser.ParseFile(token.NewFileSet(), file.Path, source.Bytes(), parser.PackageClauseOnly)
-		packageName := "invalid"
-		if parsed != nil && parsed.Name != nil && token.IsIdentifier(parsed.Name.Name) {
-			packageName = parsed.Name.Name
-		}
-		directory := path.Dir(file.Path)
-		moduleRoot, modulePath, ok := nativeSyntaxModuleFor(modules, directory)
-		if !ok {
-			unavailableModules++
-			continue
-		}
-		variant := "production"
-		if strings.HasSuffix(file.Path, "_test.go") {
-			variant = "internal_test"
-			if strings.HasSuffix(packageName, "_test") {
-				packageName = strings.TrimSuffix(packageName, "_test")
-				variant = "external_test"
-			}
-		}
-		moduleKey, err := overview.GoModuleID(n.binding.WorktreeID, path.Join(moduleRoot, "go.mod"))
+	syntax, err := stageNativeGoSyntax(ctx, store, write, stream, n.binding)
+	if err != nil {
+		return NativeIndexProgress{}, err
+	}
+	sequence, candidates := syntax.sequence, syntax.candidates
+	analyzed, unavailableModules, ambiguousPackages := syntax.analyzed, syntax.unavailableModules, syntax.ambiguousPackages
+	var typed *nativeTypedIndex
+	if !ambiguousPackages && unavailableModules == 0 {
+		typed, err = i.typedIndex(ctx, captured, candidates)
 		if err != nil {
 			return NativeIndexProgress{}, err
 		}
-		parts := make([]model.CanonicalValue, 0, 5)
-		for _, value := range []string{moduleKey, moduleRoot, directory, packageName, variant} {
-			part, err := model.CanonicalString(value)
-			if err != nil {
+	}
+	if typed != nil {
+		defer func() { resultErr = errors.Join(resultErr, typed.proof.Close()) }()
+		if len(typed.relations) != 0 {
+			batch := model.ProviderBatch{ProviderProtocol: 1, Type: "analyze_batch", JobID: job, Sequence: sequence, Packages: []model.PackageFact{}, Symbols: []model.SymbolFact{}, Relations: typed.relations, Diagnostics: []model.DiagnosticFact{}}
+			if _, err := store.StageProviderBatch(ctx, index.StageProviderRequest{Capture: write, Stream: stream, Batch: batch, MaxFrameBytes: 16 << 20}); err != nil {
 				return NativeIndexProgress{}, err
 			}
-			parts = append(parts, part)
-		}
-		_, packageKey, err := model.EncodeCanonical("go-syntax-package-location-v1", model.CanonicalArray(parts), 32768)
-		if err != nil {
-			return NativeIndexProgress{}, err
-		}
-		suffix := strings.TrimPrefix(strings.TrimPrefix(directory, moduleRoot), "/")
-		if moduleRoot == "." {
-			suffix = directory
-		}
-		importPath := modulePath
-		if suffix != "" && suffix != "." {
-			importPath += "/" + suffix
-		}
-		if variant == "external_test" {
-			importPath += "_test"
-		}
-		result, err := golanganalysis.AnalyzeSyntaxFile(ctx, golanganalysis.SyntaxInput{Snapshot: captured.snapshot, Profile: n.binding.Profile, Path: file.Path, PackageKey: packageKey, ImportPath: importPath, ModuleKey: moduleKey, PackageName: packageName, Variant: variant, Scanner: i.request.Scanner, MaxManifestBytes: 64 << 20, MaxFileBytes: 2 << 20, MaxNodes: 1000000, MaxDepth: 512, MaxFacts: 100000, MaxOutputBytes: 16 << 20})
-		if err != nil {
-			return NativeIndexProgress{}, err
-		}
-		batch := model.ProviderBatch{ProviderProtocol: 1, Type: "analyze_batch", JobID: job, Sequence: sequence, Packages: []model.PackageFact{}, Symbols: result.Symbols, Relations: []model.RelationFact{}, Diagnostics: result.Diagnostics}
-		if !packages[packageKey] {
-			batch.Packages = append(batch.Packages, result.Package)
-			packages[packageKey] = true
-		}
-		if _, err := store.StageProviderBatch(ctx, index.StageProviderRequest{Capture: write, Stream: stream, Batch: batch, MaxFrameBytes: 16 << 20}); err != nil {
-			return NativeIndexProgress{}, err
-		}
-		sequence++
-		analyzed[file.Path] = result.ContentHash
-		if len(result.Diagnostics) > 0 {
-			failures := []index.ParseFailure{}
-			for _, d := range result.Diagnostics {
-				if d.Code == "GO_PARSE_ERROR" {
-					failures = append(failures, index.ParseFailure{Path: file.Path, DiagnosticID: d.DiagnosticID})
-				}
-			}
-			if len(failures) > 0 {
-				if err := store.MarkParseErrors(ctx, index.MarkParseErrorsRequest{Capture: write, Failures: failures}); err != nil {
-					return NativeIndexProgress{}, err
-				}
-			}
+			sequence++
 		}
 	}
 	done := model.ProviderDone{ProviderProtocol: 1, Type: "analyze_done", JobID: job, Sequence: sequence, Status: "partial", InputDigest: manifest.SnapshotDigest, Capabilities: []model.Capability{{Name: "go_syntax", ProviderID: "embedded-go-syntax", ProviderVersion: "1", Status: "partial"}}, Gaps: []model.Gap{{Code: "BUILD_SELECTION_UNVERIFIED", Reason: "Captured syntax only; build selection, import identity and typed dependency closure are not verified.", SourceRefs: []model.SourceRef{}}}}
+	if typed != nil {
+		done.Capabilities = append(done.Capabilities, model.Capability{Name: "go_semantics", ProviderID: "embedded-go-captured", ProviderVersion: "1", Status: "partial"})
+		done.Gaps = []model.Gap{{Code: "GRAPH_COVERAGE_PARTIAL", Reason: "Static Go relations are limited to verified local package closures and do not establish runtime dispatch.", SourceRefs: []model.SourceRef{}}}
+		if typed.selected != len(candidates) {
+			done.Gaps = append(done.Gaps, model.Gap{Code: "BUILD_SELECTION_UNVERIFIED", Reason: "Some captured Go packages had no verified typed closure.", SourceRefs: []model.SourceRef{}})
+		}
+	}
 	if unavailableModules > 0 {
 		done.Gaps = append(done.Gaps, model.Gap{Code: "MODULE_MANIFEST_UNAVAILABLE", Reason: "Captured Go files without a valid configured nearest module were not assigned an import identity.", Count: &unavailableModules, SourceRefs: []model.SourceRef{}})
 	}
@@ -420,52 +332,16 @@ func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job
 				return index.ErrCaptureMismatch
 			}
 		}
+		if typed != nil {
+			if err := typed.proof.Check(ctx); err != nil {
+				return err
+			}
+		}
 		return n.recheckBinding(ctx)
 	}, MaxFacts: 1000000, MaxFrameBytes: 16 << 20})
 	if err != nil {
 		return NativeIndexProgress{}, err
 	}
 	published = true
-	return NativeIndexProgress{GenerationID: generation, SnapshotDigest: manifest.SnapshotDigest, Files: len(manifest.Files)}, nil
-}
-
-type nativeSyntaxModule struct {
-	importPath string
-	configured bool
-}
-
-func nativeSyntaxModules(captured *snapshot.Snapshot, profile *model.GoProfile) map[string]nativeSyntaxModule {
-	configured := map[string]bool{}
-	for _, root := range profile.ModuleRoots {
-		configured[root] = true
-	}
-	modules := map[string]nativeSyntaxModule{}
-	for _, entry := range captured.Manifest().Files {
-		if path.Base(entry.Path) != "go.mod" {
-			continue
-		}
-		root := path.Dir(entry.Path)
-		item := nativeSyntaxModule{configured: configured[root]}
-		if entry.Status == "captured" {
-			if file, ok := captured.File(entry.Path); ok {
-				parsed, err := modfile.Parse(entry.Path, file.Bytes(), nil)
-				if err == nil && parsed.Module != nil && module.CheckPath(parsed.Module.Mod.Path) == nil && len(parsed.Module.Mod.Path) <= 512 {
-					item.importPath = parsed.Module.Mod.Path
-				}
-			}
-		}
-		modules[root] = item
-	}
-	return modules
-}
-
-func nativeSyntaxModuleFor(modules map[string]nativeSyntaxModule, directory string) (string, string, bool) {
-	for current := directory; ; current = path.Dir(current) {
-		if item, ok := modules[current]; ok {
-			return current, item.importPath, item.configured && item.importPath != ""
-		}
-		if current == "." {
-			return "", "", false
-		}
-	}
+	return NativeIndexProgress{GenerationID: generation, SnapshotDigest: manifest.SnapshotDigest, Files: len(manifest.Files), Typed: typed != nil}, nil
 }

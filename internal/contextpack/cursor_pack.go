@@ -296,7 +296,7 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 		}
 		target := p.report.Target
 		response := model.Response{SchemaVersion: 1, RequestID: in.RequestID, Status: status, Scope: &p.report.Scope, Freshness: model.Freshness{Status: "not_checked", Scope: "none", BufferScope: "disk_only", Consistency: "captured_bytes_with_observed_stability", SourceView: "indexed_snapshot"}, Coverage: coverage, Readiness: "needs_context", Data: model.PackData{Operation: operation, PackToken: packToken, TargetRefs: []model.GraphRef{&target}, Items: append([]model.EvidenceItem{}, items...), EditPreconditionValidated: false}, Pagination: model.Pagination{Truncated: truncated, EnumerationComplete: true, ReturnedCount: int64(len(items)), RequiredPending: &required, OptionalPending: &optional, NextCursor: nextCursor, LimitReason: reason}, Budget: model.Budget{MaxOutputBytes: cap, DeliveryMode: in.DeliveryMode}, Warnings: groupedGaps(warningsRemaining, visibleWarnings)}
-		blocks, e := settlePagedResponse(&response, operation)
+		blocks, e := measurePagedCandidate(&response)
 		if e != nil {
 			return PackPage{}, SignedPosition{}, e
 		}
@@ -429,6 +429,14 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 	if best.Response.Pagination.Truncated && !CursorAdvances(previous, bestPosition) {
 		return PackPage{}, ErrContinuationUnavailable
 	}
+	// Trial pages only measure exact bytes. Validate the full wire contract
+	// once for the selected page, before the final authority checks.
+	if _, err = model.DecodeResponseJSON(best.Blocks[0], int(best.Response.Budget.MaxOutputBytes), 4, operation, false); err != nil {
+		return PackPage{}, ErrInput
+	}
+	if err = model.ValidateDeliveredBytes(best.Response.Budget, best.Blocks); err != nil {
+		return PackPage{}, ErrInput
+	}
 	if err = p.codec.Recheck(ctx, packClaims, authorize); err != nil {
 		return PackPage{}, err
 	}
@@ -461,7 +469,7 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 	return best, nil
 }
 
-func settlePagedResponse(response *model.Response, operation string) ([][]byte, error) {
+func measurePagedCandidate(response *model.Response) ([][]byte, error) {
 	estimate := int64(0)
 	for i := 0; i < 8; i++ {
 		response.Budget.SerializedBytes = estimate
@@ -480,12 +488,6 @@ func settlePagedResponse(response *model.Response, operation string) ([][]byte, 
 			blocks := [][]byte{raw}
 			if response.Budget.DeliveryMode == "mcp_dual" {
 				blocks = append(blocks, append([]byte(nil), raw...))
-			}
-			if _, err = model.DecodeResponseJSON(raw, int(response.Budget.MaxOutputBytes), 4, operation, false); err != nil {
-				return nil, ErrInput
-			}
-			if err = model.ValidateDeliveredBytes(response.Budget, blocks); err != nil {
-				return nil, ErrInput
 			}
 			return blocks, nil
 		}

@@ -50,7 +50,7 @@ var _ search.Reader = (*Store)(nil)
 // Authorization callbacks must enforce the current actor/policy and may not
 // expose these internal results until their enclosing scope has been checked.
 func (s *Store) Search(ctx context.Context, request search.Request) (output search.Result, resultErr error) {
-	if s == nil || ctx == nil || s.lease == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) ||
+	if ctx == nil || !s.readable() ||
 		!validHash(request.ProfileID) || request.GenerationID != "" && !validUUID(request.GenerationID) ||
 		request.AuthorizeGeneration == nil || request.AuthorizePath == nil || request.Scanner == nil ||
 		request.Limit < 1 || request.Limit > 100 || request.MaxOutputBytes < 4096 || request.MaxOutputBytes > 1024*1024 ||
@@ -119,7 +119,7 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	if err := requireWAL(ctx, conn, false); err != nil {
+	if err := requireReadJournal(ctx, conn, s.image); err != nil {
 		return output, err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

@@ -14,16 +14,19 @@ import (
 )
 
 type TypedInput struct {
-	Loader         CapturedLoaderInput
-	PackageKey     string
-	ModuleKey      string
-	OtherPackages  []TypedPackageIdentity
-	SyntaxCache    *SyntaxCache // optional parse-only cache, never typed facts
-	MaxNodes       int
-	MaxDepth       int
-	MaxFacts       int
-	MaxOccurrences int
-	MaxOutputBytes int
+	Loader        CapturedLoaderInput
+	PackageKey    string
+	ModuleKey     string
+	OtherPackages []TypedPackageIdentity
+	// OtherPackageCandidates supplies capture-derived identities for packages
+	// that may be selected by this load. Only its verified local closure is used.
+	OtherPackageCandidates []TypedPackageIdentity
+	SyntaxCache            *SyntaxCache // optional parse-only cache, never typed facts
+	MaxNodes               int
+	MaxDepth               int
+	MaxFacts               int
+	MaxOccurrences         int
+	MaxOutputBytes         int
 }
 
 // Package identities are supplied by the coordinator, never guessed from
@@ -74,11 +77,11 @@ type TypedResult struct {
 // AST pointer is retained in or returned by TypedResult.
 func AnalyzeTypedCaptured(ctx context.Context, input TypedInput) (TypedResult, error) {
 	if ctx == nil || input.MaxNodes < 1 || input.MaxNodes > 1000000 || input.MaxDepth < 1 || input.MaxDepth > 512 || input.MaxFacts < 1 || input.MaxFacts > 100000 ||
-		input.MaxOccurrences < 1 || input.MaxOccurrences > 100000 || input.MaxOutputBytes < 1024 || input.MaxOutputBytes > 16*1024*1024 || len(input.OtherPackages) > 127 ||
+		input.MaxOccurrences < 1 || input.MaxOccurrences > 100000 || input.MaxOutputBytes < 1024 || input.MaxOutputBytes > 16*1024*1024 || len(input.OtherPackages)+len(input.OtherPackageCandidates) > 127 ||
 		len(input.PackageKey) < 1 || len(input.PackageKey) > 192*4 || len(input.ModuleKey) < 1 || len(input.ModuleKey) > 192*4 {
 		return TypedResult{}, ErrLoaderInput
 	}
-	for _, identity := range input.OtherPackages {
+	for _, identity := range append(append([]TypedPackageIdentity(nil), input.OtherPackages...), input.OtherPackageCandidates...) {
 		if len(identity.ImportPath) < 1 || len(identity.ImportPath) > 2048*4 || len(identity.PackageKey) < 1 || len(identity.PackageKey) > 192*4 || len(identity.ModuleKey) < 1 || len(identity.ModuleKey) > 192*4 {
 			return TypedResult{}, ErrLoaderInput
 		}
@@ -92,6 +95,7 @@ func AnalyzeTypedCaptured(ctx context.Context, input TypedInput) (TypedResult, e
 		return TypedResult{}, err
 	}
 	input.OtherPackages = append([]TypedPackageIdentity(nil), input.OtherPackages...)
+	input.OtherPackageCandidates = append([]TypedPackageIdentity(nil), input.OtherPackageCandidates...)
 	var extracted *TypedResult
 	loader := input.Loader
 	loader.consumeTypes = func(ctx context.Context, pkg *packages.Package, overlay *CapturedOverlay, files map[*packages.Package][]string) error {
@@ -148,8 +152,37 @@ type typedRange struct {
 }
 
 type typedScope struct {
-	scope Scope
-	depth int
+	scope        Scope
+	prefixMaxEnd int64
+}
+
+type typedFileScopes struct {
+	packageID string
+	levels    [][]typedScope
+}
+
+func (f *typedFileScopes) add(scope Scope, depth int) {
+	if depth == 0 {
+		f.packageID = scope.ID
+		return
+	}
+	for len(f.levels) < depth {
+		f.levels = append(f.levels, nil)
+	}
+	f.levels[depth-1] = append(f.levels[depth-1], typedScope{scope: scope})
+}
+
+func (f *typedFileScopes) index() {
+	for _, level := range f.levels {
+		sort.Slice(level, func(i, j int) bool {
+			return level[i].scope.StartByte < level[j].scope.StartByte
+		})
+		var maxEnd int64
+		for i := range level {
+			maxEnd = max(maxEnd, level[i].scope.EndByte)
+			level[i].prefixMaxEnd = maxEnd
+		}
+	}
 }
 
 type typedSelection struct {
@@ -168,7 +201,7 @@ type typedCollector struct {
 	candidates      map[typedSite][]model.SymbolFact
 	caseScopes      map[typedRange]string
 	caseSymbols     map[string][]model.SymbolFact
-	fileScopes      map[string][]typedScope
+	fileScopes      map[string]typedFileScopes
 	objects         map[types.Object]string
 	output          TypedResult
 	usedBytes       int
@@ -199,12 +232,25 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 	}
 	identities := map[string]TypedPackageIdentity{pkg.PkgPath: {ImportPath: pkg.PkgPath, PackageKey: input.PackageKey, ModuleKey: input.ModuleKey}}
 	seenKeys := map[string]bool{input.PackageKey: true}
-	for _, identity := range input.OtherPackages {
+	addIdentity := func(identity TypedPackageIdentity) error {
 		if identity.ImportPath == "" || identity.PackageKey == "" || identity.ModuleKey == "" || identities[identity.ImportPath].ImportPath != "" || available[identity.ImportPath] == nil || seenKeys[identity.PackageKey] {
-			return TypedResult{}, ErrInputMismatch
+			return ErrInputMismatch
 		}
 		identities[identity.ImportPath] = identity
 		seenKeys[identity.PackageKey] = true
+		return nil
+	}
+	for _, identity := range input.OtherPackages {
+		if err := addIdentity(identity); err != nil {
+			return TypedResult{}, ErrInputMismatch
+		}
+	}
+	for _, identity := range input.OtherPackageCandidates {
+		if available[identity.ImportPath] != nil {
+			if err := addIdentity(identity); err != nil {
+				return TypedResult{}, err
+			}
+		}
 	}
 	var units []typedPackage
 	localPackages := make(map[string]bool, len(available))
@@ -215,7 +261,7 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 		}
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].pkg.PkgPath < units[j].pkg.PkgPath })
-	c := &typedCollector{ctx: ctx, input: input, pkg: pkg, overlay: overlay, selected: map[string]bool{}, localPackages: localPackages, candidates: map[typedSite][]model.SymbolFact{}, caseScopes: map[typedRange]string{}, caseSymbols: map[string][]model.SymbolFact{}, fileScopes: map[string][]typedScope{}, objects: map[types.Object]string{},
+	c := &typedCollector{ctx: ctx, input: input, pkg: pkg, overlay: overlay, selected: map[string]bool{}, localPackages: localPackages, candidates: map[typedSite][]model.SymbolFact{}, caseScopes: map[typedRange]string{}, caseSymbols: map[string][]model.SymbolFact{}, fileScopes: map[string]typedFileScopes{}, objects: map[types.Object]string{},
 		output: TypedResult{Status: "partial", Reasons: []string{}, Syntax: []SyntaxResult{}, Occurrences: []TypedOccurrence{}, Calls: []TypedCallSite{}}}
 	for _, unit := range units {
 		current := unit.pkg
@@ -254,6 +300,7 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 			}
 			c.output.Syntax = append(c.output.Syntax, syntax)
 			depths := map[string]int{}
+			var fileScopes typedFileScopes
 			for _, scope := range syntax.Scopes {
 				depth := 0
 				if scope.ParentID != "" {
@@ -269,7 +316,7 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 					return TypedResult{}, ErrInputMismatch
 				}
 				depths[scope.ID] = depth
-				c.fileScopes[filename] = append(c.fileScopes[filename], typedScope{scope: scope, depth: depth})
+				fileScopes.add(scope, depth)
 				if scope.Kind != "case" {
 					continue
 				}
@@ -279,6 +326,8 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 				}
 				c.caseScopes[key] = scope.ID
 			}
+			fileScopes.index()
+			c.fileScopes[filename] = fileScopes
 			for _, symbol := range syntax.Symbols {
 				if symbol.Path == nil || symbol.Range == nil || symbol.Kind == "file" || symbol.Kind == "package" || symbol.Kind == "closure" {
 					continue
@@ -662,27 +711,40 @@ func (c *typedCollector) identSite(ident *ast.Ident) (typedSite, error) {
 	return typedSite{path: filename, start: start, end: end, name: ident.Name}, nil
 }
 
-// The cap bounds worst-case nested-scope lookup until a later indexed graph
-// implementation can demonstrate a larger supported envelope.
+// Per-depth interval bounds skip unrelated sibling scopes. The inspection cap
+// still applies when many ranges overlap or the scopes are deeply nested.
 func (c *typedCollector) scopeFor(site typedSite) (string, error) {
-	best, bestDepth := "", -1
-	for _, entry := range c.fileScopes[site.path] {
-		c.scopeChecks++
-		if c.scopeChecks > 2000000 {
-			return "", ErrSyntaxLimit
-		}
-		if c.scopeChecks%1024 == 0 {
-			if err := c.ctx.Err(); err != nil {
-				return "", err
+	if err := c.ctx.Err(); err != nil {
+		return "", err
+	}
+	file := c.fileScopes[site.path]
+	best := file.packageID
+	for _, level := range file.levels {
+		end := sort.Search(len(level), func(i int) bool {
+			return level[i].scope.StartByte > site.start
+		})
+		found := ""
+		for i := end - 1; i >= 0 && level[i].prefixMaxEnd >= site.end; i-- {
+			c.scopeChecks++
+			if c.scopeChecks > 2000000 {
+				return "", ErrSyntaxLimit
 			}
+			if c.scopeChecks%1024 == 0 {
+				if err := c.ctx.Err(); err != nil {
+					return "", err
+				}
+			}
+			scope := level[i].scope
+			if scope.EndByte < site.end {
+				continue
+			}
+			if found != "" && found != scope.ID {
+				return "", ErrInputMismatch
+			}
+			found = scope.ID
 		}
-		if entry.scope.Kind != "package" && (entry.scope.StartByte > site.start || entry.scope.EndByte < site.end) {
-			continue
-		}
-		if entry.depth > bestDepth {
-			best, bestDepth = entry.scope.ID, entry.depth
-		} else if entry.depth == bestDepth && best != entry.scope.ID {
-			return "", ErrInputMismatch
+		if found != "" {
+			best = found
 		}
 	}
 	if best == "" {

@@ -32,6 +32,10 @@ type protectedWorktreeManifest struct {
 }
 
 func readWorktreeManifest(ctx context.Context, root *paths.Root, installation, worktree string) (protectedWorktreeManifest, [32]byte, error) {
+	return readWorktreeManifestForMaintenance(ctx, root, installation, worktree, "")
+}
+
+func readWorktreeManifestForMaintenance(ctx context.Context, root *paths.Root, installation, worktree, operation string) (protectedWorktreeManifest, [32]byte, error) {
 	var out protectedWorktreeManifest
 	var zero [32]byte
 	if rootManagedAncestors(ctx, root, true) != nil {
@@ -65,6 +69,9 @@ func readWorktreeManifest(ctx context.Context, root *paths.Root, installation, w
 		}
 	} else if out.Stage != "CREATING" || out.IndexIncarnation != "" || out.RecordsIncarnation != "" {
 		return out, zero, ErrProfileDenied
+	}
+	if err := checkMaintenanceGate(ctx, root, installation, worktree, operation); err != nil {
+		return out, zero, err
 	}
 	return out, sha256.Sum256(raw), ctx.Err()
 }
@@ -108,10 +115,19 @@ type ProtectedWorktreeOwner struct {
 func (o *ProtectedWorktreeOwner) Check(ctx context.Context) error { return o.check(ctx) }
 
 func (o *ProtectedWorktreeOwner) check(ctx context.Context) error {
-	if o == nil || o.closed.Load() || o.authorize == nil || o.profile.Check(ctx) != nil || o.domain.Check(ctx) != nil {
+	if o == nil || o.closed.Load() || o.authorize == nil {
 		return ErrProfileDenied
 	}
+	if err := o.profile.Check(ctx); err != nil {
+		return err
+	}
+	if err := o.domain.Check(ctx); err != nil {
+		return err
+	}
 	m, digest, err := readWorktreeManifest(ctx, o.control, o.profile.manifest.ProfileID, o.manifest.WorktreeID)
+	if errors.Is(err, ErrStoreRecoveryRequired) {
+		return err
+	}
 	if err != nil || digest != o.digest || m.Stage != "READY" {
 		return ErrProfileDenied
 	}
@@ -163,6 +179,9 @@ func openProtectedWorktree(ctx context.Context, rootPath, worktree string, autho
 		return nil, err
 	}
 	o.manifest, o.digest, err = readWorktreeManifest(ctx, o.control, p.manifest.ProfileID, worktree)
+	if errors.Is(err, ErrStoreRecoveryRequired) {
+		return nil, err
+	}
 	if err != nil || o.manifest.Stage != "READY" {
 		return nil, ErrProfileIncomplete
 	}

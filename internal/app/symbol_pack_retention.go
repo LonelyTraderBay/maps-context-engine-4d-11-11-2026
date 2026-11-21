@@ -203,6 +203,31 @@ type RetainedSymbolPack struct {
 	contentHash [32]byte
 }
 
+type symbolPackDeliveryKey struct{}
+
+// CoreService creates a fresh slot per CLI call. The backend submits and
+// verifies the handle synchronously within that call.
+type symbolPackDelivery struct {
+	pack *RetainedSymbolPack
+}
+
+// RememberSymbolPackDelivery records the handle prepared for this CLI response.
+func RememberSymbolPackDelivery(ctx context.Context, pack *RetainedSymbolPack) {
+	if delivery, ok := ctx.Value(symbolPackDeliveryKey{}).(*symbolPackDelivery); ok {
+		delivery.pack = pack
+	}
+}
+
+// SymbolPackForDelivery reuses only the same request's restored handle. The
+// caller must still recheck stored bytes, expiry and authority before delivery.
+func SymbolPackForDelivery(ctx context.Context, token, principal string) *RetainedSymbolPack {
+	delivery, _ := ctx.Value(symbolPackDeliveryKey{}).(*symbolPackDelivery)
+	if delivery == nil || delivery.pack == nil || delivery.pack.token != token || delivery.pack.principal != principal {
+		return nil
+	}
+	return delivery.pack
+}
+
 func (p *RetainedSymbolPack) Token() string {
 	if p == nil {
 		return ""

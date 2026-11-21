@@ -59,6 +59,13 @@ func discard(conn *sql.Conn) error {
 	return err
 }
 
+func (s *Store) requireReadJournal(ctx context.Context, conn *sql.Conn) error {
+	if s.image {
+		return ctx.Err()
+	}
+	return wal(ctx, conn, false)
+}
+
 func wal(ctx context.Context, conn *sql.Conn, enable bool) error {
 	query := "PRAGMA journal_mode"
 	if enable {

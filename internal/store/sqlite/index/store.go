@@ -15,6 +15,7 @@ import (
 // Public transport must wait until the real OS lease is wired.
 type Store struct {
 	readers   *sql.DB
+	image     bool
 	writer    *sql.DB
 	lease     ports.LifecycleLease
 	identity  Identity
@@ -27,11 +28,29 @@ func Open(ctx context.Context, readers, writer *sql.DB, worktreeID string, lease
 	if ctx == nil || !withinPoolLimit(readers, 4) || !withinPoolLimit(writer, 1) || lease == nil || !validUUID(worktreeID) {
 		return nil, ErrInvalidStore
 	}
-	identity, err := readIdentity(ctx, readers, worktreeID, lease)
+	identity, err := readIdentity(ctx, readers, worktreeID, lease, false)
 	if err != nil {
 		return nil, err
 	}
 	return &Store{readers: readers, writer: writer, lease: lease, identity: identity}, nil
+}
+
+// OpenAuthenticatedImage borrows a receipt-verified immutable SQLite pool.
+// Image mode has no writer. The owner retains the lifecycle lease.
+func OpenAuthenticatedImage(ctx context.Context, readers *sql.DB, worktreeID string, lease ports.LifecycleLease) (*Store, error) {
+	if ctx == nil || !withinPoolLimit(readers, 1) || lease == nil || !validUUID(worktreeID) {
+		return nil, ErrInvalidStore
+	}
+	identity, err := readIdentity(ctx, readers, worktreeID, lease, true)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{readers: readers, lease: lease, identity: identity, image: true}, nil
+}
+
+func (s *Store) readable() bool {
+	return s != nil && s.lease != nil && withinPoolLimit(s.readers, 4) &&
+		(s.image || withinPoolLimit(s.writer, 1))
 }
 
 func withinPoolLimit(db *sql.DB, maximum int) bool {
@@ -45,10 +64,10 @@ func withinPoolLimit(db *sql.DB, maximum int) bool {
 // Identity revalidates the current schema and incarnation under the caller's
 // shared lease; an observed replacement never silently becomes this store.
 func (s *Store) Identity(ctx context.Context) (Identity, error) {
-	if s == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) || s.lease == nil || ctx == nil {
+	if ctx == nil || !s.readable() {
 		return Identity{}, ErrInvalidStore
 	}
-	identity, err := readIdentity(ctx, s.readers, s.identity.WorktreeID, s.lease)
+	identity, err := readIdentity(ctx, s.readers, s.identity.WorktreeID, s.lease, s.image)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -58,7 +77,7 @@ func (s *Store) Identity(ctx context.Context) (Identity, error) {
 	return identity, nil
 }
 
-func readIdentity(ctx context.Context, db *sql.DB, worktreeID string, lease ports.LifecycleLease) (identity Identity, resultErr error) {
+func readIdentity(ctx context.Context, db *sql.DB, worktreeID string, lease ports.LifecycleLease, image bool) (identity Identity, resultErr error) {
 	if err := lease.Check(ctx, worktreeID, ports.SharedLease); err != nil {
 		return Identity{}, err
 	}
@@ -72,7 +91,7 @@ func readIdentity(ctx context.Context, db *sql.DB, worktreeID string, lease port
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	if err := requireWAL(ctx, conn, false); err != nil {
+	if err := requireReadJournal(ctx, conn, image); err != nil {
 		return Identity{}, err
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
