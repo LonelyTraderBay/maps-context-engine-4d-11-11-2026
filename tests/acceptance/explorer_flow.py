@@ -1,11 +1,13 @@
 """Check the packaged static flow against an authored, protected fixture."""
 from hashlib import sha256
+from contextlib import closing
 import json
 import os
 from pathlib import Path
 import re
 import selectors
 import signal
+import sqlite3
 import subprocess
 
 SOURCE = """package demo
@@ -35,7 +37,12 @@ PROFILE = {"schema_version": 1, "sql_profile": {"dialect": "mysql", "version": "
 def prepare():
     return {"flow.go": SOURCE, "schema.sql": SCHEMA, "mce4d-flow.json": json.dumps(PROFILE) + "\n"}
 
-def exercise(root, setup, worktree, profile, active):
+def prepare_large_graph():
+    return {f"viewport_{part:02d}.go": "package demo\n" + "".join(
+        f"func Viewport{part:02d}{number:04d}() int {{ return {number} }}\n" for number in range(2000)
+    ) for part in range(25)}
+
+def exercise(root, setup, worktree, profile, active, large_graph=False):
     subprocess.run(["/usr/sbin/ip", "link", "set", "lo", "up"], check=True, timeout=5)
     console = subprocess.Popen(["/mce4d", "explorer", "--worktree-id", worktree, "--profile-id", profile,
                                 "--listen", "127.0.0.1:0"], preexec_fn=setup(1000), env={
@@ -58,20 +65,33 @@ def exercise(root, setup, worktree, profile, active):
         tmp = os.environ["MCE4D_T083_BROWSER_TMP"]
         data = {"origin": origin_line.removeprefix("Explorer "), "code": code_line.removeprefix("Bootstrap code: "),
                 "schema": SCHEMA.strip().removesuffix(";"), "schema_hash": sha256(SCHEMA.encode()).hexdigest()}
-        child = subprocess.run([os.environ["MCE4D_T083_NODE"], str(Path(__file__).with_suffix(".browser.mjs"))],
-            input=json.dumps(data), text=True, capture_output=True, timeout=100, user=1000, group=1000, extra_groups=[], env={
+        script = Path(__file__).with_name("explorer_viewport.browser.mjs") if large_graph else Path(__file__).with_suffix(".browser.mjs")
+        child = subprocess.run([os.environ["MCE4D_T083_NODE"], str(script)],
+            input=json.dumps(data), text=True, capture_output=True, timeout=140, user=1000, group=1000, extra_groups=[], env={
                 "PATH": "/usr/bin:/bin", "HOME": tmp, "TMPDIR": tmp,
                 "LD_LIBRARY_PATH": os.environ["MCE4D_T083_BROWSER_LIBS"],
                 "MCE4D_T083_CHROMIUM": os.environ["MCE4D_T083_CHROMIUM"],
             })
         assert child.returncode == 0, child.stderr
         proof = json.loads(child.stdout)
-        assert proof["status"] == "PASS" and proof["case"] == "T097_NATIVE_BROWSER_FLOW"
+        expected = "T099_NATIVE_VIEWPORT" if large_graph else "T097_NATIVE_BROWSER_FLOW"
+        assert proof["status"] == "PASS" and proof["case"] == expected
         print(json.dumps(proof), flush=True)
     finally:
         if console.poll() is None:
             console.send_signal(signal.SIGINT)
         console.wait(timeout=8)
     assert console.returncode == 0
-    for name, raw in prepare().items():
+    if large_graph:
+        database, = (root / "profiles" / "runtime").rglob("index.sqlite")
+        wal = database.with_name("index.sqlite-wal")
+        assert not wal.exists() or wal.stat().st_size == 0
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
+            result = db.execute("""
+                SELECT count(*) FROM active_generations a JOIN symbols s USING(generation_id)
+                WHERE a.profile_id=? AND s.name GLOB 'Viewport[0-9]*'
+            """, (profile,)).fetchone()
+        assert result == (50000,), result
+        print(json.dumps({"case": "T099_INDEXED_SCALE", "status": "PASS", "authored_functions": result[0]}), flush=True)
+    for name, raw in (prepare_large_graph() if large_graph else prepare()).items():
         assert (root / "target" / name).read_text() == raw

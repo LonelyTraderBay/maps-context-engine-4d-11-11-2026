@@ -30,14 +30,18 @@ func checkFactRanges(ctx context.Context, db publicationQueryer, worktree string
 	paths := map[string]bool{}
 	count := 0
 	check := func(name string, start, end int64) error {
-		if policy.CheckPath(name) != nil {
-			return ErrPublishIntegrity
-		}
-		if err := capture.Scanner.CheckContent([]byte(name)); err != nil {
-			return err
-		}
-		if err := capture.Authorize(ctx, worktree, name, manifest.PolicyDigest, capture.PolicyEpoch); err != nil {
-			return err
+		// Paths are checked on first use and again after the scan. Every
+		// range still has to be valid against the pinned source bytes.
+		if !paths[name] {
+			if policy.CheckPath(name) != nil {
+				return ErrPublishIntegrity
+			}
+			if err := capture.Scanner.CheckContent([]byte(name)); err != nil {
+				return err
+			}
+			if err := capture.Authorize(ctx, worktree, name, manifest.PolicyDigest, capture.PolicyEpoch); err != nil {
+				return err
+			}
 		}
 		file, ok := capture.Snapshot.File(name)
 		if !ok || start < 0 || end < start || end > int64(file.Len()) {

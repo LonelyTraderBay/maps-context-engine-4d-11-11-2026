@@ -1,0 +1,783 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mce4d:ai:lineage:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "nodes",
+    "links"
+  ],
+  "properties": {
+    "format": {
+      "const": "mce4d-ai-lineage-v1"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      },
+      "minItems": 1,
+      "maxItems": 128
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/link"
+      },
+      "maxItems": 512
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,127}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "split_role": {
+      "enum": [
+        "train",
+        "validation",
+        "test",
+        "evaluation"
+      ]
+    },
+    "chunk_unit": {
+      "enum": [
+        "tokens",
+        "bytes",
+        "characters"
+      ]
+    },
+    "metric": {
+      "enum": [
+        "cosine",
+        "dot_product",
+        "euclidean"
+      ]
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,11})(\\.[0-9]{1,12})?$"
+    },
+    "dimension": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1048576
+    },
+    "positive": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400000
+    },
+    "nonnegative": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "identifiers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/identifier"
+      },
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "dependency",
+            "transformation",
+            "training_input",
+            "evaluation_input",
+            "serves",
+            "fallback"
+          ]
+        }
+      }
+    },
+    "node": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "dataset"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "schema_digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "split"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "split_role": {
+                  "$ref": "#/$defs/split_role"
+                },
+                "schema_digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "preprocessing"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "input_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "output_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "features"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "feature_names": {
+                  "$ref": "#/$defs/identifiers"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "training"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "input_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "output_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "model"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "provider": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "artifact_id": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "input_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "output_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "inference"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "input_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "output_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "timeout_ms": {
+                  "$ref": "#/$defs/positive"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "evaluation"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "metric_name": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "threshold": {
+                  "$ref": "#/$defs/decimal"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "serving"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "input_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "output_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "timeout_ms": {
+                  "$ref": "#/$defs/positive"
+                },
+                "retry_limit": {
+                  "$ref": "#/$defs/nonnegative"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "prompt"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "input_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "tokenizer"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "provider": {
+                  "$ref": "#/$defs/identifier"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "chunker"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "chunk_size": {
+                  "$ref": "#/$defs/positive"
+                },
+                "overlap": {
+                  "$ref": "#/$defs/nonnegative"
+                },
+                "unit": {
+                  "$ref": "#/$defs/chunk_unit"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "embedding"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "dimension": {
+                  "$ref": "#/$defs/dimension"
+                },
+                "metric": {
+                  "$ref": "#/$defs/metric"
+                },
+                "provider": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "artifact_id": {
+                  "$ref": "#/$defs/identifier"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "vector_index"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "dimension": {
+                  "$ref": "#/$defs/dimension"
+                },
+                "metric": {
+                  "$ref": "#/$defs/metric"
+                },
+                "schema_digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "retrieval"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "input_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "output_schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "timeout_ms": {
+                  "$ref": "#/$defs/positive"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "reranker"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "provider": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "digest": {
+                  "$ref": "#/$defs/digest"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "output_schema"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "schema_digest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "fallback"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "artifact_id": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "retry_limit": {
+                  "$ref": "#/$defs/nonnegative"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "metadata"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "kind": {
+              "const": "tool_scope"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "tool_scopes": {
+                  "$ref": "#/$defs/identifiers"
+                },
+                "revision": {
+                  "$ref": "#/$defs/identifier"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

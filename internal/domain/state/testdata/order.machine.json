@@ -1,0 +1,166 @@
+{
+  "format": "mce4d-state-model-v1",
+  "machine_id": "order-flow",
+  "version": 1,
+  "initial": "active",
+  "states": [
+    {
+      "id": "active",
+      "kind": "compound",
+      "parent": null,
+      "initial": "pending",
+      "entry": [
+        "audit"
+      ],
+      "exit": []
+    },
+    {
+      "id": "pending",
+      "kind": "atomic",
+      "parent": "active",
+      "initial": null,
+      "entry": [],
+      "exit": []
+    },
+    {
+      "id": "settled",
+      "kind": "final",
+      "parent": null,
+      "initial": null,
+      "entry": [],
+      "exit": []
+    },
+    {
+      "id": "cancelled",
+      "kind": "final",
+      "parent": null,
+      "initial": null,
+      "entry": [
+        "release"
+      ],
+      "exit": []
+    }
+  ],
+  "events": [
+    "settled",
+    "deadline",
+    "cancel",
+    "retry",
+    "compensate"
+  ],
+  "guards": [
+    {
+      "id": "receipt",
+      "expression": "receipt_present && authority_unchanged"
+    }
+  ],
+  "actions": [
+    {
+      "id": "audit",
+      "effect": "audit"
+    },
+    {
+      "id": "release",
+      "effect": "release_reservation"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "settle",
+      "from": "pending",
+      "to": "settled",
+      "event": "settled",
+      "guard": "receipt",
+      "actions": [
+        "audit"
+      ],
+      "handling": "normal",
+      "timeout_ms": null,
+      "max_attempts": null
+    },
+    {
+      "id": "expire",
+      "from": "pending",
+      "to": "cancelled",
+      "event": "deadline",
+      "guard": null,
+      "actions": [
+        "release"
+      ],
+      "handling": "timeout",
+      "timeout_ms": 1000,
+      "max_attempts": null
+    },
+    {
+      "id": "cancel",
+      "from": "pending",
+      "to": "cancelled",
+      "event": "cancel",
+      "guard": null,
+      "actions": [],
+      "handling": "cancel",
+      "timeout_ms": null,
+      "max_attempts": null
+    },
+    {
+      "id": "retry",
+      "from": "pending",
+      "to": "pending",
+      "event": "retry",
+      "guard": null,
+      "actions": [],
+      "handling": "retry",
+      "timeout_ms": null,
+      "max_attempts": 2
+    },
+    {
+      "id": "compensate",
+      "from": "pending",
+      "to": "cancelled",
+      "event": "compensate",
+      "guard": null,
+      "actions": [
+        "release"
+      ],
+      "handling": "compensation",
+      "timeout_ms": null,
+      "max_attempts": null
+    }
+  ],
+  "invariants": [
+    {
+      "id": "verified_receipt",
+      "state": "pending",
+      "guard": "receipt"
+    }
+  ],
+  "vocabulary": [
+    {
+      "id": "reservation",
+      "meaning": "A hold for a pending request."
+    }
+  ],
+  "obligations": [
+    {
+      "id": "dedup",
+      "transition": "retry",
+      "kind": "idempotency",
+      "status": "unknown",
+      "reason": null
+    },
+    {
+      "id": "cleanup",
+      "transition": "expire",
+      "kind": "compensation",
+      "status": "evidence",
+      "reason": null
+    },
+    {
+      "id": "ledger",
+      "transition": "cancel",
+      "kind": "reconciliation",
+      "status": "not_applicable_with_reason",
+      "reason": "This fixture has no external ledger."
+    }
+  ]
+}

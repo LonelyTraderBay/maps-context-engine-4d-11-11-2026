@@ -655,7 +655,7 @@ func checkContracts(text, root string, tasks map[string]task, add func(string, .
 			add("schema authority version or root reference invalid")
 		}
 		defs, ok := schema["$defs"].(map[string]any)
-		if !ok || len(defs) != 151 {
+		if !ok || len(defs) != 152 {
 			add("schema definition count mismatch")
 		}
 		checkRefs(schema, schema, add)

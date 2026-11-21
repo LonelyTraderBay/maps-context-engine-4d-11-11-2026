@@ -176,6 +176,7 @@ try {
   if (input.gu0) {
     const headers = appDocument.headers();
     assert.match(headers['content-security-policy'], /(?:^|; )script-src 'self';/);
+    assert.match(headers['content-security-policy'], /(?:^|; )worker-src 'self';/);
     assert.match(headers['content-security-policy'], /(?:^|; )connect-src 'self';/);
     assert.match(headers['content-security-policy'], /(?:^|; )frame-ancestors 'none';/);
     assert.equal(headers['x-frame-options'], 'DENY');
@@ -233,6 +234,7 @@ try {
       });
     }
     assert.equal(await more.count(), 0);
+    await page.waitForFunction(initial => document.querySelectorAll('#graph-pane .react-flow__edge').length > initial, edgeCount);
     const allEdges = await graph.locator('.react-flow__edge').count();
     assert.ok(allEdges > edgeCount);
     await inspect('Show');

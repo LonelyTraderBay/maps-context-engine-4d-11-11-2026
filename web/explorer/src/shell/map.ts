@@ -1,11 +1,12 @@
 import type { Coverage, Gap, GraphEdge, GraphNode, ScopeVector } from '../index.ts';
 import { subgraphDigest, verifyScopeDigest } from '../index.ts';
 import type { ExplorerClient } from '../api/client.ts';
+import { hardEdges, hardNodes } from '../features/graph/viewport.ts';
+
+export { hardNodes };
 
 export const defaultNodes = 200;
 export const defaultEdges = 500;
-export const hardNodes = 500;
-const hardEdges = 1500;
 
 export type GraphSlice = {
   nodes: GraphNode[];
@@ -75,8 +76,10 @@ export async function loadGraph(
       cursor: next, viewportFull: false,
       pendingNodes: page.pagination.required_pending, pendingEdges: page.pagination.optional_pending,
     };
+    const symbolCatalog = page.coverage.gaps.some(gap => gap.code === 'GRAPH_PROJECTION_LIMIT');
+    if (symbolCatalog && nodes.size === maxNodes && next !== null) result.viewportFull = !initial;
     publishPage?.(result);
-    if (next === null) break;
+    if (next === null || symbolCatalog && nodes.size === maxNodes) break;
   }
   return result;
 }

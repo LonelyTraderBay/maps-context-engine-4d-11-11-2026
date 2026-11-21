@@ -32,12 +32,35 @@ type MutationResult struct {
 	Replayed bool
 }
 
-// MutateMapping appends one version and atomically advances head, epoch and
-// receipt. The server supplies the principal, policy and held OS writer.
-// Authorize and CheckEvidence must not reenter this records pool.
 func (s *Store) MutateMapping(ctx context.Context, request MutationRequest) (out MutationResult, resultErr error) {
+	if request.CheckEvidence == nil || (request.Action == "propose") != (request.Mapping != nil) {
+		return out, ErrInvalidStore
+	}
+	return s.mutate(ctx, request, "ui_mapping", func(worktree string) (Version, error) {
+		body, err := json.Marshal(request.Mapping)
+		if err != nil {
+			return Version{}, ErrInvalidStore
+		}
+		mapping, err := model.DecodeUIMappingPayloadJSON(body, maxRecordBytes)
+		if err != nil || mapping.SourceRef.WorktreeID != worktree {
+			return Version{}, ErrInvalidStore
+		}
+		return Version{UIMapping: &mapping, SourceRefs: []model.SourceRef{mapping.SourceRef}}, nil
+	}, func(ctx context.Context, record Version) error {
+		if record.UIMapping == nil {
+			return ErrIntegrity
+		}
+		return request.CheckEvidence(ctx, *record.UIMapping)
+	})
+}
+
+// mutate appends one version and atomically advances the head, epoch and
+// receipt. The server supplies the principal, policy and held OS writer.
+// Authorization and evidence callbacks may not reenter this records pool.
+func (s *Store) mutate(ctx context.Context, request MutationRequest, kind string, propose func(string) (Version, error),
+	checkEvidence func(context.Context, Version) error) (out MutationResult, resultErr error) {
 	if s == nil || s.image || s.db == nil || s.lease == nil || ctx == nil || s.db.Stats().MaxOpenConnections != 1 ||
-		request.Writer == nil || request.Authorize == nil || request.CheckEvidence == nil || !uuid(request.JobID) ||
+		request.Writer == nil || request.Authorize == nil || !uuid(request.JobID) ||
 		!uuid(request.Mutation.MutationID) || len(request.Mutation.PrincipalID) > 1024 || !utf8.ValidString(request.Reason) ||
 		request.Reason == "" || utf8.RuneCountInString(request.Reason) > 2048 {
 		return out, ErrInvalidStore
@@ -49,14 +72,14 @@ func (s *Store) MutateMapping(ctx context.Context, request MutationRequest) (out
 		return out, ErrInvalidStore
 	}
 	if request.Action == "propose" {
-		if request.RecordID != "" || request.ExpectedVersion != 0 || request.Mapping == nil {
+		if request.RecordID != "" || request.ExpectedVersion != 0 {
 			return out, ErrInvalidStore
 		}
 	} else if !uuid(request.RecordID) || request.ExpectedVersion < 1 ||
-		request.ExpectedVersion >= exactIntegerMax || request.Mapping != nil {
+		request.ExpectedVersion >= exactIntegerMax {
 		return out, ErrInvalidStore
 	}
-	if _, err := mappingStatus(request.Action, "proposed"); err != nil {
+	if _, err := nextRecordStatus(request.Action, "proposed"); err != nil {
 		return out, err
 	}
 	if err := request.Authorize(ctx, s.identity); err != nil {
@@ -119,6 +142,9 @@ func (s *Store) MutateMapping(ctx context.Context, request MutationRequest) (out
 		return out, err
 	}
 	if replay != nil {
+		if replay.Kind != kind {
+			return out, model.ErrRecordConflict
+		}
 		if err := check(); err != nil {
 			return out, err
 		}
@@ -130,18 +156,23 @@ func (s *Store) MutateMapping(ctx context.Context, request MutationRequest) (out
 	if epoch >= exactIntegerMax {
 		return out, ErrLimit
 	}
-	record, err := prepareMapping(ctx, tx, worktree, request)
+	record, err := prepareRecord(ctx, tx, worktree, request, kind, propose)
 	if err != nil {
 		return out, err
 	}
+	if record.DeclaredStatus == "approved" || record.DeclaredStatus == "proposed" {
+		if err := checkEvidence(ctx, record); err != nil {
+			return out, err
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := persistMapping(ctx, tx, request, record, now, epoch); err != nil {
+	if err := persistRecord(ctx, tx, request, record, now, epoch); err != nil {
 		return out, err
 	}
 	if record.DeclaredStatus == "approved" || record.DeclaredStatus == "proposed" {
 		// Repeat source authority just before publication. Explicit revocation
 		// and supersession remain possible once a source snapshot is gone.
-		if err := request.CheckEvidence(ctx, *record.UIMapping); err != nil {
+		if err := checkEvidence(ctx, record); err != nil {
 			return out, err
 		}
 	}
@@ -182,7 +213,7 @@ func mutationReplay(ctx context.Context, tx *sql.Tx, worktree string, incoming m
 	return &record, nil
 }
 
-func mappingStatus(action, previous string) (string, error) {
+func nextRecordStatus(action, previous string) (string, error) {
 	switch action {
 	case "propose":
 		return "proposed", nil
@@ -204,53 +235,40 @@ func mappingStatus(action, previous string) (string, error) {
 	return "", model.ErrRecordConflict
 }
 
-func prepareMapping(ctx context.Context, tx *sql.Tx, worktree string, request MutationRequest) (Version, error) {
-	record := Version{Version: 1, Kind: "ui_mapping", DeclaredStatus: "proposed"}
+func prepareRecord(ctx context.Context, tx *sql.Tx, worktree string, request MutationRequest, kind string, propose func(string) (Version, error)) (Version, error) {
+	var record Version
 	if request.Action == "propose" {
-		body, err := json.Marshal(request.Mapping)
+		proposed, err := propose(worktree)
 		if err != nil {
-			return Version{}, ErrInvalidStore
+			return Version{}, err
 		}
-		mapping, err := model.DecodeUIMappingPayloadJSON(body, maxRecordBytes)
-		if err != nil || mapping.SourceRef.WorktreeID != worktree {
-			return Version{}, ErrInvalidStore
-		}
+		record = proposed
+		record.Version, record.Kind, record.DeclaredStatus = 1, kind, "proposed"
 		record.RecordID, err = newUUID()
 		if err != nil {
 			return Version{}, err
 		}
-		record.UIMapping = &mapping
-		record.SourceRefs = []model.SourceRef{mapping.SourceRef}
 	} else {
 		head, err := scanVersion(tx.QueryRowContext(ctx, `SELECT `+versionColumns+` FROM record_heads h
 			JOIN record_versions v ON v.record_id=h.record_id AND v.version=h.version WHERE h.record_id=?`, request.RecordID), worktree)
 		if err != nil {
 			return Version{}, err
 		}
-		if head.Version != request.ExpectedVersion || head.Kind != "ui_mapping" {
+		if head.Version != request.ExpectedVersion || head.Kind != kind || (kind == "state_model" && !head.StateModelSource) {
 			return Version{}, model.ErrRecordConflict
 		}
 		record = head
 		record.Version++
-		record.DeclaredStatus, err = mappingStatus(request.Action, head.DeclaredStatus)
+		record.DeclaredStatus, err = nextRecordStatus(request.Action, head.DeclaredStatus)
 		if err != nil {
-			return Version{}, err
-		}
-	}
-	if record.DeclaredStatus == "proposed" || record.DeclaredStatus == "approved" {
-		if err := request.CheckEvidence(ctx, *record.UIMapping); err != nil {
 			return Version{}, err
 		}
 	}
 	return record, nil
 }
 
-func persistMapping(ctx context.Context, tx *sql.Tx, request MutationRequest, record Version, now string, epoch int64) error {
-	payload, err := json.Marshal(record.UIMapping)
-	if err != nil {
-		return err
-	}
-	digest, err := model.UIMappingPayloadDigest(*record.UIMapping, maxRecordBytes)
+func persistRecord(ctx context.Context, tx *sql.Tx, request MutationRequest, record Version, now string, epoch int64) error {
+	payload, digest, err := recordPayload(record)
 	if err != nil {
 		return err
 	}
@@ -280,6 +298,21 @@ func persistMapping(ctx context.Context, tx *sql.Tx, request MutationRequest, re
 	_, err = tx.ExecContext(ctx, `INSERT INTO mutation_receipts(client_mutation_id,principal_id,request_hash,record_id,result_version,created_at)
 		VALUES(?,?,?,?,?,?)`, request.Mutation.MutationID, request.Mutation.PrincipalID, request.Mutation.RequestHash, record.RecordID, record.Version, now)
 	return err
+}
+
+func recordPayload(record Version) ([]byte, string, error) {
+	if record.Kind == "state_model" {
+		return stateModelPayload(record.SourceRefs)
+	}
+	if record.UIMapping == nil {
+		return nil, "", ErrIntegrity
+	}
+	payload, err := json.Marshal(record.UIMapping)
+	if err != nil {
+		return nil, "", err
+	}
+	digest, err := model.UIMappingPayloadDigest(*record.UIMapping, maxRecordBytes)
+	return payload, digest, err
 }
 
 func exactlyOne(change sql.Result, err error) error {

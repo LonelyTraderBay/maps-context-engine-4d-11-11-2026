@@ -220,7 +220,7 @@ func (s *RecordService) project(ctx context.Context, state RecordSnapshot, store
 		data.Limitations = append(data.Limitations, model.Gap{Code: "RECORD_PROVENANCE_UNAVAILABLE",
 			Reason: "The current authority could not verify the recorded source.", SourceRefs: []model.SourceRef{}})
 	}
-	if stored.Kind != "ui_mapping" {
+	if stored.Kind != "ui_mapping" && (stored.Kind != "state_model" || !stored.StateModelSource) {
 		data.Limitations = append(data.Limitations, model.Gap{Code: "RECORD_PAYLOAD_UNSUPPORTED",
 			Reason: "This record kind exposes metadata only.", SourceRefs: []model.SourceRef{}})
 	}

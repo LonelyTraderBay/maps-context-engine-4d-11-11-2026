@@ -2,6 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { initialSelection, selectionReducer as select } from '../../web/explorer/src/shell/selection.ts';
 import { selectionLocator } from '../../web/explorer/src/shell/context_locator.ts';
+import { layout } from '../../web/explorer/src/features/graph/layout.ts';
+
+test('graph worker lays out the bounded viewport in deterministic input order', () => {
+  const nodes = Array.from({ length: 500 }, (_, i) => String(i).padStart(3, '0'));
+  const edges = nodes.flatMap((from, i) => Array.from({ length: 3 }, (_, branch) => [
+    from + branch, from, nodes[Math.floor(i / 10) * 10 + (i + branch + 1) % 10],
+  ]));
+  const ordered = layout({ nodes, edges });
+  assert.equal(ordered.length, 500);
+  assert.ok(ordered.every((position, i) => position.id === nodes[i] &&
+    Number.isFinite(position.x) && Number.isFinite(position.y)));
+  assert.deepEqual(layout({ nodes: nodes.toReversed(), edges: edges.toReversed() }), ordered);
+  assert.throws(() => layout({ nodes: [...nodes, 'over'], edges }), /Invalid layout viewport/);
+  assert.throws(() => layout({ nodes, edges: [...edges, ['over', '001', '002']] }), /Invalid layout viewport/);
+  assert.throws(() => layout({ nodes, edges: [['missing', '001', 'outside']] }), /unknown endpoint/);
+});
 
 test('Explorer selection is scoped to the current graph digest', () => {
   let selection = select(initialSelection, { type: 'scope', digest: 'generation-one' });

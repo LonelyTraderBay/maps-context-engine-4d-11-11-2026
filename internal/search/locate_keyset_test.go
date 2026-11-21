@@ -11,11 +11,11 @@ func TestLocateKeyRoundTripPreservesBinaryProgress(t *testing.T) {
 	values := []string{"a", "aa", "b", strings.Repeat("é", 192), strings.Repeat("😀", 192)}
 	previous := contextpack.SignedPosition{LastKey: []string{}}
 	for i, value := range values {
-		parts, err := encodeLocateKey(value)
+		parts, err := EncodeLocateKey(value)
 		if err != nil {
 			t.Fatal(err)
 		}
-		decoded, err := decodeLocateKey(parts)
+		decoded, err := DecodeLocateKey(parts)
 		if err != nil || decoded != value {
 			t.Fatalf("round trip failed: %q %v", decoded, err)
 		}
@@ -26,7 +26,7 @@ func TestLocateKeyRoundTripPreservesBinaryProgress(t *testing.T) {
 		previous = next
 	}
 	for _, parts := range [][]string{{"A0"}, {"f"}, {"61", "62"}, {strings.Repeat("f", 514)}} {
-		if _, err := decodeLocateKey(parts); err == nil {
+		if _, err := DecodeLocateKey(parts); err == nil {
 			t.Fatalf("noncanonical key accepted: %v", parts)
 		}
 	}

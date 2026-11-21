@@ -17,10 +17,13 @@ import (
 )
 
 const (
-	explorerGraphOrder = "explorer-graph-v1"
-	maxExplorerGraphs  = 4
-	maxProjectionBytes = 4 << 20
+	explorerGraphOrder   = "explorer-graph-v1"
+	explorerCatalogOrder = "explorer-symbol-catalog-v1"
+	maxExplorerGraphs    = 4
+	maxProjectionBytes   = 4 << 20
 )
+
+var errExplorerCatalog = errors.New("workspace graph requires bounded symbol pages")
 
 type explorerGraph struct {
 	pager    *search.GraphPager
@@ -106,7 +109,8 @@ func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, req
 		return nil, app.ErrCoreInput
 	}
 	guard := func(ctx context.Context, binding contextpack.CursorBinding) error {
-		if binding.PrincipalDigest != p.Digest || binding.BindingDigest != p.BindingDigest || binding.OrderVersion != explorerGraphOrder || binding.RequestDigest != digest {
+		if binding.PrincipalDigest != p.Digest || binding.BindingDigest != p.BindingDigest || binding.RequestDigest != digest ||
+			(binding.OrderVersion != explorerGraphOrder && binding.OrderVersion != explorerCatalogOrder) {
 			return contextpack.ErrCursorInvalid
 		}
 		_, err := e.core.Reader.Recheck(ctx, p, binding.Scope)
@@ -135,6 +139,10 @@ func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, req
 		binding := contextpack.CursorBinding{Purpose: "list", PrincipalDigest: p.Digest, BindingDigest: p.BindingDigest,
 			Scope: observed.Vector, RequestDigest: digest, OrderVersion: explorerGraphOrder}
 		entry, err = e.projectGraph(ctx, p, observed, request, binding, guard)
+		if errors.Is(err, errExplorerCatalog) {
+			binding.OrderVersion = explorerCatalogOrder
+			return e.readSymbolCatalog(ctx, p, observed, binding, guard, nil, nodeLimit, options)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -142,6 +150,13 @@ func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, req
 		claims, err := e.codec.VerifyPrincipal(ctx, cursor, "list", p.Digest, guard)
 		if err != nil {
 			return nil, err
+		}
+		if claims.Binding.OrderVersion == explorerCatalogOrder {
+			observed, err := e.core.Reader.Recheck(ctx, p, claims.Binding.Scope)
+			if err != nil {
+				return nil, err
+			}
+			return e.readSymbolCatalog(ctx, p, observed, claims.Binding, guard, &claims, nodeLimit, options)
 		}
 		var ok bool
 		entry, ok = e.graphs.get(claims.Binding.ResultID, time.Now())
@@ -184,12 +199,12 @@ func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, req
 		response.Pagination.OptionalPending = &page.PendingEdges
 		response.Pagination.NextCursor = page.NextCursor
 		response.Pagination.Truncated = page.NextCursor != nil
-		response.Pagination.EnumerationComplete = page.NextCursor == nil
+		response.Pagination.EnumerationComplete = !response.Pagination.Truncated
 		response.Status = "ok"
-		if page.NextCursor != nil || response.Coverage.Status == "partial" {
+		if response.Pagination.Truncated || response.Coverage.Status == "partial" {
 			response.Status = "partial"
 		}
-		if page.NextCursor != nil {
+		if response.Pagination.Truncated {
 			reason := "limit"
 			response.Pagination.LimitReason = &reason
 		} else {
@@ -220,15 +235,29 @@ func (e *ExplorerReader) projectGraph(ctx context.Context, p app.CorePrincipal, 
 	if err != nil {
 		return explorerGraph{}, err
 	}
-	graph, err := e.core.Reader.Index.ReadPublishedGraph(ctx, index.PublishedGraphRequest{Member: observed.Vector.Members[0],
+	member := observed.Vector.Members[0]
+	maxNodes, maxEdges := int(e.core.limits.MaxGraphNodes), int(e.core.limits.MaxGraphEdges)
+	_, workspace := request.Root.(*model.WorkspaceSelector)
+	maxSymbols := 0
+	if workspace {
+		maxSymbols = maxNodes
+	}
+	graph, err := e.core.Reader.Index.ReadPublishedGraph(ctx, index.PublishedGraphRequest{Member: member,
 		VectorDigest: observed.Vector.VectorDigest, AuthorizeGeneration: input.AuthorizeGeneration,
 		AuthorizePath: input.AuthorizePath, Scanner: input.Scanner, MaxManifestBytes: input.MaxManifestBytes,
-		MaxFileBytes: input.MaxFileBytes, MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000})
+		MaxFileBytes: input.MaxFileBytes, MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000,
+		MaxSymbols: maxSymbols})
+	catalogFallback := workspace && len(request.Kinds) == 0
+	if catalogFallback && errors.Is(err, index.ErrCaptureLimit) {
+		return explorerGraph{}, errExplorerCatalog
+	}
 	if err != nil {
 		return explorerGraph{}, err
 	}
-	maxNodes, maxEdges := int(e.core.limits.MaxGraphNodes), int(e.core.limits.MaxGraphEdges)
 	nodes, edges, err := explorerGraphFacts(ctx, graph, observed.Vector, request, maxNodes, maxEdges)
+	if catalogFallback && (errors.Is(err, search.ErrGraphPageLarge) || errors.Is(err, app.ErrCoreLimit)) {
+		return explorerGraph{}, errExplorerCatalog
+	}
 	if errors.Is(err, search.ErrGraphPageLarge) {
 		return explorerGraph{}, app.ErrCoreLimit
 	}
@@ -237,6 +266,9 @@ func (e *ExplorerReader) projectGraph(ctx context.Context, p app.CorePrincipal, 
 	}
 	pager, err := search.NewGraphPager(ctx, e.codec, binding, guard, input.Scanner, nodes, edges, true, maxNodes, maxEdges, maxProjectionBytes)
 	if errors.Is(err, search.ErrGraphPageLarge) {
+		if catalogFallback {
+			return explorerGraph{}, errExplorerCatalog
+		}
 		return explorerGraph{}, app.ErrCoreLimit
 	}
 	if err != nil {

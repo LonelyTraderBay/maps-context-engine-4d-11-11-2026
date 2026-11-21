@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FlowStep, GraphNode, ScopeVector, SourceRef } from '../../../.generated/types';
 import type { ExplorerClient } from '../../api/client.ts';
 import { readFlowSelection, readStaticFlow } from './data.ts';
@@ -46,6 +46,23 @@ const limitNames: Record<string, string> = {
   FLOW_EVENT_OUTBOX_DECLARED: 'Outbox là khai báo. Chưa có bằng chứng đã publish hoặc commit.',
 };
 
+const flowBatch = 20;
+const filters = {
+  all: 'Tất cả',
+  http: 'HTTP',
+  sql: 'SQL',
+  branch: 'Điều kiện và ranh giới',
+  event: 'Event',
+} as const;
+
+type StepFilter = keyof typeof filters;
+
+function matches(step: FlowStep, filter: StepFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'branch') return step.step_kind.startsWith('branch') || step.step_kind.endsWith('_boundary');
+  return step.step_kind.startsWith(filter + '_');
+}
+
 function hasSelectedRef(step: FlowStep, node: GraphNode | null): boolean {
   if (!node) return false;
   const target = node.ref;
@@ -66,6 +83,8 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
   const [reading, setReading] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [filter, setFilter] = useState<StepFilter>('all');
+  const [shown, setShown] = useState(flowBatch);
   const selection = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -106,9 +125,13 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
     }
   }
 
+  const ids = useMemo(() => new Map(result?.data.steps.map((step, index) => [step.step_id, index + 1] as const)),
+    [result]);
+  const incomingByStep = useMemo(() => Map.groupBy(result?.data.edges ?? [], edge => edge.to_step_id), [result]);
   const steps = result?.data.steps ?? [];
-  const ids = new Map(steps.map((step, index) => [step.step_id, index + 1] as const));
-  const selectedStepVisible = steps.some(step => step.step_id === chosen && hasSelectedRef(step, selected));
+  const matching = steps.filter(step => matches(step, filter));
+  const visibleSteps = matching.slice(0, shown);
+  const selectedStepVisible = visibleSteps.some(step => step.step_id === chosen && hasSelectedRef(step, selected));
   return <section className="pane flow-pane" aria-labelledby="flow-heading">
     <header className="pane-heading">
       <div>
@@ -131,18 +154,33 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
           : `Flow tĩnh · ${steps.length} bước`}
         {reading && ' · Đang đọc nguồn'}
       </p>
+      {steps.length > 0 && <div className="flow-filters">
+        <label htmlFor="flow-filter">Lọc bước</label>
+        <select id="flow-filter" value={filter} onChange={event => {
+          setFilter(event.currentTarget.value as StepFilter);
+          setShown(flowBatch);
+        }}>
+          {Object.entries(filters).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <span className="pane-count" role="status">{visibleSteps.length}/{matching.length} bước phù hợp</span>
+      </div>}
+      {steps.length > 0 && matching.length === 0 && <p className="notice">Không có bước phù hợp trong lát flow đã đọc.</p>}
+      {result.pagination.truncated && <p className="notice notice--partial">
+        {result.pagination.required_pending == null ? 'Chưa rõ số bước còn lại trong giới hạn phân tích.' :
+          `Còn ${result.pagination.required_pending} bước ngoài giới hạn phản hồi.`}
+      </p>}
       {steps.length === 0 && <p className="notice">Index chưa có flow được xác minh cho lựa chọn này.</p>}
       {result.coverage.gaps.length > 0 && <ul className="flow-gaps">
         {result.coverage.gaps.map((gap, index) => <li key={gap.code + index}>{gap.reason}</li>)}
       </ul>}
       <ol className="flow-list">
-        {steps.map(step => {
+        {visibleSteps.map(step => {
           const sql = step.step_kind.startsWith('sql_');
           const title = stepNames[step.step_kind] ?? step.step_kind;
           const source = step.source_refs[0];
           const targets = step.canonical_refs.filter(ref => ref.kind === 'entity');
           const active = hasSelectedRef(step, selected) && (!selectedStepVisible || chosen === step.step_id);
-          const incoming = result.data.edges.filter(edge => edge.to_step_id === step.step_id);
+          const incoming = incomingByStep.get(step.step_id) ?? [];
           return <li key={step.step_id} className={'flow-step' + (sql ? ' flow-step--sql' : '')}>
             <button className="flow-step__choose" type="button" aria-pressed={active} disabled={!source}
               onClick={() => void choose(step)}>
@@ -170,6 +208,8 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
           </li>;
         })}
       </ol>
+      {visibleSteps.length < matching.length && <button className="quiet-button" type="button"
+        onClick={() => setShown(value => value + flowBatch)}>Hiện thêm bước ({matching.length - visibleSteps.length})</button>}
     </div>}
   </section>;
 }

@@ -5,7 +5,7 @@ import os,pathlib,subprocess,hashlib,fcntl,struct,stat,json,socket,time,re,shuti
 run=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_RUN']).resolve(strict=True);root=run/'rootfs';built=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_BUILD']).resolve(strict=True)
 approved=json.loads(pathlib.Path(os.environ['MCE4D_ACCEPTANCE_APPROVALS']).read_text())
 assert set(approved['binaries'])=={'mce4d','state-profile','go-toolchain'}
-suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0','records','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench','ui_real','ui_flow','groups')
+suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0','records','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench','ui_real','ui_flow','ui_large_graph','groups')
 preview_suites=('ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench')
 assert os.getpid()==1, 'run broker in a fresh private PID/mount/network namespace'
 import importlib.util,sys
@@ -60,10 +60,10 @@ sources['a.go']=sources['a.go'].replace('type Inner struct { Value int }','type 
 sources['untrusted.md']=fixture['untrusted_document']
 sources['execute-me.sh']='#!/bin/sh\nprintf executed > /result/repo-executed\n'
 sources['go.env.txt']='GOFLAGS=-mod=mod -toolexec=/target/execute-me.sh\n'
-if suite=='ui_flow':
+if suite in ('ui_flow','ui_large_graph'):
  sys.path.insert(0,str(module_path.parent))
  import explorer_flow
- sources.update(explorer_flow.prepare())
+ sources.update(explorer_flow.prepare_large_graph() if suite=='ui_large_graph' else explorer_flow.prepare())
 if suite in ('scale','bench'):
  authored=scale.prepare(root,os.environ['MCE4D_SCALE_COHORT'])
  peer=root/'peer';peer.mkdir();peer.chmod(0o755)
@@ -135,8 +135,10 @@ try:
   config={'pack_ttl_seconds':native_matrix.TEST_PACK_TTL,'rename_result_ttl_seconds':native_matrix.TEST_RENAME_TTL}
  if suite=='ui_hmr':
   config={'writer_lock_wait_ms':200}
- if suite=='ui_flow':
+ if suite in ('ui_flow','ui_large_graph'):
   config={'query_timeout_ms':30000,'max_output_bytes':65536}
+ if suite=='ui_large_graph':
+  config['index_timeout_ms']=900000
  p=command('/state-profile',['create','--root','/profiles/runtime','--engine-uid','1000','--engine-gid','1000','--client-uid','1001',*targets,'--worker-executable','/mce4d'],0);assert p.returncode==0
  config_patch={'schema_version':1,'core':config}
  if suite=='ui_hmr':config_patch['explorer']={'map_watch_poll_ms':50,'map_watch_debounce_ms':250}
@@ -145,11 +147,14 @@ try:
  p=command('/mce4d',['repo','add','--root','/target']);assert p.returncode==0;worktree=re.search(r'Registered worktree ([0-9a-f-]{36})',p.stdout).group(1)
  policy={'schema_version':1,'allowed_roots':['/target'],'denied_globs':[],'trusted_rule_paths':['AGENTS.md'],'dependency_roots':[],'allowed_executables':[{'path':'/git','sha256':hashlib.sha256((root/'git').read_bytes()).hexdigest()},{'path':'/toolchain/bin/go','sha256':hashlib.sha256((root/'toolchain/bin/go').read_bytes()).hexdigest()},{'path':'/bin/gopls','sha256':hashlib.sha256((root/'bin/gopls').read_bytes()).hexdigest()}],'allow_target_execution':False,'allow_runtime_download':False,'max_file_bytes':65536,'max_source_bytes':2097152,'max_output_bytes':65536,'secret_rules_version':'builtin-v1'}
  if suite in ('scale','bench'):policy['max_source_bytes']=32<<20
+ if suite=='ui_large_graph':
+  policy.update(max_file_bytes=128<<10,max_source_bytes=3<<20)
  if suite=='scale' and authored['cohort'] in scale.PACK_COHORTS:policy['max_output_bytes']=config['max_output_bytes']
  if suite in ('spec-only','self-index'):policy['trusted_rule_paths']=['design.md'] if suite=='spec-only' else []
  if suite=='ui_real':policy['trusted_rule_paths']=[]
  p=command('/mce4d',['policy','set','--input-json','-'],payload={'worktree_id':worktree,'expected_epoch':1,'policy':policy});assert p.returncode==0
  profile={'schema_version':1,'language':'go','goos':'linux','goarch':'amd64','build_tags':[],'cgo_enabled':False,'tests_enabled':False,'module_roots':['.'],'toolchain_digest':toolchain_digest,'provider_digest':approved['binaries']['mce4d'],'module_mode':'readonly','analysis_mode':'typed_when_available','dependency_roots':[]}
+ if suite=='ui_large_graph':profile['analysis_mode']='syntax'
  p=command('/mce4d',['profile','set','--worktree-id',worktree,'--input-json','-'],payload={'worktree_id':worktree,'profile_name':'typed','expected_revision':0,'profile':profile});assert p.returncode==0;profile_id=json.loads(p.stdout)['data']['profile_id']
  p=command('/state-profile',['worktree-create','--root','/profiles/runtime','--worktree-id',worktree],0);assert p.returncode==0
  if suite in preview_suites:
@@ -160,7 +165,7 @@ try:
   from explorer_shell import exercise_shell
   exercise_shell(root,setup,worktree,profile_id,active,"empty")
  if suite not in ('scale','bench'):
-  p=command('/mce4d',['index','--worktree-id',worktree,'--profile-id',profile_id]);assert p.returncode==0
+  p=command('/mce4d',['index','--worktree-id',worktree,'--profile-id',profile_id],timeout=910 if suite=='ui_large_graph' else 90);assert p.returncode==0
  prefix=['--worktree-id',worktree,'--profile-id',profile_id,'query']
  request={'selector':{'kind':'source_position','path':'a.go','content_hash':hashlib.sha256(sources['a.go'].encode()).hexdigest(),'byte_offset':sources['a.go'].index('Value')},'new_name':'Count','preserve_contracts':True,'max_output_bytes':65536}
  if suite=='security':
@@ -179,11 +184,11 @@ try:
   from explorer_native import exercise
   exercise(root,setup,worktree,profile_id,active)
   assert tree(root/'target')==before and tree(root/'host-config')==before_config
- elif suite=='ui_flow':
-  explorer_flow.exercise(root,setup,worktree,profile_id,active)
+ elif suite in ('ui_flow','ui_large_graph'):
+  explorer_flow.exercise(root,setup,worktree,profile_id,active,large_graph=suite=='ui_large_graph')
   assert tree(root/'target')==before and tree(root/'host-config')==before_config
   assert not (root/'result/repo-executed').exists()
-  print(json.dumps({'case':'T097_TARGET_CANARY','status':'PASS','target_executions':0,'source_mutations':0}),flush=True)
+  print(json.dumps({'case':'T099_TARGET_CANARY' if suite=='ui_large_graph' else 'T097_TARGET_CANARY','status':'PASS','target_executions':0,'source_mutations':0}),flush=True)
  elif suite=='ui_real':
   subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
   exercise_shell(root,setup,worktree,profile_id,active,"benchmark")

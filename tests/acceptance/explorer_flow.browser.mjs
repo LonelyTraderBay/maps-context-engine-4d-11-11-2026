@@ -65,6 +65,13 @@ try {
   await card.getByText('Cùng giao dịch', { exact: false }).waitFor();
   await card.getByRole('button', { name: /^schema.sql/ }).click();
   await source.getByText(fixture.schema, { exact: true }).waitFor();
+  const filter = pane.getByRole('combobox', { name: 'Lọc bước' });
+  await filter.selectOption('sql');
+  await insert.waitFor();
+  assert.equal(await route.count(), 0);
+  await source.getByText(fixture.schema, { exact: true }).waitFor();
+  await filter.selectOption('all');
+  await route.waitFor();
   assert.ok(flow.data.steps.some(step => step.step_kind === 'sql_insert' && step.outcome_status === 'outcome_unknown' &&
     step.source_refs.some(ref => ref.content_hash === fixture.schema_hash)));
   const begin = flow.data.steps.find(step => step.step_kind === 'sql_begin');

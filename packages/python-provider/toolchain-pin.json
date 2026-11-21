@@ -1,0 +1,9 @@
+{
+  "implementation": "CPython",
+  "version": "3.14.4",
+  "platform": "linux-amd64",
+  "distribution_build": "Ubuntu 3.14.4-1ubuntu0.2",
+  "interpreter_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41",
+  "stdlib_fingerprint": "75a857349888f4e5a0e47488958527164787ab343d6ca1f4fe0d4b38626aaf14",
+  "license": "PSF-2.0 with upstream notices"
+}

@@ -103,6 +103,11 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 		if err := request.Scanner.CheckContent([]byte(request.Position.Path)); err != nil {
 			return output, err
 		}
+	case "catalog":
+		if !request.Keyset || request.GenerationID == "" || request.Position != nil ||
+			request.Query != "" || request.Qualified || len(request.Kinds) != 0 || request.Package != "" {
+			return output, ErrInvalidSearch
+		}
 	default:
 		return output, ErrInvalidSearch
 	}
@@ -350,15 +355,15 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 	if request.Qualified {
 		column = "s.qualified_name"
 	}
-	where := "s.generation_id=? AND "
+	where := "s.generation_id=?"
 	args := []any{generation}
 	order := column + ",s.symbol_id"
 	switch request.Mode {
 	case "exact":
-		where += column + "=?"
+		where += " AND " + column + "=?"
 		args = append(args, request.Query)
 	case "prefix":
-		where += column + ">=?"
+		where += " AND " + column + ">=?"
 		args = append(args, request.Query)
 		if upper, ok := prefixUpper(request.Query); ok {
 			where += " AND " + column + "<?"
@@ -368,7 +373,7 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 		// A file symbol covers every byte and is not a concrete declaration at
 		// the selected position. Preserve ambiguity among actual overlapping
 		// symbols rather than choosing an arbitrary nearest declaration.
-		where += "s.path=? AND s.kind<>'file' AND s.start_byte<=? AND s.end_byte>?"
+		where += " AND s.path=? AND s.kind<>'file' AND s.start_byte<=? AND s.end_byte>?"
 		args = append(args, request.Position.Path, request.Position.ByteOffset, request.Position.ByteOffset)
 		order = "s.start_byte,s.end_byte,s.symbol_id"
 	}

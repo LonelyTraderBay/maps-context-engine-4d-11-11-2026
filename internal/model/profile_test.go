@@ -53,3 +53,42 @@ func TestTSProfileClosedAndNoPlugins(t *testing.T) {
 		}
 	}
 }
+
+func TestPythonProfileClosedModes(t *testing.T) {
+	hash := strings.Repeat("c", 64)
+	raw := fmt.Sprintf(`{"schema_version":1,"language":"python","python_version":"3.14.4","interpreter_digest":"%s","stdlib_digest":"%s","provider_digest":"%s","module_roots":["src","."],"allow_project_imports":false,"analysis_mode":"syntax"}`, hash, hash, hash)
+	profile, err := DecodeEffectiveProfileJSON([]byte(raw), 16384)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := ProfileDigest(profile, 16384)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reordered, err := DecodeEffectiveProfileJSON([]byte(strings.Replace(raw, `["src","."]`, `[".","src"]`, 1)), 16384)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ProfileDigest(reordered, 16384)
+	if err != nil || got != fingerprint {
+		t.Fatalf("module root order changed the profile digest: %s %v", got, err)
+	}
+	typed, err := DecodeEffectiveProfileJSON([]byte(strings.Replace(raw, `"analysis_mode":"syntax"`, `"analysis_mode":"typed_when_available"`, 1)), 16384)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedID, err := ProfileDigest(typed, 16384)
+	if err != nil || typedID == fingerprint {
+		t.Fatalf("typed and syntax profiles must be isolated: %s %v", typedID, err)
+	}
+	for _, invalid := range []string{
+		strings.Replace(raw, `"allow_project_imports":false`, `"allow_project_imports":true`, 1),
+		strings.Replace(raw, `"analysis_mode":"syntax"`, `"analysis_mode":"runtime"`, 1),
+		strings.Replace(raw, `"analysis_mode":`, `"startup_module":"sitecustomize","analysis_mode":`, 1),
+		strings.Replace(raw, `"src"`, `"../src"`, 1),
+	} {
+		if _, err := DecodeEffectiveProfileJSON([]byte(invalid), 16384); err == nil {
+			t.Fatalf("accepted invalid Python profile %s", invalid)
+		}
+	}
+}

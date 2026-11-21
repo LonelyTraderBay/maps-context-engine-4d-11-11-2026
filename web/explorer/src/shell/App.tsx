@@ -64,6 +64,7 @@ export function App() {
 
   const endSession = useCallback((message: string) => {
     work.current?.abort();
+    selectionOrder.current++;
     client.disconnect();
     setConnected(false);
     setPreview(false);
@@ -303,7 +304,7 @@ export function App() {
       </div>
       <div className="workspace" data-pane={selection.compactPane}
         style={{ '--graph-share': width + '%' } as CSSProperties}>
-        <GraphPane graph={graph} busy={busy} error={error} hasIndex={workspace?.index_state === 'published'}
+        <GraphPane graph={graph} scope={scope?.vector_digest ?? null} busy={busy} error={error} hasIndex={workspace?.index_state === 'published'}
           selected={chosen?.node ?? null} onChoose={value => manualSelection({ type: 'choose', node: value })}
           onMore={() => void more()} />
         <Splitter value={width} onChange={setWidth} />

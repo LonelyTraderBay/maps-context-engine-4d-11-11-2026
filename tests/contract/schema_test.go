@@ -19,7 +19,7 @@ func TestSchemaResolvesAndSourceRefFixtures(t *testing.T) {
 	if err := json.Unmarshal(data, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if len(schema.Defs) != 151 {
+	if len(schema.Defs) != 152 {
 		t.Fatalf("got %d definitions", len(schema.Defs))
 	}
 	schema.Ref = "#/$defs/SourceRef"

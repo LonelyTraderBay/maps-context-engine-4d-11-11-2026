@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/domain/state"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 )
@@ -42,7 +43,7 @@ const versionColumns = `
  CASE WHEN length(CAST(v.record_id AS BLOB))=36 THEN v.record_id END,
  v.version,v.record_kind,v.declared_status,
  CASE WHEN length(CAST(v.source_refs_json AS BLOB))<=262144 THEN v.source_refs_json END,
- CASE WHEN v.record_kind='ui_mapping' AND length(CAST(v.payload_json AS BLOB))<=262144 THEN v.payload_json END,
+ CASE WHEN v.record_kind IN ('ui_mapping','state_model') AND length(CAST(v.payload_json AS BLOB))<=262144 THEN v.payload_json END,
  CASE WHEN length(CAST(v.payload_hash AS BLOB))=64 THEN v.payload_hash END
 `
 
@@ -80,6 +81,23 @@ func scanVersion(row rowScanner, worktree string) (Version, error) {
 			return Version{}, ErrIntegrity
 		}
 		value.SourceRefs = append(value.SourceRefs, ref)
+	}
+	if value.Kind == "state_model" && payload.Valid {
+		var version struct {
+			Format string `json:"format"`
+		}
+		if err := json.Unmarshal([]byte(payload.String), &version); err != nil {
+			return Version{}, ErrIntegrity
+		}
+		if version.Format == state.Format {
+			raw, expected, err := stateModelPayload(value.SourceRefs)
+			if err != nil || value.SourceRefs[0].WorktreeID != worktree ||
+				expected != digest || string(raw) != payload.String {
+				return Version{}, ErrIntegrity
+			}
+			value.StateModelSource = true
+		}
+		return value, nil
 	}
 	if value.Kind != "ui_mapping" {
 		return value, nil

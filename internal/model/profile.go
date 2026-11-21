@@ -3,9 +3,12 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"unicode/utf8"
 )
+
+var pythonVersionPattern = regexp.MustCompile(`^3\.[0-9]{1,2}\.[0-9]{1,3}$`)
 
 type EffectiveProfile interface {
 	normalizedProfile() (EffectiveProfile, error)
@@ -33,6 +36,17 @@ type TSProfile struct {
 	NodeDigest          string   `json:"node_digest"`
 	ProviderDigest      string   `json:"provider_digest"`
 	AllowProjectPlugins bool     `json:"allow_project_plugins"`
+	AnalysisMode        string   `json:"analysis_mode"`
+}
+type PythonProfile struct {
+	SchemaVersion       int64    `json:"schema_version"`
+	Language            string   `json:"language"`
+	PythonVersion       string   `json:"python_version"`
+	InterpreterDigest   string   `json:"interpreter_digest"`
+	StdlibDigest        string   `json:"stdlib_digest"`
+	ProviderDigest      string   `json:"provider_digest"`
+	ModuleRoots         []string `json:"module_roots"`
+	AllowProjectImports bool     `json:"allow_project_imports"`
 	AnalysisMode        string   `json:"analysis_mode"`
 }
 
@@ -92,6 +106,21 @@ func (p *TSProfile) normalizedProfile() (EffectiveProfile, error) {
 	result.TsconfigPaths = paths
 	return &result, nil
 }
+func (p *PythonProfile) normalizedProfile() (EffectiveProfile, error) {
+	if p == nil || p.SchemaVersion != 1 || p.Language != "python" || !pythonVersionPattern.MatchString(p.PythonVersion) ||
+		!lowerHex(p.InterpreterDigest, 64) || !lowerHex(p.StdlibDigest, 64) || !lowerHex(p.ProviderDigest, 64) ||
+		p.AllowProjectImports || (p.AnalysisMode != "syntax" && p.AnalysisMode != "typed_when_available") {
+		return nil, fmt.Errorf("invalid Python profile")
+	}
+	result := *p
+	roots, err := sortedStrings(p.ModuleRoots, 1, 64, 4096, 2)
+	if err != nil {
+		return nil, err
+	}
+	result.ModuleRoots = roots
+	return &result, nil
+}
+
 func DecodeEffectiveProfileJSON(data []byte, maxBytes int) (EffectiveProfile, error) {
 	if _, err := DecodeIdentityJSON(data, maxBytes); err != nil {
 		return nil, err
@@ -111,6 +140,9 @@ func DecodeEffectiveProfileJSON(data []byte, maxBytes int) (EffectiveProfile, er
 	case "typescript_javascript":
 		fields = []string{"schema_version", "language", "tsconfig_paths", "compiler_digest", "node_digest", "provider_digest", "allow_project_plugins", "analysis_mode"}
 		result = &TSProfile{}
+	case "python":
+		fields = []string{"schema_version", "language", "python_version", "interpreter_digest", "stdlib_digest", "provider_digest", "module_roots", "allow_project_imports", "analysis_mode"}
+		result = &PythonProfile{}
 	default:
 		return nil, fmt.Errorf("unknown profile language")
 	}

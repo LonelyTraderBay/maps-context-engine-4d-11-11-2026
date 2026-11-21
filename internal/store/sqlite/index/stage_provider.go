@@ -396,14 +396,21 @@ func validateProviderBatchWithKnown(ctx context.Context, worktree string, captur
 	paths := make(map[string]bool)
 	var sourceBytes int64
 	verifyPath := func(path string, captured bool, start, end int64) error {
-		if !known[path] || policy.CheckPath(path) != nil {
-			return ErrCaptureMismatch
-		}
-		if err := capture.Scanner.CheckContent([]byte(path)); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := capture.Authorize(ctx, worktree, path, manifest.PolicyDigest, capture.PolicyEpoch); err != nil {
-			return err
+		// A batch uses one immutable capture and policy epoch. Authorize each
+		// path on first use and return it for the caller's final recheck.
+		if !paths[path] {
+			if !known[path] || policy.CheckPath(path) != nil {
+				return ErrCaptureMismatch
+			}
+			if err := capture.Scanner.CheckContent([]byte(path)); err != nil {
+				return err
+			}
+			if err := capture.Authorize(ctx, worktree, path, manifest.PolicyDigest, capture.PolicyEpoch); err != nil {
+				return err
+			}
 		}
 		if captured {
 			file, ok := capture.Snapshot.File(path)

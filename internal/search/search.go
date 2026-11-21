@@ -11,7 +11,7 @@ import (
 
 type Request struct {
 	ProfileID, GenerationID string
-	Mode                    string // exact, prefix, text, file, or position
+	Mode                    string // exact, prefix, text, file, position, or catalog
 	Query                   string
 	Kinds                   []string // exact symbol kinds; empty means all kinds
 	Package                 string   // exact Go import path; empty means all packages

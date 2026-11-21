@@ -82,7 +82,7 @@ func LocateKeysetPage(ctx context.Context, reader Reader, codec *contextpack.Cur
 	if position.NextCoverageGap != 0 || position.NextWarningGap != 0 || position.NextByteOffset != 0 || continuation == nil && (position.NextItem != 0 || len(position.LastKey) != 0) || continuation != nil && (position.NextItem == 0 || len(position.LastKey) == 0) {
 		return LocatePage{}, contextpack.ErrCursorInvalid
 	}
-	after, err := decodeLocateKey(position.LastKey)
+	after, err := DecodeLocateKey(position.LastKey)
 	if err != nil {
 		return LocatePage{}, err
 	}
@@ -161,7 +161,7 @@ func LocateKeysetPage(ctx context.Context, reader Reader, codec *contextpack.Cur
 	page := LocatePage{Result: result}
 	page.Result.NextKey = ""
 	if result.Truncated {
-		parts, e := encodeLocateKey(last)
+		parts, e := EncodeLocateKey(last)
 		if e != nil || position.NextItem > 9007199254740991-int64(count) {
 			return LocatePage{}, ErrLocatePageInvalid
 		}
@@ -198,9 +198,9 @@ func FileLocateKey(filename string) (string, error) {
 	return "file-" + digest, nil
 }
 
-// Hex preserves SQLite BINARY byte order and avoids control characters. Three
+// EncodeLocateKey preserves SQLite BINARY byte order and avoids control characters. Three
 // 512-byte pieces cover the complete 192-rune ID allowed by the wire model.
-func encodeLocateKey(id string) ([]string, error) {
+func EncodeLocateKey(id string) ([]string, error) {
 	if id == "" || len(id) > 768 || !utf8.ValidString(id) {
 		return nil, ErrLocatePageInvalid
 	}
@@ -214,7 +214,7 @@ func encodeLocateKey(id string) ([]string, error) {
 	return parts, nil
 }
 
-func decodeLocateKey(parts []string) (string, error) {
+func DecodeLocateKey(parts []string) (string, error) {
 	if len(parts) == 0 {
 		return "", nil
 	}

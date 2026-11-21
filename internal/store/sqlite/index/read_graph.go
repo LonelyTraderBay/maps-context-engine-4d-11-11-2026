@@ -29,6 +29,7 @@ type PublishedGraphRequest struct {
 	MaxSourceBytes      int64
 	MaxFactBytes        int
 	MaxFacts            int
+	MaxSymbols          int // zero uses only MaxFacts
 }
 
 // PublishedGraph contains the complete bounded provider catalog for exactly
@@ -125,7 +126,8 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 	if ctx == nil || !s.readable() ||
 		r.AuthorizeGeneration == nil || r.AuthorizePath == nil || r.Scanner == nil || !validHash(r.VectorDigest) ||
 		r.MaxManifestBytes < 1024 || r.MaxManifestBytes > 64*1024*1024 || r.MaxFileBytes < 1 || r.MaxFileBytes > 64*1024*1024 ||
-		r.MaxSourceBytes < 1 || r.MaxSourceBytes > 512*1024*1024 || r.MaxFactBytes < 1024 || r.MaxFactBytes > 16*1024*1024 || r.MaxFacts < 1 || r.MaxFacts > 100000 {
+		r.MaxSourceBytes < 1 || r.MaxSourceBytes > 512*1024*1024 || r.MaxFactBytes < 1024 || r.MaxFactBytes > 16*1024*1024 || r.MaxFacts < 1 || r.MaxFacts > 100000 ||
+		r.MaxSymbols < 0 || r.MaxSymbols > r.MaxFacts {
 		return nil, ErrInvalidStore
 	}
 	if _, ok := ctx.Deadline(); !ok {

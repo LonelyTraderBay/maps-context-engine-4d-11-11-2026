@@ -24,6 +24,12 @@ export async function readStaticFlow(client: Pick<ExplorerClient, 'flow'>, scope
     throw new Error('Flow trả về không khớp lựa chọn.');
   }
   await verifyScopeDigest(response.scope, 32768);
+  const stepIDs = new Set(data.steps.map(step => step.step_id));
+  const edgeIDs = new Set(data.edges.map(edge => edge.edge_id));
+  if (data.steps.length > 100 || data.edges.length > 300 || stepIDs.size !== data.steps.length ||
+      edgeIDs.size !== data.edges.length || data.edges.some(edge => !stepIDs.has(edge.from_step_id) || !stepIDs.has(edge.to_step_id))) {
+    throw new Error('Flow trả về vượt giới hạn hoặc chứa liên kết ngoài lát hiển thị.');
+  }
   for (const step of data.steps) {
     if (step.possible_or_observed !== 'statically_possible' || step.order_semantics === 'causal_trace' ||
         step.outcome_status.endsWith('_observed') || !step.canonical_refs.every(ref => uniqueMember(scope, ref)) ||

@@ -99,7 +99,7 @@ func (p *NodeProvider) withNode(parent context.Context, job ports.ProviderJob,
 	}
 	ctx, stop := context.WithDeadline(parent, minTime(deadline, time.Now().Add(time.Minute)))
 	defer stop()
-	root, err := p.verifyJob(ctx, job)
+	root, err := verifyCapturedJob(ctx, p.config.ScratchParent, job)
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func minTime(a, b time.Time) time.Time {
 	return b
 }
 
-func (p *NodeProvider) verifyJob(ctx context.Context, job ports.ProviderJob) (*paths.Root, error) {
+func verifyCapturedJob(ctx context.Context, scratchParent string, job ports.ProviderJob) (*paths.Root, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -142,11 +142,11 @@ func (p *NodeProvider) verifyJob(ctx context.Context, job ports.ProviderJob) (*p
 		return nil, ErrAuthority
 	}
 	path := job.Start.SnapshotRoot
-	if filepath.Dir(path) != p.config.ScratchParent || strings.ContainsAny(path, "*,") ||
+	if filepath.Dir(path) != scratchParent || strings.ContainsAny(path, "*,") ||
 		filepath.Dir(job.Start.ManifestPath) != path || filepath.Clean(job.Start.ManifestPath) != job.Start.ManifestPath {
 		return nil, ErrAuthority
 	}
-	parent, err := paths.OpenRoot(p.config.ScratchParent)
+	parent, err := paths.OpenRoot(scratchParent)
 	if err != nil {
 		return nil, ErrAuthority
 	}
@@ -302,7 +302,11 @@ func (p *NodeProvider) sealWorker() (*os.File, error) {
 	} else if p.config.Entrypoint != "" {
 		return nil, ErrAuthority
 	}
-	if len(body) == 0 || len(body) > maxProgramBytes || hexDigest(body) != p.config.ProviderDigest {
+	return sealProviderProgram(body, p.config.ProviderDigest)
+}
+
+func sealProviderProgram(body []byte, digest string) (*os.File, error) {
+	if len(body) == 0 || len(body) > maxProgramBytes || hexDigest(body) != digest {
 		return nil, ErrAuthority
 	}
 	fd, err := unix.MemfdCreate("mce4d-provider", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
@@ -332,6 +336,30 @@ func (s *stderrLimit) Write(data []byte) (int, error) {
 
 func runFramedNode(ctx context.Context, root, compiler *paths.Root, node, script *os.File, job ports.ProviderJob,
 	mode string, consume func(context.Context, *bufio.Reader) error) (resultErr error) {
+	const programFD = "/proc/self/fd/4"
+	args := []string{"--permission", "--preserve-symlinks-main",
+		"--max-old-space-size=256", "--allow-fs-read=" + programFD,
+		"--allow-fs-read=" + job.Start.SnapshotRoot}
+	env := []string{"LC_ALL=C", "TZ=UTC"}
+	if mode != "" {
+		env = append(env, "MCE4D_PROVIDER_MODE="+mode)
+	}
+	var verify func(context.Context) error
+	if compiler != nil {
+		path, err := compiler.CanonicalPath()
+		if err != nil {
+			return ErrAuthority
+		}
+		args = append(args, "--allow-fs-read="+path)
+		env = append(env, "MCE4D_COMPILER_ROOT="+path)
+		verify = func(context.Context) error { return compiler.Verify() }
+	}
+	return runFramedWorker(ctx, root, node, script, job, append(args, programFD), env, verify, consume)
+}
+
+func runFramedWorker(ctx context.Context, root *paths.Root, executable, script *os.File, job ports.ProviderJob,
+	args, env []string, verify func(context.Context) error, consume func(context.Context, *bufio.Reader) error,
+) (resultErr error) {
 	ctx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	dir, err := root.DirectoryHandle()
@@ -352,26 +380,10 @@ func runFramedNode(ctx context.Context, root, compiler *paths.Root, node, script
 	defer outR.Close()
 	defer outW.Close()
 
-	const programFD = "/proc/self/fd/4"
-	args := []string{"--permission", "--preserve-symlinks-main",
-		"--max-old-space-size=256", "--allow-fs-read=" + programFD,
-		"--allow-fs-read=" + job.Start.SnapshotRoot}
-	env := []string{"LC_ALL=C", "TZ=UTC"}
-	if mode != "" {
-		env = append(env, "MCE4D_PROVIDER_MODE="+mode)
-	}
-	if compiler != nil {
-		path, err := compiler.CanonicalPath()
-		if err != nil {
-			return ErrAuthority
-		}
-		args = append(args, "--allow-fs-read="+path)
-		env = append(env, "MCE4D_COMPILER_ROOT="+path)
-	}
-	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", append(args, programFD)...)
+	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", args...)
 	cmd.Dir = "/proc/self/fd/" + strconv.FormatUint(uint64(dir.Fd()), 10)
 	cmd.Env = env
-	cmd.ExtraFiles = []*os.File{node, script}
+	cmd.ExtraFiles = []*os.File{executable, script}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = inR, outW, &stderrLimit{cancel: stop}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	cmd.WaitDelay = 2 * time.Second
@@ -411,7 +423,7 @@ func runFramedNode(ctx context.Context, root, compiler *paths.Root, node, script
 		if resultErr == nil {
 			if err := verifyCapture(ctx, root, job); err != nil {
 				resultErr = err
-			} else if job.Recheck(ctx) != nil || compiler != nil && compiler.Verify() != nil {
+			} else if job.Recheck(ctx) != nil || verify != nil && verify(ctx) != nil {
 				resultErr = ErrAuthority
 			}
 		}

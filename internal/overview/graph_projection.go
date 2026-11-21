@@ -68,6 +68,20 @@ func graphIdentityID(kind string, identity model.GraphIdentity, id string) strin
 	return kind + "-" + hex.EncodeToString(sum[:])
 }
 
+// CapturedSymbolNode keeps the canonical node identity common to the complete
+// projection and the Explorer's bounded symbol catalog.
+func CapturedSymbolNode(identity model.GraphIdentity, symbol model.SymbolFact, source *model.SourceRef) model.GraphNode {
+	node := model.GraphNode{NodeID: graphIdentityID("symbol", identity, symbol.SymbolID),
+		Ref:  &model.SymbolRef{Kind: "symbol", GraphIdentity: identity, SymbolID: symbol.SymbolID},
+		Kind: symbol.Kind, Label: symbol.Name, Plane: "annotation",
+		SourceRefs: []model.SourceRef{}, EvidenceRefs: []model.EvidenceRef{}}
+	if source != nil {
+		node.Plane = "observed_static"
+		node.SourceRefs = append(node.SourceRefs, *source)
+	}
+	return node
+}
+
 // NewProjectedGraph walks the verified, pinned fact catalog once and gives the
 // complete materialization to T025's signed pager. Incomplete traversal is an
 // explicit error; no cursor restarts a partial walk against a newer snapshot.
@@ -140,11 +154,7 @@ func ProjectFacts(ctx context.Context, captured *snapshot.Snapshot, scope model.
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		id := addSymbol(symbol.SymbolID)
-		node := nodes[id]
-		node.Kind = symbol.Kind
-		node.Label = symbol.Name
-		node.Plane = "observed_static"
+		var source *model.SourceRef
 		if symbol.Path != nil && symbol.Range != nil {
 			file, ok := captured.File(*symbol.Path)
 			if !ok {
@@ -154,11 +164,10 @@ func ProjectFacts(ctx context.Context, captured *snapshot.Snapshot, scope model.
 			if _, e := model.MatchPinnedSource(scope, ref, serviceID, 32768); e != nil {
 				return nil, nil, ErrInput
 			}
-			node.SourceRefs = append(node.SourceRefs, ref)
-		} else {
-			node.Plane = "annotation"
+			source = &ref
 		}
-		nodes[id] = node
+		node := CapturedSymbolNode(identity, symbol, source)
+		nodes[node.NodeID] = node
 	}
 	edges := make([]model.GraphEdge, 0, len(references))
 	for _, reference := range references {

@@ -14,6 +14,16 @@ import (
 // preflight rejects corrupt oversized rows before the driver materializes them.
 func readGraphFacts(ctx context.Context, tx *sql.Tx, r PublishedGraphRequest, g *PublishedGraph) error {
 	id := r.Member.GenerationID
+	if r.MaxSymbols > 0 {
+		var found int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM symbols WHERE generation_id=? ORDER BY symbol_id LIMIT 1 OFFSET ?`, id, r.MaxSymbols).Scan(&found)
+		if err == nil {
+			return ErrCaptureLimit
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
 	var count int64
 	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM packages WHERE generation_id=?)+(SELECT count(*) FROM symbols WHERE generation_id=?)+(SELECT count(*) FROM relations WHERE generation_id=?)+(SELECT count(*) FROM diagnostics WHERE generation_id=?)`, id, id, id, id).Scan(&count); err != nil {
 		return err
