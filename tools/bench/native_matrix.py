@@ -20,7 +20,9 @@ def exercise(root, command, worktree, profile, authored, config, scale):
     state = root / "profiles/runtime/home/.local/state/mce4d/worktrees" / worktree
     index = ["index", "--worktree-id", worktree, "--profile-id", profile]
     query = ["--worktree-id", worktree, "--profile-id", profile, "query"]
-    evidence = {"case": "T039_NATIVE_MATRIX", **authored, "config": config, "index": {}, "query": [],
+    xl_boundary = authored["cohort"] == "XL150K"
+    case = "T077_XL_BOUNDARY" if xl_boundary else "T039_NATIVE_MATRIX"
+    evidence = {"case": case, **authored, "config": config, "index": {}, "query": [],
                 "source_sha256": scale.source_digest(target), "usage": None, "proxy": {}}
 
     def run_index(phase, full=False, input_bytes=None):
@@ -56,7 +58,16 @@ def exercise(root, command, worktree, profile, authored, config, scale):
             assert full.returncode == 4 and "limit reached" in full.stderr, full.stderr
             evidence["refusal_state"] = scale.unpublished_oracle(state)
             evidence["outcome"] = "unsupported_at_measured_cap"
+            if xl_boundary:
+                assert evidence["index"]["full"]["stop_reason"] is None, "outer guard stopped the engine"
+                evidence["after_source_sha256"] = scale.source_digest(target)
+                assert evidence["after_source_sha256"] == evidence["source_sha256"], "engine changed fixture source"
+                evidence["read_after_refusal"] = "status_only"
+                evidence["workload_query_update"] = "NOT_RUN"
             return
+
+        if xl_boundary:
+            raise AssertionError("XL boundary exceeded the configured inventory cap without refusal")
 
         status, _, _ = read("status", {}, "setup")
         active, = status["data"]["scopes"]

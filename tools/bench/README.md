@@ -143,6 +143,17 @@ The fixed A/B/C retrieval probe measures delivered bytes for one authored
 symbol oracle. It exercises direct grep/read, locate plus direct read, and
 locate plus snapshot context on the same source. These local transport
 counts are separate from host input/output tokens and host task success.
+
+## C078 beyond the L file-count boundary
+
+Run the same protected Linux broker with `MCE4D_ACCEPTANCE_SUITE=bench` and
+`MCE4D_SCALE_COHORT=XL150K`. The independently authored workload contains
+150,000 files. Keep the profile's default 100,000-file limit and record the
+actual configuration. The pinned packaged CLI must refuse within its
+deadline, preserve the source, and publish zero generations. The only query
+after refusal checks that status reports a missing index. The evidence records
+latency to refusal, sampled tree RSS, sampled write-byte floor, and allocated
+state. Workload queries and incremental updates remain `NOT_RUN`.
 Use the 30-task T038 plan and an authoritative usage export when a host
 comparison has been authorized.
 
