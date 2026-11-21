@@ -19,7 +19,7 @@ func main() {
 		os.Exit(code)
 	}
 	cpus := runtime.NumCPU()
-	deps := cli.Dependencies{CPUs: cpus, SQLiteProbe: sqlite.ProbeMemory, LookupExecutable: exec.LookPath,
+	deps := cli.Dependencies{CPUs: cpus, SQLiteProbe: sqlite.ProbeMemory, LookupExecutable: exec.LookPath, ExplorerAssets: bundledExplorerAssets(),
 		OpenConfig: func(ctx context.Context, configPath string) (cli.ConfigOwner, func() error, error) {
 			return cli.OpenDefaultReadOnlyConfig(ctx, configPath, cpus)
 		},

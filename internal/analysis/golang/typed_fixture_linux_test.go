@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/inventory"
@@ -228,7 +229,11 @@ func Điểm(giá int) int {
 	profile.ModuleRoots = append([]string{}, profile.ModuleRoots...)
 	profile.DependencyRoots = append([]string{}, profile.DependencyRoots...)
 	mutating.Loader.Preflight.Profile = &profile
-	mutating.Loader.Preflight.AuthorizeScope = func(context.Context, string, string, string, int64) error { profile.Goos = "windows"; return nil }
+	var mutateProfile sync.Once
+	mutating.Loader.Preflight.AuthorizeScope = func(context.Context, string, string, string, int64) error {
+		mutateProfile.Do(func() { profile.Goos = "windows" })
+		return nil
+	}
 	if got, err := AnalyzeTypedCaptured(ctx, mutating); err != nil || !got.Loader.BuildSelectionVerified || got.Loader.SnapshotDigest != preflight.Snapshot.Manifest().SnapshotDigest || profile.Goos != "windows" {
 		t.Fatalf("profile mutation changed an in-flight typed load: %+v %v", got, err)
 	}

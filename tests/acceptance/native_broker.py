@@ -5,7 +5,7 @@ import os,pathlib,subprocess,hashlib,fcntl,struct,stat,json,socket,time,re,shuti
 run=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_RUN']).resolve(strict=True);root=run/'rootfs';built=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_BUILD']).resolve(strict=True)
 approved=json.loads(pathlib.Path(os.environ['MCE4D_ACCEPTANCE_APPROVALS']).read_text())
 assert set(approved['binaries'])=={'mce4d','state-profile','go-toolchain'}
-suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles')
+suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0')
 assert os.getpid()==1, 'run broker in a fresh private PID/mount/network namespace'
 import importlib.util,sys
 sys.dont_write_bytecode=True
@@ -77,7 +77,7 @@ else:
  for name,body in sources.items():(root/'target'/name).write_text(body)
 for p in [root/'target']+list((root/'target').rglob('*')):
  p.chmod(0o755 if p.is_dir() else 0o644);os.chown(p,1001,1001)
-if suite in ('security','gc','backup','restore'):(root/'target/execute-me.sh').chmod(0o755)
+if suite in ('security','gc','backup','restore','explorer-gu0'):(root/'target/execute-me.sh').chmod(0o755)
 (root/'host-config/config.toml').write_bytes(b'synthetic existing host config\n')
 def tree(p):return {str(f.relative_to(p)):hashlib.sha256(f.read_bytes()).hexdigest() for f in p.rglob('*') if f.is_file()}
 before=tree(root/'target');before_config=tree(root/'host-config');active=[]
@@ -115,6 +115,7 @@ try:
   config={'pack_ttl_seconds':native_matrix.TEST_PACK_TTL,'rename_result_ttl_seconds':native_matrix.TEST_RENAME_TTL}
  p=command('/state-profile',['create','--root','/profiles/runtime','--engine-uid','1000','--engine-gid','1000','--client-uid','1001',*targets,'--worker-executable','/mce4d'],0);assert p.returncode==0
  p=command('/mce4d',['config','set','--input-json','-'],payload={'action':'set','config':{'schema_version':1,'core':config},'expected_digest':None});assert p.returncode==0
+ config_digest=json.loads(p.stdout)['data']['config_digest']
  p=command('/mce4d',['repo','add','--root','/target']);assert p.returncode==0;worktree=re.search(r'Registered worktree ([0-9a-f-]{36})',p.stdout).group(1)
  policy={'schema_version':1,'allowed_roots':['/target'],'denied_globs':[],'trusted_rule_paths':['AGENTS.md'],'dependency_roots':[],'allowed_executables':[{'path':'/git','sha256':hashlib.sha256((root/'git').read_bytes()).hexdigest()},{'path':'/toolchain/bin/go','sha256':hashlib.sha256((root/'toolchain/bin/go').read_bytes()).hexdigest()},{'path':'/bin/gopls','sha256':hashlib.sha256((root/'bin/gopls').read_bytes()).hexdigest()}],'allow_target_execution':False,'allow_runtime_download':False,'max_file_bytes':65536,'max_source_bytes':2097152,'max_output_bytes':65536,'secret_rules_version':'builtin-v1'}
  if suite in ('scale','bench'):policy['max_source_bytes']=32<<20
@@ -124,6 +125,11 @@ try:
  profile={'schema_version':1,'language':'go','goos':'linux','goarch':'amd64','build_tags':[],'cgo_enabled':False,'tests_enabled':False,'module_roots':['.'],'toolchain_digest':toolchain_digest,'provider_digest':approved['binaries']['mce4d'],'module_mode':'readonly','analysis_mode':'typed_when_available','dependency_roots':[]}
  p=command('/mce4d',['profile','set','--worktree-id',worktree,'--input-json','-'],payload={'worktree_id':worktree,'profile_name':'typed','expected_revision':0,'profile':profile});assert p.returncode==0;profile_id=json.loads(p.stdout)['data']['profile_id']
  p=command('/state-profile',['worktree-create','--root','/profiles/runtime','--worktree-id',worktree],0);assert p.returncode==0
+ if suite in ('explorer-shell','explorer-gu0'):
+  subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
+  sys.path.insert(0,str(module_path.parent))
+  from explorer_shell import exercise_shell
+  exercise_shell(root,setup,worktree,profile_id,active,"empty")
  if suite not in ('scale','bench'):
   p=command('/mce4d',['index','--worktree-id',worktree,'--profile-id',profile_id]);assert p.returncode==0
  prefix=['--worktree-id',worktree,'--profile-id',profile_id,'query']
@@ -138,6 +144,34 @@ try:
   native_matrix.exercise_context(root,setup,worktree,profile_id,security)
  elif suite=='bench-retention':
   native_matrix.exercise_retention(root,setup,worktree,profile_id,request,security)
+ elif suite=='explorer':
+  subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
+  sys.path.insert(0,str(module_path.parent))
+  from explorer_native import exercise
+  exercise(root,setup,worktree,profile_id,active)
+  assert tree(root/'target')==before and tree(root/'host-config')==before_config
+ elif suite in ('explorer-shell','explorer-gu0'):
+  exercise_shell(root,setup,worktree,profile_id,active,"indexed", gu0=suite=='explorer-gu0')
+  if suite=='explorer-gu0':
+   from explorer_native import exercise
+   config_patch={'schema_version':1,'core':config,'explorer':{'bearer_ttl_seconds':16}}
+   p=command('/mce4d',['config','set','--input-json','-'],payload={'action':'set','config':config_patch,'expected_digest':config_digest})
+   assert p.returncode==0
+   exercise(root,setup,worktree,profile_id,active,gu0=True)
+  assert tree(root/'target')==before and tree(root/'host-config')==before_config
+  if suite=='explorer-gu0':
+   canary=root/'target/gu0-denied.txt'
+   canary.write_bytes(b'T084_SYNTHETIC_DENIED_CANARY\n')
+   canary.chmod(0o644);os.chown(canary,1001,1001)
+   before[canary.name]=hashlib.sha256(canary.read_bytes()).hexdigest()
+   policy['denied_globs']=[canary.name]
+   p=command('/mce4d',['policy','set','--input-json','-'],payload={'worktree_id':worktree,'expected_epoch':2,'policy':policy})
+   assert p.returncode==0
+   p=command('/mce4d',['index','--worktree-id',worktree,'--profile-id',profile_id]);assert p.returncode==0
+   exercise(root,setup,worktree,profile_id,active,gu0=True,canary_only=True)
+   assert tree(root/'target')==before and tree(root/'host-config')==before_config
+   assert not (root/'result/repo-executed').exists()
+   print(json.dumps({'check':'GU0_CANARY','status':'PASS','target_files':len(before),'host_config_files':len(before_config),'source_mutations':0,'target_executions':0}),flush=True)
  elif suite=='spec-only':
   self_index.check_spec_only(root,command,worktree,profile_id)
   assert tree(root/'target')==before

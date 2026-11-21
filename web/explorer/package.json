@@ -1,0 +1,29 @@
+{
+  "name": "@mce4d/explorer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node tools/generate-contracts.mjs",
+    "typecheck": "npm run generate && tsc --noEmit",
+    "lint": "node --check tools/generate-contracts.mjs && node --check vite.config.mjs && node --check ../../tests/contract/ui.browser.mjs && node --check ../../tests/contract/ui.contracts.test.mjs",
+    "test": "npm run generate && node --test ../../tests/contract/ui.contracts.test.mjs",
+    "build": "npm run generate && vite build",
+    "test:e2e": "npm run generate && node ../../tests/contract/ui.browser.mjs"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "3.1.3",
+    "@xyflow/react": "13.0.2",
+    "jsonc-parser": "3.3.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "playwright": "1.65.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.8"
+  }
+}

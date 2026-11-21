@@ -11,6 +11,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/cli"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/compose"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/explorer"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/records"
@@ -50,6 +51,13 @@ func configureNativeDependencies(deps *cli.Dependencies) {
 			err = cli.ErrBindingDenied
 		}
 		return service, release, err
+	}
+	deps.OpenExplorer = func(ctx context.Context, selected, worktree, profile string) (explorer.Options, func() error, error) {
+		options, release, err := compose.OpenNativeExplorer(ctx, root, selected, worktree, profile, deps.CPUs)
+		if errors.Is(err, sqlite.ErrStoreRecoveryRequired) {
+			err = app.ErrCoreStoreRecovery
+		}
+		return options, release, err
 	}
 	deps.AddRepo = func(ctx context.Context, selected, path string) (cli.RegisteredRepo, error) {
 		registered, err := compose.RegisterNativeRepo(ctx, root, selected, path, deps.CPUs)

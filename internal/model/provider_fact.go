@@ -104,9 +104,7 @@ func DecodeRelationFactJSON(data []byte, maxBytes int) (RelationFact, error) {
 	if !validID(r.RelationID) || !validID(r.SourceSymbolID) || !optionalID(r.TargetSymbolID) || !validSourcePath(r.SitePath) || !stringAtMost(r.Reason, 1024) || (r.UnresolvedLabel != nil && !boundedString(*r.UnresolvedLabel, 512)) {
 		return RelationFact{}, fmt.Errorf("invalid relation")
 	}
-	switch r.Kind {
-	case "CONTAINS", "IMPORTS", "REFERS_TO", "READS", "WRITES", "CALLS_DIRECT", "CALLS_INTERFACE", "MAY_DISPATCH_TO", "UNRESOLVED_REF", "UNRESOLVED_CALL", "TEST_REF", "DOC_LINK":
-	default:
+	if !ValidRelationKind(r.Kind) {
 		return RelationFact{}, fmt.Errorf("invalid relation kind")
 	}
 	switch r.EvidenceKind {
@@ -119,4 +117,13 @@ func DecodeRelationFactJSON(data []byte, maxBytes int) (RelationFact, error) {
 		return RelationFact{}, fmt.Errorf("invalid unresolved relation")
 	}
 	return r, nil
+}
+
+func ValidRelationKind(kind string) bool {
+	switch kind {
+	case "CONTAINS", "IMPORTS", "REFERS_TO", "READS", "WRITES", "CALLS_DIRECT", "CALLS_INTERFACE", "MAY_DISPATCH_TO", "UNRESOLVED_REF", "UNRESOLVED_CALL", "TEST_REF", "DOC_LINK":
+		return true
+	default:
+		return false
+	}
 }

@@ -238,6 +238,14 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 	}
 	switch data := response.Data.(type) {
 	case nil:
+		if wanted, ok := request.(model.SourceReadRequest); ok && name == "POST /source/read" {
+			if response.Status != "error" || response.Error == nil || response.Error.Code != "RESULT_TOO_LARGE" ||
+				len(response.Error.Details) != 1 || response.Error.Details[0].Code != "SOURCE_RANGE_TOO_LARGE" ||
+				len(response.Error.Details[0].SourceRefs) != 1 || response.Error.Details[0].SourceRefs[0] != wanted.SourceRef {
+				return ErrAuthority
+			}
+			break
+		}
 		if response.Scope == nil || response.Status != "error" || response.Error == nil || response.Error.Code != "RESULT_TOO_LARGE" || len(response.Error.Details) != 1 || response.Error.Details[0].Code != "EVIDENCE_ITEM_TOO_LARGE" {
 			return ErrAuthority
 		}
@@ -275,6 +283,34 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 			if err := checkEvidence(item.EvidenceRefs); err != nil {
 				return err
 			}
+		}
+	case model.GraphData:
+		if _, ok := request.(model.GraphQueryRequest); !ok || name != "POST /graph/query" {
+			return ErrAuthority
+		}
+		for _, node := range data.Nodes {
+			if err := checkGraph(node.Ref); err != nil {
+				return err
+			}
+			if err := checkRefs(node.SourceRefs); err != nil {
+				return err
+			}
+			if err := checkEvidence(node.EvidenceRefs); err != nil {
+				return err
+			}
+		}
+		for _, edge := range data.Edges {
+			if err := checkEvidence(edge.EvidenceRefs); err != nil {
+				return err
+			}
+		}
+	case model.SourceData:
+		wanted, ok := request.(model.SourceReadRequest)
+		if !ok || name != "POST /source/read" || data.SourceRef != wanted.SourceRef {
+			return ErrAuthority
+		}
+		if err := checkRef(data.SourceRef); err != nil {
+			return err
 		}
 	case model.PackData:
 		for _, ref := range data.TargetRefs {

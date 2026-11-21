@@ -1,0 +1,26 @@
+{
+  "bridge": {
+    "parent_to_sdk": ["CHALLENGE", "BOUND", "PICK_AT", "LIST_INSTANCES", "HIGHLIGHT", "CLEAR_HIGHLIGHT", "REQUEST_SCROLL", "SET_MODE", "DISPOSE", "PING", "ERROR"],
+    "sdk_to_parent": ["READY", "BOUND_ACK", "PICK_RESULT", "INSTANCES", "HIGHLIGHT_RESULT", "SCROLL_RESULT", "MODE_ACK", "BUILD_CHANGED", "INSTANCE_INVALIDATED", "CAPABILITY_STATUS", "DISPOSED", "PONG", "ERROR"]
+  },
+  "http": {
+    "POST /session/bootstrap": ["bootstrap", 16384, 131072],
+    "GET /workspace": ["status", 32768, 131072],
+    "POST /graph/query": ["graph_query", 65536, 1048576],
+    "POST /source/read": ["source_read", 32768, 131072],
+    "POST /mapping/resolve": ["mapping_resolve", 32768, 131072],
+    "POST /flow/query": ["flow_query", 65536, 1048576],
+    "POST /context/pack": ["context_pack", 32768, 131072],
+    "POST /preview/attach": ["preview_attach", 16384, 131072],
+    "POST /preview/bind": ["preview_bind", 16384, 131072],
+    "POST /preview/mode": ["preview_mode", 16384, 131072],
+    "POST /preview/ack": ["preview_ack", 16384, 131072],
+    "POST /preview/invalidate": ["preview_invalidate", 16384, 131072],
+    "POST /preview/detach": ["preview_detach", 16384, 131072],
+    "POST /mapping/propose": ["mapping_propose", 16384, 131072],
+    "POST /mapping/review": ["mapping_review", 16384, 131072],
+    "POST /preview/status": ["preview_status", 16384, 131072],
+    "POST /records/list": ["records_list", 16384, 131072],
+    "POST /records/read": ["records_read", 16384, 131072]
+  }
+}

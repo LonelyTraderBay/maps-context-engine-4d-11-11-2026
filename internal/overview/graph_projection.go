@@ -9,6 +9,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/contextpack"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/search"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/snapshot"
 )
 
 // ProjectedGraph retains selection coverage and gaps beside its materialized
@@ -95,6 +96,38 @@ func NewProjectedGraph(ctx context.Context, input contextpack.Input, codec *cont
 		return nil, search.ErrGraphIncomplete
 	}
 	identity := model.GraphIdentity{WorktreeID: report.Target.WorktreeID, ProfileID: report.Target.ProfileID, GenerationID: report.Target.GenerationID}
+	ordered, edges, err := ProjectFacts(ctx, input.Snapshot, report.Scope, input.ServiceID, identity, report.Nodes, report.References, maxNodes, maxEdges)
+	if err != nil {
+		return nil, err
+	}
+	check := func(ctx context.Context, b contextpack.CursorBinding) error {
+		if err := guard(ctx, b); err != nil {
+			return err
+		}
+		return selection.Check(ctx)
+	}
+	pager, err := search.NewGraphPager(ctx, codec, binding, check, input.Scanner, ordered, edges, true, maxNodes, maxEdges, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err = selection.Check(ctx); err != nil {
+		return nil, err
+	}
+	if err = codec.Recheck(ctx, preClaims, guard); err != nil {
+		return nil, err
+	}
+	return &ProjectedGraph{pager: pager, selection: selection, coverage: report.Coverage, gaps: append([]model.Gap{}, report.Gaps...)}, nil
+}
+
+// ProjectFacts converts verified facts and their captured evidence into a
+// renderer-neutral graph. Selection, access checks and pagination are owned
+// by its callers.
+func ProjectFacts(ctx context.Context, captured *snapshot.Snapshot, scope model.ScopeVector, serviceID *string, identity model.GraphIdentity,
+	symbols []model.SymbolFact, references []contextpack.Reference, maxNodes, maxEdges int,
+) ([]model.GraphNode, []model.GraphEdge, error) {
+	if len(symbols) > maxNodes || len(references) > maxEdges {
+		return nil, nil, search.ErrGraphPageLarge
+	}
 	nodes := map[string]model.GraphNode{}
 	addSymbol := func(id string) string {
 		nodeID := graphIdentityID("symbol", identity, id)
@@ -103,9 +136,9 @@ func NewProjectedGraph(ctx context.Context, input contextpack.Input, codec *cont
 		}
 		return nodeID
 	}
-	for _, symbol := range report.Nodes {
-		if err = ctx.Err(); err != nil {
-			return nil, err
+	for _, symbol := range symbols {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
 		}
 		id := addSymbol(symbol.SymbolID)
 		node := nodes[id]
@@ -113,13 +146,13 @@ func NewProjectedGraph(ctx context.Context, input contextpack.Input, codec *cont
 		node.Label = symbol.Name
 		node.Plane = "observed_static"
 		if symbol.Path != nil && symbol.Range != nil {
-			file, ok := input.Snapshot.File(*symbol.Path)
+			file, ok := captured.File(*symbol.Path)
 			if !ok {
-				return nil, ErrInput
+				return nil, nil, ErrInput
 			}
 			ref := model.SourceRef{WorktreeID: identity.WorktreeID, ProfileID: identity.ProfileID, GenerationID: identity.GenerationID, Path: *symbol.Path, ContentHash: file.ContentHash(), Range: *symbol.Range}
-			if _, e := model.MatchPinnedSource(report.Scope, ref, input.ServiceID, 32768); e != nil {
-				return nil, ErrInput
+			if _, e := model.MatchPinnedSource(scope, ref, serviceID, 32768); e != nil {
+				return nil, nil, ErrInput
 			}
 			node.SourceRefs = append(node.SourceRefs, ref)
 		} else {
@@ -127,10 +160,10 @@ func NewProjectedGraph(ctx context.Context, input contextpack.Input, codec *cont
 		}
 		nodes[id] = node
 	}
-	edges := make([]model.GraphEdge, 0, len(report.References))
-	for _, reference := range report.References {
-		if err = ctx.Err(); err != nil {
-			return nil, err
+	edges := make([]model.GraphEdge, 0, len(references))
+	for _, reference := range references {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
 		}
 		relation := reference.Relation
 		from := addSymbol(relation.SourceSymbolID)
@@ -153,27 +186,11 @@ func NewProjectedGraph(ctx context.Context, input contextpack.Input, codec *cont
 		edges = append(edges, model.GraphEdge{EdgeID: graphIdentityID("relation", identity, relation.RelationID), FromNodeID: from, ToNodeID: to, RelationKind: relation.Kind, ResolutionStatus: status, EvidenceRefs: []model.EvidenceRef{evidence}})
 	}
 	if len(nodes) > maxNodes || len(edges) > maxEdges {
-		return nil, search.ErrGraphPageLarge
+		return nil, nil, search.ErrGraphPageLarge
 	}
 	ordered := make([]model.GraphNode, 0, len(nodes))
 	for _, node := range nodes {
 		ordered = append(ordered, node)
 	}
-	check := func(ctx context.Context, b contextpack.CursorBinding) error {
-		if err := guard(ctx, b); err != nil {
-			return err
-		}
-		return selection.Check(ctx)
-	}
-	pager, err := search.NewGraphPager(ctx, codec, binding, check, input.Scanner, ordered, edges, true, maxNodes, maxEdges, maxBytes)
-	if err != nil {
-		return nil, err
-	}
-	if err = selection.Check(ctx); err != nil {
-		return nil, err
-	}
-	if err = codec.Recheck(ctx, preClaims, guard); err != nil {
-		return nil, err
-	}
-	return &ProjectedGraph{pager: pager, selection: selection, coverage: report.Coverage, gaps: append([]model.Gap{}, report.Gaps...)}, nil
+	return ordered, edges, nil
 }

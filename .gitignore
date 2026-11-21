@@ -1,3 +1,8 @@
 /artifacts/
 /mce4d
 /mce4d.exe
+/node_modules/
+/web/explorer/node_modules/
+/web/explorer/.generated/
+/web/explorer/dist/
+/cmd/mce4d/explorer_dist/

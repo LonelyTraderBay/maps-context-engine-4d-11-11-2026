@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -24,6 +25,8 @@ type Dependencies struct {
 	OpenConfig          func(context.Context, string) (ConfigOwner, func() error, error)
 	OpenCore            OpenCore
 	OpenRetainedCore    OpenCore
+	OpenExplorer        OpenExplorer
+	ExplorerAssets      fs.FS
 	OpenAdmin           OpenAdmin
 	ProbeConfig         func(context.Context, string) error
 	SQLiteProbe         func(context.Context) (string, bool, error)
@@ -45,6 +48,7 @@ Usage:
   mce4d [--runtime-config <approved-local-file>] config show|validate|set --input-json <file-or-dash>
   mce4d query status|locate --input-json <file-or-dash>
   mce4d mcp --worktree-id <id> --profile-id <id>
+  mce4d explorer --worktree-id <id> --profile-id <id> --listen 127.0.0.1:0
   mce4d profile set --worktree-id <id> --input-json <file-or-dash>
   mce4d repo add --root <approved-absolute-path>
   mce4d policy set --input-json <file-or-dash>
@@ -140,6 +144,9 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 	}
 	if len(args) == 2 && args[0] == "doctor" && args[1] == "--json" {
 		return writeJSON(stdout, stderr, doctor(ctx, deps, configPath))
+	}
+	if len(args) > 0 && args[0] == "explorer" {
+		return runExplorer(ctx, args[1:], configPath, stdout, stderr, deps)
 	}
 	if len(args) > 0 && args[0] == "store" {
 		if len(args) > 1 && (args[1] == "restore" || args[1] == "recover" && containsFlag(args[2:], "--apply")) {

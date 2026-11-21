@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "compiler": {
+    "package": "typescript",
+    "version": "5.9.3",
+    "license": "Apache-2.0",
+    "entry": "lib/typescript.js",
+    "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+    "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==",
+    "archive_sha256": "10e108c9cf7d5f2879053dff18515fb405abf2ccef63eaaf017d9c571687a1d3",
+    "file_manifest_sha256": "8fb0025c6ad53e08e02d1f50baf2c2bbf4c9a1833a9cd8b3ac3b26d6e1569707",
+    "files": {
+      "LICENSE.txt": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+      "ThirdPartyNoticeText.txt": "1af3c68039c57e539422da82a4faada506ce6d0ea6f90e0b699d02dbcdb7a90c",
+      "lib/typescript.js": "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675"
+    }
+  },
+  "node": {
+    "version": "24.22.3",
+    "platform": "linux",
+    "arch": "x64",
+    "executable_sha256": "a7ec1b37e6ff9d187e4198c5b6df9a4eb1c74dd31804fb3bac55cc4ceca1ac01"
+  }
+}

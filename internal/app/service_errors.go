@@ -80,3 +80,9 @@ func coreError(name string, err error) (code, message, action string, retry bool
 		return "INTERNAL_ERROR", "The operation failed.", "none", false
 	}
 }
+
+// CoreErrorInfo exposes the sanitized core error vocabulary to local adapters.
+func CoreErrorInfo(name string, err error) model.ErrorInfo {
+	code, message, action, retry := coreError(name, err)
+	return model.ErrorInfo{Code: code, Message: message, SuggestedAction: action, Retryable: retry, Details: []model.Gap{}}
+}

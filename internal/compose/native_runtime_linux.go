@@ -175,7 +175,25 @@ func OpenNativeRetainedCore(ctx context.Context, installation, selected, worktre
 	return openNativeCore(ctx, installation, selected, worktree, profile, cpus, true)
 }
 
-func openNativeCore(ctx context.Context, installation, selected, worktree, profile string, cpus int, retained bool) (_ *app.CoreService, release func() error, resultErr error) {
+func openNativeCore(ctx context.Context, installation, selected, worktree, profile string, cpus int, retained bool) (*app.CoreService, func() error, error) {
+	native, release, err := openNativeCoreParts(ctx, installation, selected, worktree, profile, cpus, retained, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	service, err := app.NewCoreService(native.config, native.backend.Authority, native.backend, nil)
+	if err != nil {
+		return nil, nil, errors.Join(err, release())
+	}
+	return service, release, nil
+}
+
+type nativeCoreParts struct {
+	backend   *CoreBackend
+	config    *app.RuntimeConfigService
+	effective model.RuntimeConfig
+}
+
+func openNativeCoreParts(ctx context.Context, installation, selected, worktree, profile string, cpus int, retained, rename bool) (_ *nativeCoreParts, release func() error, resultErr error) {
 	selection := model.ScopeRequest{WorktreeID: &worktree, ProfileID: &profile}
 	if mode, err := selection.SelectionMode(1); err != nil || mode != "single" {
 		return nil, nil, app.ErrCoreAuthentication
@@ -249,9 +267,11 @@ func openNativeCore(ctx context.Context, installation, selected, worktree, profi
 	if err != nil {
 		return nil, nil, err
 	}
-	backend, err = attachNativeRename(bounded, n, backend, principal)
-	if err != nil {
-		return nil, nil, err
+	if rename {
+		backend, err = attachNativeRename(bounded, n, backend, principal)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	if retained {
 		root, lease, protected, err := boundStores.CacheResources(bounded)
@@ -283,11 +303,7 @@ func openNativeCore(ctx context.Context, installation, selected, worktree, profi
 			return nil, nil, err
 		}
 	}
-	service, err := app.NewCoreService(config, authority, backend, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	return service, release, nil
+	return &nativeCoreParts{backend: backend, config: config, effective: effective}, release, nil
 }
 
 func nativeLinkedRelative(target *paths.Root, common string) (string, error) {

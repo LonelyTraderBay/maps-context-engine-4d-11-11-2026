@@ -1,0 +1,21 @@
+Maps Context Engine 4D
+Third-party notices for the local release candidate
+
+The project's own source, schemas and migrations remain private under S02
+IP-04 of Maps-Context-Engine-4D_SPEC.md.
+
+Each candidate archive includes NOTICE.txt, the applicable upstream license
+and attribution texts under LICENSES/, a CycloneDX SBOM, and a manifest. The
+SBOM identifies the built Go modules, Go runtime and vendored packages, and
+the SQLite sources embedded in the driver. See S21 T041 for the exact B005
+commit, platform artifacts and checksums.
+
+The MCP Go SDK's code carries MIT and Apache-2.0 terms. Its documentation
+is outside the candidate archives. The SQLite public domain dedication and
+the driver's BSD-3-Clause license are included with the candidate. The
+MPL-2.0 test dependency covered by IP-05a is outside the packaged binaries
+and archives.
+
+Go, gopls, Git and Codex used to build or verify the candidate are separately
+provisioned. Their distributions and the local project data stay outside the
+candidate archives.

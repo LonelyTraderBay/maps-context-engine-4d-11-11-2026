@@ -1,0 +1,15 @@
+body {
+  margin: 16px;
+  font: 16px system-ui, sans-serif;
+}
+
+#root {
+  width: 640px;
+  height: 320px;
+}
+
+iframe {
+  width: 10px;
+  height: 10px;
+  border: 0;
+}
