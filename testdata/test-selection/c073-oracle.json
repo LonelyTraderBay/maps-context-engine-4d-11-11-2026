@@ -1,0 +1,41 @@
+[
+  {
+    "name": "leaf_complete_fixture",
+    "changed": ["orders/create.go"],
+    "expected": [{"test_id":"TestCreate","test_path":"orders/create_test.go"}],
+    "suggested": [{"test_id":"TestCreate","test_path":"orders/create_test.go"}],
+    "fallback": "none"
+  },
+  {
+    "name": "shared_identifier_effect",
+    "changed": ["shared/ids.go"],
+    "expected": [
+      {"test_id":"TestCreate","test_path":"orders/create_test.go"},
+      {"test_id":"TestCharge","test_path":"payments/charge_test.go"},
+      {"test_id":"TestCheckout","test_path":"integration/checkout_test.go"}
+    ],
+    "suggested": [
+      {"test_id":"TestCreate","test_path":"orders/create_test.go"},
+      {"test_id":"TestCharge","test_path":"payments/charge_test.go"}
+    ],
+    "fallback": "full_regression"
+  },
+  {
+    "name": "schema_module_change",
+    "changed": ["contracts/orders.schema.json","go.mod"],
+    "expected": [
+      {"test_id":"TestCreate","test_path":"orders/create_test.go"},
+      {"test_id":"TestCharge","test_path":"payments/charge_test.go"},
+      {"test_id":"TestCheckout","test_path":"integration/checkout_test.go"}
+    ],
+    "suggested": [],
+    "fallback": "full_regression"
+  },
+  {
+    "name": "unmapped_new_branch",
+    "changed": ["new/worker.go"],
+    "expected": [{"test_id":"TestCheckout","test_path":"integration/checkout_test.go"}],
+    "suggested": [],
+    "fallback": "full_regression"
+  }
+]

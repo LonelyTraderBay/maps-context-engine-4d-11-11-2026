@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
 import type { FlowStep, GraphNode, ScopeVector, SourceRef } from '../../../.generated/types';
 import type { ExplorerClient } from '../../api/client.ts';
-import { readFlowSelection, readStaticFlow } from './data.ts';
+import { readFlowSelection, readObservedFlow, readStaticFlow } from './data.ts';
 import type { FlowSelection, StaticFlow } from './data.ts';
 
 type Props = {
@@ -25,6 +26,7 @@ const stepNames: Record<string, string> = {
   loop_boundary: 'Vòng lặp', event_send_boundary: 'Gửi event', event_receive_boundary: 'Nhận event',
   sql_begin: 'BEGIN', sql_commit: 'COMMIT', sql_rollback: 'ROLLBACK', sql_insert: 'INSERT',
   sql_update: 'UPDATE', sql_delete: 'DELETE', sql_read: 'READ', sql_call: 'CALL', sql_boundary: 'SQL chưa phân giải',
+  http_request: 'HTTP request', runtime_span: 'Span đã ghi', sql_statement: 'Câu lệnh SQL',
 };
 
 const orderNames: Record<FlowStep['order_semantics'], string> = {
@@ -44,6 +46,9 @@ const limitNames: Record<string, string> = {
   FLOW_EVENT_DELIVERY_UNOBSERVED: 'Chưa có quan sát giao nhận event.',
   FLOW_EVENT_ACK_DECLARED: 'Ack là cấu hình đã khai báo. Trạng thái lưu dữ liệu chưa xác định.',
   FLOW_EVENT_OUTBOX_DECLARED: 'Outbox là khai báo. Chưa có bằng chứng đã publish hoặc commit.',
+  OBSERVED_TRANSACTION_OUTCOME_UNKNOWN: 'Chưa có kết quả giao dịch được xác nhận trong lần chạy này.',
+  OBSERVED_TRANSACTION_COMMIT: 'Trace ghi nhận commit của giao dịch.',
+  OBSERVED_TRANSACTION_ROLLBACK: 'Trace ghi nhận rollback của giao dịch.',
 };
 
 const flowBatch = 20;
@@ -78,7 +83,8 @@ function message(error: unknown): string {
 
 export function FlowPanel({ client, root, scope, visible, selected, beginSelection, onSelect, onClose,
   onReturnToPreview, onSessionError }: Props) {
-  const [result, setResult] = useState<StaticFlow | null>(null);
+  const [observedArtifactId, setObservedArtifactId] = useState<string>();
+  const [loaded, setLoaded] = useState<{ result: StaticFlow; artifactId: string | undefined } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reading, setReading] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -86,11 +92,17 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
   const [filter, setFilter] = useState<StepFilter>('all');
   const [shown, setShown] = useState(flowBatch);
   const selection = useRef<AbortController | null>(null);
+  const result = loaded?.artifactId === observedArtifactId ? loaded?.result ?? null : null;
+  const canRead = observedArtifactId !== undefined || client.flowEnabled();
 
   useEffect(() => {
+    if (!canRead) return;
     const request = new AbortController();
-    void readStaticFlow(client, scope, root.ref, request.signal).then(data => {
-      if (!request.signal.aborted) setResult(data);
+    const read = observedArtifactId
+      ? readObservedFlow(client, scope, root.ref, observedArtifactId, request.signal)
+      : readStaticFlow(client, scope, root.ref, request.signal);
+    void read.then(data => {
+      if (!request.signal.aborted) setLoaded({ result: data, artifactId: observedArtifactId });
     }).catch(reason => {
       if (request.signal.aborted) return;
       setError(message(reason));
@@ -100,7 +112,24 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
       request.abort();
       selection.current?.abort();
     };
-  }, [attempt, client, onSessionError, root.ref, scope]);
+  }, [attempt, canRead, client, observedArtifactId, onSessionError, root.ref, scope]);
+
+  function changeArtifact(artifactId: string | undefined) {
+    setLoaded(null);
+    setError(null);
+    setChosen(null);
+    setReading(null);
+    setFilter('all');
+    setShown(flowBatch);
+    setObservedArtifactId(artifactId);
+    setAttempt(value => value + 1);
+  }
+
+  function openArtifact(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const value = new FormData(event.currentTarget).get('artifact-id');
+    if (typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)) changeArtifact(value);
+  }
 
   async function choose(step: FlowStep, source?: SourceRef) {
     selection.current?.abort();
@@ -132,10 +161,12 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
   const matching = steps.filter(step => matches(step, filter));
   const visibleSteps = matching.slice(0, shown);
   const selectedStepVisible = visibleSteps.some(step => step.step_id === chosen && hasSelectedRef(step, selected));
+  const observed = observedArtifactId !== undefined;
+  const displayed = observed ? 'Flow quan sát' : 'Flow tĩnh';
   return <section className="pane flow-pane" aria-labelledby="flow-heading">
     <header className="pane-heading">
       <div>
-        <h2 id="flow-heading">Flow backend</h2>
+        <h2 id="flow-heading">{observed ? 'Flow quan sát' : 'Flow backend'}</h2>
         <p className="flow-root">{root.label || root.kind}</p>
       </div>
       <div className="flow-actions">
@@ -143,15 +174,21 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
         <button className="quiet-button" type="button" onClick={onClose}>Đóng flow</button>
       </div>
     </header>
+    {client.observedFlowEnabled() && <form className="preview-dialog__form" onSubmit={openArtifact}>
+      <label>Mã trace đã nhập <input name="artifact-id" required pattern="[0-9a-f]{64}" maxLength={64} autoComplete="off" /></label>
+      <button className="quiet-button" type="submit">Mở trace</button>
+      {observed && client.flowEnabled() && <button className="quiet-button" type="button"
+        onClick={() => changeArtifact(undefined)}>Về flow tĩnh</button>}
+    </form>}
     {error && <p className="notice notice--error" role="alert">{error}</p>}
-    {!result && !error && <p className="notice" role="status">Đang đọc flow tĩnh từ index…</p>}
+    {canRead && !result && !error && <p className="notice" role="status">Đang đọc {displayed.toLowerCase()}…</p>}
     {!result && error && <div className="flow-retry"><button className="quiet-button" type="button"
       onClick={() => { setError(null); setAttempt(value => value + 1); }}>Thử lại</button></div>}
-    {result && <div className="flow-body" aria-label="Các bước flow tĩnh">
+    {result && <div className="flow-body" aria-label={'Các bước ' + displayed.toLowerCase()}>
       <p className="flow-status" role="status">
         {result.pagination.truncated || result.coverage.status === 'partial'
-          ? `Flow tĩnh một phần · ${steps.length} bước đã đọc`
-          : `Flow tĩnh · ${steps.length} bước`}
+          ? `${displayed} một phần · ${steps.length} bước đã đọc`
+          : `${displayed} · ${steps.length} bước`}
         {reading && ' · Đang đọc nguồn'}
       </p>
       {steps.length > 0 && <div className="flow-filters">
@@ -190,7 +227,7 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
             </button>
             {sql && <dl className="flow-sql">
               <div><dt>Phạm vi dữ liệu</dt><dd>{targets.length ? `${targets.length} thực thể có bằng chứng` : 'Xem câu lệnh trong nguồn'}</dd></div>
-              <div><dt>Kết quả lưu</dt><dd>Chưa xác định</dd></div>
+              <div><dt>Kết quả lưu</dt><dd>{transactionOutcome(step, observed)}</dd></div>
             </dl>}
             {sql && step.source_refs.length > 1 && <div className="flow-table-sources" aria-label="Nguồn khai báo bảng hoặc view">
               {step.source_refs.slice(1).map(ref => <button className="quiet-button" type="button"
@@ -199,7 +236,7 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
               </button>)}
             </div>}
             {incoming.length > 0 && <p className="flow-connections">
-              {incoming.map(edge => `${edgeNames[edge.kind] ?? edge.kind} · bước ${ids.get(edge.from_step_id)}`).join('  ·  ')}
+              {incoming.map(edge => `${observed && edge.kind === 'control' ? 'Span cha' : edgeNames[edge.kind] ?? edge.kind} · bước ${ids.get(edge.from_step_id)}`).join('  ·  ')}
             </p>}
             {step.limitations.length > 0 && <details className="flow-step__limits">
               <summary>Giới hạn bằng chứng</summary>
@@ -212,4 +249,16 @@ export function FlowPanel({ client, root, scope, visible, selected, beginSelecti
         onClick={() => setShown(value => value + flowBatch)}>Hiện thêm bước ({matching.length - visibleSteps.length})</button>}
     </div>}
   </section>;
+}
+
+function transactionOutcome(step: FlowStep, observed: boolean): string {
+  if (!observed) return 'Chưa xác định';
+  if (step.outcome_status === 'rollback_observed' || step.limitations.some(gap => gap.code === 'OBSERVED_TRANSACTION_ROLLBACK')) {
+    return 'Đã quan sát rollback';
+  }
+  if (step.outcome_status === 'commit_observed' || step.limitations.some(gap => gap.code === 'OBSERVED_TRANSACTION_COMMIT')) {
+    return 'Đã quan sát commit';
+  }
+  if (step.outcome_status === 'statement_success_observed') return 'Câu lệnh thành công, kết quả giao dịch chưa rõ';
+  return 'Chưa xác định';
 }

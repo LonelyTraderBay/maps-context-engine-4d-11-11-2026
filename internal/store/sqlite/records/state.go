@@ -49,7 +49,7 @@ func (s *Store) ReadState(ctx context.Context, maxHeads int, authorize StateAuth
 		}
 	}()
 	version, identity, epoch, err := inspect(ctx, tx, s.identity.WorktreeID)
-	if err != nil || version != 1 || identity != s.identity {
+	if err != nil || version == 0 || identity != s.identity {
 		return State{}, errors.Join(ErrStoreChanged, err)
 	}
 	var count, invalid, approved int64

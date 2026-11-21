@@ -23,7 +23,7 @@ type schemaObject struct {
 
 var referenceSchemas schemaref.Cache[schemaObject]
 
-func buildReferenceSchema(ctx context.Context, _ int) (objects []schemaObject, resultErr error) {
+func buildReferenceSchema(ctx context.Context, version int) (objects []schemaObject, resultErr error) {
 	reference, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		return nil, err
@@ -33,12 +33,17 @@ func buildReferenceSchema(ctx context.Context, _ int) (objects []schemaObject, r
 	if _, err := reference.ExecContext(ctx, migration.V1()); err != nil {
 		return nil, err
 	}
+	if version == 2 {
+		if _, err := reference.ExecContext(ctx, migration.V2()); err != nil {
+			return nil, err
+		}
+	}
 	return schemaObjects(ctx, reference)
 }
 
 // Cached expected DDL never replaces the fresh observation of the real store.
-func validateSchema(ctx context.Context, actual schemaQueryer) error {
-	want, err := referenceSchemas.Get(ctx, 1, buildReferenceSchema)
+func validateSchema(ctx context.Context, actual schemaQueryer, version int) error {
+	want, err := referenceSchemas.Get(ctx, version, buildReferenceSchema)
 	if err != nil {
 		return err
 	}

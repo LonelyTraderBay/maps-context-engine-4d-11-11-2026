@@ -49,7 +49,7 @@ type Store struct {
 }
 
 // InitializeWithWriter initializes only an empty, already authorized durable
-// database. Existing recognized V1 data is preserved; unknown/newer schemas
+// database. Existing recognized records data is preserved; unknown/newer schemas
 // are rejected before changing journal mode. The caller owns the file path,
 // exclusive lifecycle, writer lease and pool, and must reconcile uncertain
 // commits. This function does not write a record or alter a target worktree.
@@ -137,7 +137,7 @@ func InitializeWithWriter(ctx context.Context, db *sql.DB, worktree string, leas
 		identity = previous
 	}
 	finalVersion, finalIdentity, _, err := inspect(ctx, tx, worktree)
-	if err != nil || finalVersion != 1 || finalIdentity != identity {
+	if err != nil || finalVersion < 1 || finalIdentity != identity {
 		return Identity{}, errors.Join(ErrUnrecognizedStore, err)
 	}
 	if err := lease.Check(ctx, worktree, ports.ExclusiveLease); err != nil {
@@ -212,7 +212,7 @@ func (s *Store) readIdentity(ctx context.Context) (identity Identity, epoch int6
 		}
 	}()
 	version, identity, epoch, err := inspect(ctx, tx, s.identity.WorktreeID)
-	if err != nil || version != 1 {
+	if err != nil || version == 0 {
 		return Identity{}, 0, errors.Join(ErrUnrecognizedStore, err)
 	}
 	if s.identity.Incarnation != "" && s.identity != identity {
@@ -236,13 +236,13 @@ func inspect(ctx context.Context, db schemaQueryer, worktree string) (int, Ident
 	if err := db.QueryRowContext(ctx, `SELECT schema_version,min_reader_version FROM schema_meta WHERE singleton=1`).Scan(&version, &reader); err != nil {
 		return 0, Identity{}, 0, errors.Join(ErrUnrecognizedStore, err)
 	}
-	if version > 1 || reader > 1 {
+	if version > 2 || reader > 2 {
 		return 0, Identity{}, 0, ErrSchemaTooNew
 	}
-	if version != 1 || reader != 1 {
+	if (version != 1 && version != 2) || reader != version {
 		return 0, Identity{}, 0, ErrUnrecognizedStore
 	}
-	if err := validateSchema(ctx, db); err != nil {
+	if err := validateSchema(ctx, db, version); err != nil {
 		return 0, Identity{}, 0, errors.Join(ErrUnrecognizedStore, err)
 	}
 	var identity Identity
@@ -250,7 +250,7 @@ func inspect(ctx context.Context, db schemaQueryer, worktree string) (int, Ident
 	if err := db.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(worktree_id AS BLOB))=36 THEN worktree_id END,CASE WHEN length(CAST(incarnation AS BLOB))=36 THEN incarnation END,record_epoch FROM records_meta WHERE singleton=1`).Scan(&identity.WorktreeID, &identity.Incarnation, &epoch); err != nil || !uuid(identity.WorktreeID) || !uuid(identity.Incarnation) || identity.WorktreeID != worktree || epoch < 0 || epoch > exactIntegerMax {
 		return 0, Identity{}, 0, ErrStoreChanged
 	}
-	return 1, identity, epoch, nil
+	return version, identity, epoch, nil
 }
 
 func newUUID() (string, error) {

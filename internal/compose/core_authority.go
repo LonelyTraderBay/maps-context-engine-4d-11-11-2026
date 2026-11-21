@@ -314,13 +314,36 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 		}
 	case model.FlowData:
 		wanted, ok := request.(model.FlowQueryRequest)
-		if !ok || name != "POST /flow/query" || data.Mode != "static" || !reflect.DeepEqual(wanted.RootRef, data.RootRef) {
+		if !ok || name != "POST /flow/query" || !reflect.DeepEqual(wanted.RootRef, data.RootRef) {
 			return ErrAuthority
+		}
+		mode := "static"
+		if wanted.Mode != nil {
+			mode = *wanted.Mode
+		}
+		if mode != data.Mode || mode == "observed" && (wanted.ArtifactID == nil || len(data.Steps) == 0) {
+			return ErrAuthority
+		}
+		if mode == "observed" {
+			bound := false
+			for _, ref := range data.Steps[0].EvidenceRefs {
+				if ref.Origin == "runtime_observation" && ref.Kind == "runtime_observed" &&
+					ref.ArtifactID != nil && *ref.ArtifactID == *wanted.ArtifactID {
+					bound = true
+				}
+			}
+			if !bound {
+				return ErrAuthority
+			}
 		}
 		if err := checkGraph(data.RootRef); err != nil {
 			return err
 		}
 		for _, step := range data.Steps {
+			if mode == "observed" && (step.PossibleOrObserved != "observed" || step.OrderSemantics != "causal_trace" ||
+				len(step.EvidenceRefs) == 0) {
+				return ErrAuthority
+			}
 			for _, ref := range step.CanonicalRefs {
 				if err := checkGraph(ref); err != nil {
 					return err

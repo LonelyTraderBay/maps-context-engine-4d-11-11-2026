@@ -217,7 +217,7 @@ func (s *Store) readRecords(ctx context.Context, authorize StateAuthorizer, visi
 		}
 	}()
 	version, identity, epoch, err := inspect(ctx, tx, s.identity.WorktreeID)
-	if err != nil || version != 1 || identity != s.identity {
+	if err != nil || version == 0 || identity != s.identity {
 		return State{}, errors.Join(ErrStoreChanged, err)
 	}
 	state := State{Identity: identity, RecordEpoch: epoch}

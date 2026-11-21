@@ -41,6 +41,55 @@ export async function readStaticFlow(client: Pick<ExplorerClient, 'flow'>, scope
   return { ...response, data };
 }
 
+export async function readObservedFlow(client: Pick<ExplorerClient, 'flow'>, scope: ScopeVector, root: GraphRef,
+  artifactId: string, signal: AbortSignal): Promise<StaticFlow> {
+  if (!uniqueMember(scope, root) || !/^[0-9a-f]{64}$/.test(artifactId)) {
+    throw new Error('Lần quan sát không khớp phạm vi đã chọn.');
+  }
+  const response = await client.flow({ scope: { pinned_vector: scope }, root_ref: root, mode: 'observed',
+    artifact_id: artifactId }, signal);
+  const data = response.data;
+  if (!data || data.mode !== 'observed' || !response.scope || response.scope.vector_digest !== scope.vector_digest ||
+      await graphRefDigest(data.root_ref, 8192) !== await graphRefDigest(root, 8192) ||
+      response.coverage.status !== 'partial') {
+    throw new Error('Flow quan sát không khớp lần chạy đã chọn.');
+  }
+  await verifyScopeDigest(response.scope, 32768);
+  const validEvidence = (ref: FlowStep['evidence_refs'][number]) =>
+    ref.origin === 'runtime_observation' && ref.kind === 'runtime_observed' && ref.artifact_id !== null &&
+    /^[0-9a-f]{64}$/.test(ref.artifact_id) && /^span-[0-9a-f]{32}-[0-9a-f]{16}$/.test(ref.evidence_id);
+  const steps = new Map(data.steps.map(step => [step.step_id, step]));
+  const edges = new Set(data.edges.map(edge => edge.edge_id));
+  const first = data.steps[0];
+  if (steps.size !== data.steps.length || edges.size !== data.edges.length || steps.size > 100 || edges.size > 300 ||
+      !first?.evidence_refs.some(ref => ref.artifact_id === artifactId)) {
+    throw new Error('Flow quan sát thiếu span của yêu cầu hoặc vượt giới hạn.');
+  }
+  const rootDigest = await graphRefDigest(root, 8192);
+  const firstRefs = await Promise.all(first.canonical_refs.map(ref => graphRefDigest(ref, 8192)));
+  if (!firstRefs.includes(rootDigest)) throw new Error('Span của yêu cầu nằm ngoài gốc flow đã chọn.');
+  for (const step of data.steps) {
+    if (step.possible_or_observed !== 'observed' || step.order_semantics !== 'causal_trace' ||
+        step.outcome_status === 'statically_possible' || step.outcome_status === 'declared_operation' ||
+        step.evidence_refs.length === 0 || !step.evidence_refs.every(validEvidence) ||
+        !step.canonical_refs.every(ref => uniqueMember(scope, ref)) ||
+        !step.source_refs.every(ref => uniqueMember(scope, ref))) {
+      throw new Error('Bước quan sát thiếu provenance hoặc nằm ngoài phạm vi.');
+    }
+  }
+  for (const edge of data.edges) {
+    const from = steps.get(edge.from_step_id);
+    const to = steps.get(edge.to_step_id);
+    if (!from || !to || edge.evidence_refs.length !== 2 || !edge.evidence_refs.every(validEvidence) ||
+        ![from, to].every(step => step.evidence_refs.some(ref => edge.evidence_refs.some(evidence =>
+          evidence.artifact_id === ref.artifact_id && evidence.evidence_id === ref.evidence_id)))) {
+      throw new Error('Quan hệ quan sát thiếu bằng chứng cho hai span.');
+    }
+  }
+  signal.throwIfAborted();
+  return { ...response, data };
+}
+
 export async function readFlowSelection(client: Pick<ExplorerClient, 'graph' | 'source'>, scope: ScopeVector, step: FlowStep,
   visible: readonly GraphNode[], signal: AbortSignal, source = step.source_refs[0]): Promise<FlowSelection> {
   const member = source && uniqueMember(scope, source);

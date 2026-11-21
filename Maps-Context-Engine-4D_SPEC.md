@@ -1174,11 +1174,11 @@ Mỗi cập nhật tracker phải read current revision, patch đúng hàng, ki�
 ### Progress ban đầu — derived từ các hàng task
 
 - R1: 52 task; DONE=52; IN_PROGRESS=0; BLOCKED=0; VERIFY=0; TODO=0; completion=52/52=100%.
-- R2: 10 DONE gồm P07 và P09, cùng 10 DEFERRED. R2 tính riêng khỏi mẫu số R1.
-- R3: 12 task DEFERRED; mở capability theo gate.
-- Explorer U0: 4 DONE + 0 TODO; U1: 10 DONE + 0 TODO; U2: 6 DONE + 0 TODO; U3: 4 DEFERRED. TODO không đồng nghĩa prerequisites đã đủ hoặc permission runtime đã có.
-- Toàn roadmap: 108 tasks; 1 TODO + 90 DONE + 17 DEFERRED; implementation DONE=90. R1/R2/R3/U0/U1/U2/U3 tính riêng; không gọi task-count là % effort.
-- Gate hiện tại: G0 PASS; G1 PASS và G2 PASS phạm vi Linux filesystem/fixture theo S21; G3 PASS phạm vi Linux fixture/installed Codex theo E708-E714. G4 PASS phạm vi fixture cục bộ, 11/11 task DONE theo E839–E843. B005 checkpoint local/restore/tag PASS. G5 PASS phạm vi fixture theo E849–E852, 2/2 task DONE. B005 mang nhãn R1_VALIDATED_ON_FIXTURES. B006 10/10, checkpoint local/restore/tag PASS. GU0 PASS trong phạm vi U0_GRAPH_SOURCE_VALIDATED trên Chromium/WSL2 với fixture Go có SQLite index thật, T081–T084 DONE. P07 6/6 DONE. B007 10/10, checkpoint local/restore/tag PASS. B008 10/10, checkpoint local/restore/tag PASS. B009 10/10 với overlay S53 và metadata chuẩn bị checkpoint. T085–T100 và P09 DONE. GU1 PASS với U1_REACT_INSPECT_FIXTURE_VALIDATED trên Chromium/WSL2. Benchmark graph/source repo thật phạm vi đọc hẹp PASS, C098 live-dev NOT_RUN. P09 4/4. GU2 PASS với U2_FULL_STACK_STATIC_VALIDATED phạm vi fixture tổ hợp và packaged Explorer Linux. P11 đang triển khai, T057–T058 và T062–T067 DONE. T068 tiếp theo sau commit, restore và tag B009. G6 NOT_RUN.
+- R2: 20 DONE (T043–T048, T055–T068). R2 tính riêng khỏi mẫu số R1.
+- R3: 4 DONE (T069–T072), 8 DEFERRED. P12 DONE trong phạm vi fixture.
+- Explorer U0: 4 DONE + 0 TODO; U1: 10 DONE + 0 TODO; U2: 6 DONE + 0 TODO; U3: 4 DONE (T101–T104). TODO không đồng nghĩa prerequisites đã đủ hoặc permission runtime đã có.
+- Toàn roadmap: 108 tasks; 100 DONE + 8 DEFERRED; implementation DONE=100. R1/R2/R3/U0/U1/U2/U3 tính riêng; không gọi task-count là % effort.
+- Gate hiện tại: G0 PASS; G1 PASS và G2 PASS phạm vi Linux filesystem/fixture theo S21; G3 PASS phạm vi Linux fixture/installed Codex theo E708-E714. G4 PASS phạm vi fixture cục bộ, 11/11 task DONE theo E839–E843. B005 checkpoint local/restore/tag PASS. G5 PASS phạm vi fixture theo E849-E852, 2/2 task DONE. B005 mang nhãn R1_VALIDATED_ON_FIXTURES. B006 10/10, checkpoint local/restore/tag PASS. GU0 PASS trong phạm vi U0_GRAPH_SOURCE_VALIDATED trên Chromium/WSL2 với fixture Go có SQLite index thật, T081–T084 DONE. P07 6/6 DONE. B007 10/10, checkpoint local/restore/tag PASS. B008 10/10, checkpoint local/restore/tag PASS. B009 10/10, checkpoint local/restore/tag PASS theo E971. T085–T100 và P09 DONE. GU1 PASS với U1_REACT_INSPECT_FIXTURE_VALIDATED trên Chromium/WSL2. Benchmark graph/source repo thật phạm vi đọc hẹp PASS, C098 live-dev NOT_RUN. P09 4/4. GU2 PASS với U2_FULL_STACK_STATIC_VALIDATED phạm vi fixture tổ hợp và packaged Explorer Linux. P11 DONE, G6 PASS trên fixture Linux/WSL2 theo E972 và E974. B010 10/10 chuẩn bị checkpoint S53. P12 DONE theo E975–E976. P13 DONE, GU3 PASS trong phạm vi U3_OBSERVED_RUN_VALIDATED theo E981. P14 đã DONE T071 và T072 theo E982–E983. T073 chờ xác minh checkpoint B010. G7 NOT_RUN.
 
 Tỷ lệ trên là task-count completion, không phải % effort hoặc % độ đúng của sản phẩm. Validator MUST tính lại khi cập nhật task, không sửa phần trăm thủ công.
 
@@ -1230,12 +1230,12 @@ Cột Cases là truy vết tới oracle nghiệm thu, không có nghĩa một ta
 | T040 | G4 | T003,T039,T035 | Spec↔code/API/CLI consistency; tracker/evidence review; record remaining gaps. Spec/docs integration không lệch authority; command/mode/evidence/anti-bypass checks. Kiểm S53/commit inventory/task-to-batch/receipt và không self-hash metadata commit. | R030,R093,R100,R102,R105,R107,R111,R112,R124,R125,R126,R128,R130 | C039,C040,C043,C133,C134,C135,C137,C138,C139,C147,C148,C180,C181,C182,C183,C184,C185,C186,C187,C188,C189,C190,C191,C192 | DONE | codex | E839,E840,E841,E842,E843 |
 | T041 | G5 | T040,T002 | License/notices/SBOM/security audit + reproducible release candidate manifest. Production Claim Gate và proof thực của controls, không cấp quyền publish. Xác minh checkpoint materials/remote-backup status đúng phạm vi, không publish ngoài quyền. | R036,R112,R126,R129 | C046,C047,C048,C148,C184,C185,C186,C188,C189 | DONE | codex | E844,E845,E846,E847,E848 |
 | T042 | G5 | T041 | Final gate review: R1 supported matrix, correctness+benchmark, handover/resume state. Handover đúng Verification Ladder/applicability và permission riêng. Handover checkpoint hoặc tail scope_final theo S53; source restore khác data restore. | R030,R112,R124,R127,R130 | C001..C054,C148,C180,C186,C188,C189,C190 | DONE | codex | E849,E850,E851,E852 |
-| T043 | R2 | T042 | Discovery TS/JS provider độc lập, compiler/language-service license/pin/profile và ADR; không execute scripts. | R037 | C055 | DONE | codex | E872,E873,E874,E875 |
+| T043 | R2 | T042 | Discovery TS/JS provider độc lập, compiler/language-service license/pin/profile và ADR; không execute scripts. | R037 | C055 | DONE | codex | E872,E873,E874,E875,E973,E978 |
 | T044 | R2 | T043,T055 | TS/JS typed provider + aliases/reexports/scopes/project refs; shared context contract. | R037 | C055 | DONE | codex | E879,E880,E881 |
 | T045 | R2 | T042 | Chốt domain entity/link/contract schema tối thiểu S28; identity/evidence/FK/migration và adapter contracts. | R038,R104,R117 | C059,C060,C061,C114,C163,C164,C165,C166 | DONE | codex | E882,E883,E884 |
 | T046 | R2 | T045 | Declared repo groups + member scopes/policies/snapshot vectors; không same-name auto link. Group get/list/put/remove CAS+tombstones và unavailable member ledger, pinned scope resolver. | R038,R117,R119 | C063,C163,C164,C165,C166,C157,C169,C170 | DONE | codex | E921,E922,E923 |
 | T047 | R2 | T042 | RecordService trên records.sqlite: immutable versions/head CAS/mutation receipts/epoch, approved-vs-effective needs_review; no index-GC loss. Record list/read query/historical source-expired state, no reapproval after GC. | R039,R094,R097,R119,R123 | C062,C064,C120,C121,C122,C157,C169,C170,C160,C179 | DONE | codex | E888,E889,E890 |
-| T048 | R2 | T044,T046,T047,T068 | R2 release review: Go/TS/Python/contracts/domain/AI metadata matrix; regression/token/limitations và handover. | R040 | C055..C069 | DEFERRED | UNASSIGNED | NONE |
+| T048 | R2 | T044,T046,T047,T068 | R2 release review: Go/TS/Python/contracts/domain/AI metadata matrix; regression/token/limitations và handover. | R040 | C055..C069 | DONE | codex | E974 |
 | T049 | G2 | T012,T013,T017 | Hierarchical workspace/module/package overview; deterministic source-backed summaries và module IDs. | R041 | C049 | DONE | codex | E206,E207,E208,E218,E219 |
 | T050 | G2 | T018,T019,T021 | Partition/input cache và reverse-closure invalidation; worker/memory profiling; full fallback. | R043 | C050,C053 | DONE | codex | E209,E210,E211,E212,E220,E221 |
 | T051 | G3 | T022,T024,T025,T049 | Overview/plan/selectors/topic aliases + task obligations/grouping/cursor progress; spec-only plane. | R041,R042 | C049,C052 | DONE | codex | E293,E294,E295,E296,E299,E306,E312,E313,E314 |
@@ -1255,11 +1255,11 @@ Cột Cases là truy vết tới oracle nghiệm thu, không có nghĩa một ta
 | T065 | R2 | T063,T062 | Trading/commerce context profiles, transactional/state/retry obligations có bằng chứng; no business execution. | R051 | C065,C066 | DONE | codex | E962,E963,E964 |
 | T066 | R2 | T058,T060,T062 | AI/ML/RAG prompt/model/data/eval/serving metadata lineage; no artifact execution/weights ingestion. | R054 | C067 | DONE | codex | E965,E966,E967 |
 | T067 | R2 | T056,T058,T062 | Approved architecture constraints + intended/observed drift report với witness/coverage. | R055 | C068 | DONE | codex | E968,E969,E970 |
-| T068 | R2 | T063,T064,T065,T066,T067 | Polyglot multi-domain acceptance/regression/benchmarks và capability matrices trước T048. | R056 | C055..C069 | TODO | UNASSIGNED | NONE |
-| T069 | R3 | T048 | Secure local runtime export import; redaction/revision/env/sampling/schema controls. | R057 | C070 | DEFERRED | UNASSIGNED | NONE |
-| T070 | R3 | T069 | Trace/span-link graph enrichment giữ observed-only semantics và partial instrumentation. | R057 | C071 | DEFERRED | UNASSIGNED | NONE |
-| T071 | R3 | T048 | Local test/coverage evidence import theo revision/profile/artifact hash; không chạy target tests. | R058 | C072 | DEFERRED | UNASSIGNED | NONE |
-| T072 | R3 | T071 | Test selection rationale/uncertainty/full-regression fallback; independent recall fixtures. | R058 | C073 | DEFERRED | UNASSIGNED | NONE |
+| T068 | R2 | T063,T064,T065,T066,T067 | Polyglot multi-domain acceptance/regression/benchmarks và capability matrices trước T048. | R056 | C055..C069 | DONE | codex | E972 |
+| T069 | R3 | T048 | Secure local runtime export import; redaction/revision/env/sampling/schema controls. | R057 | C070 | DONE | codex | E975 |
+| T070 | R3 | T069 | Trace/span-link graph enrichment giữ observed-only semantics và partial instrumentation. | R057 | C071 | DONE | codex | E976 |
+| T071 | R3 | T048 | Local test/coverage evidence import theo revision/profile/artifact hash; không chạy target tests. | R058 | C072 | DONE | codex | E982 |
+| T072 | R3 | T071 | Test selection rationale/uncertainty/full-regression fallback; independent recall fixtures. | R058 | C073 | DONE | codex | E983 |
 | T073 | R3 | T048 | Editor buffer bridge session/version/hash + unsaved snapshot isolation/no source mutation. | R059 | C074 | DEFERRED | UNASSIGNED | NONE |
 | T074 | R3 | T048 | Optional semantic retrieval candidate-only + privacy/license/model/version cache rules. | R060 | C075 | DEFERRED | UNASSIGNED | NONE |
 | T075 | R3 | T048,T050,T053 | Profile-driven immutable partition fact sets nếu bottleneck đã đo; publish/GC/migration invariants. | R061 | C076 | DEFERRED | UNASSIGNED | NONE |
@@ -1288,10 +1288,10 @@ Cột Cases là truy vết tới oracle nghiệm thu, không có nghĩa một ta
 | T098 | U2 | T097,T061 | Transaction/branch/async edges và unknown persistence; no live DB access; supported event evidence integration. | R076 | C101,C102,C104 | DONE | codex | E938,E939,E940 |
 | T099 | U2 | T098 | Hierarchy/filter/progressive rendering, deterministic layout workers/cancellation + accessibility and per-selection metrics. | R078,R079,R123 | C081,C105,C160,C170,C179 | DONE | codex | E941,E942,E943 |
 | T100 | U2 | T099 | GU2 review: real-repo FE↔BE↔DB roundtrip, contracts/scoping/security/canary/performance/core regression and capability release. Kiểm bản kết hợp, evidence applicability và scoped production claims. | R074,R075,R080,R084,R086,R088,R111,R112,R124 | C099..C106,C147,C148,C180 | DONE | codex | E944,E945,E946 |
-| T101 | U3 | T100,T069,T070 | Observed trace overlay adapter tái dùng runtime importer; exact build/trace/span provenance và gaps. | R076,R085 | C107,C108,C109 | DEFERRED | UNASSIGNED | NONE |
-| T102 | U3 | T101 | Bổ sung Observe arming vào basic Interact của U1; explicit dev action/request correlation; export/import only, trace propagation allowlist; no target start. | R070,R085 | C107,C108,C110 | DEFERRED | UNASSIGNED | NONE |
-| T103 | U3 | T102 | Concurrency/CORS/partial trace/rollback/redaction/session lifecycle fault suite và observer caps. | R076,R085,R086 | C108..C112 | DEFERRED | UNASSIGNED | NONE |
-| T104 | U3 | T103 | GU3 review: observed vs static correct labels, real test-environment evidence và no unapproved action/production claim. | R085,R086,R088 | C107..C112 | DEFERRED | UNASSIGNED | NONE |
+| T101 | U3 | T100,T069,T070 | Observed trace overlay adapter tái dùng runtime importer; exact build/trace/span provenance và gaps. | R076,R085 | C107,C108,C109 | DONE | codex | E977 |
+| T102 | U3 | T101 | Bổ sung Observe arming vào basic Interact của U1; explicit dev action/request correlation; export/import only, trace propagation allowlist; no target start. | R070,R085 | C107,C108,C110 | DONE | codex | E979 |
+| T103 | U3 | T102 | Concurrency/CORS/partial trace/rollback/redaction/session lifecycle fault suite và observer caps. | R076,R085,R086 | C108..C112 | DONE | codex | E980 |
+| T104 | U3 | T103 | GU3 review: observed vs static correct labels, real test-environment evidence và no unapproved action/production claim. | R085,R086,R088 | C107..C112 | DONE | codex | E981 |
 | T105 | G0 | T002,T003 | Canonical model/ports/closed schemas+registry, semantic validators và import-boundary tests trước feature code. Ghi Change Budget/Complexity gate cho delta ngoài baseline. | R089,R090,R097,R100,R107,R115,R116,R117,R118,R119,R120,R121 | C113,C114,C122,C131,C134,C139,C154,C155,C156,C157,C158,C159,C160,C161,C162,C163,C164,C165,C166,C167,C168,C169,C170,C171,C172,C173,C174,C175,C176 | DONE | codex | E090,E091,E249 |
 | T106 | G0 | T105 | Trích physical DDL/catalog/index/records, migration/FK/FTS/publish/CAS proof fixtures trên pinned driver; không target data. SQL counterexamples GC/resolver fixed và restore incarnation/permission storage proof. | R091,R094,R113,R114,R120 | C115,C116,C117,C118,C119,C120,C121,C149,C150,C151,C152,C153,C171,C172,C173 | DONE | codex | E092,E093 |
 | T107 | G0 | T105,T106 | Contract-level flow/serialization/provider/source/state proof, MCP delivery budgets, codegen/extraction parity fixtures. Bổ sung pure command/storage/evidence contract fixtures S51; chưa là OS wrapper proof. New status/paging/scope/config/codec/state positive/negative proofs; no claim OS/browser tested. Thêm Git workflow fixture cô lập cho staged completeness/restore/retry/backup theo S53; không repo người dùng. | R090,R092,R098,R099,R108,R109,R110,R111,R115,R116,R117,R118,R119,R120,R121,R126,R127,R129 | C114,C117,C128,C129,C132,C136,C140,C141,C142,C143,C144,C145,C146,C154,C155,C156,C157,C158,C159,C160,C161,C162,C163,C164,C165,C166,C167,C168,C169,C170,C171,C172,C173,C174,C175,C176,C184,C185,C186,C187,C188,C189,C190,C191,C192 | DONE | codex | E094,E095,E096,E097,E100 |
@@ -1309,12 +1309,12 @@ Thứ tự thi công không theo số ID; theo S47. Trạng thái chỉ ở bả
 | G3 — AI context interface | T022–T031,T051,T052 | Context/overview/plan/budgets/cursors; snapshot analysis mode; MCP/CLI; preview-only rename; telemetry | PASS |
 | G4 — Verification | T032–T040,T053,T054 | C001–C054 + core-applicable C113–C136/fault/security/platform/scale/self-index tests; fair benchmark; spec/code đồng bộ; applicable C137–C148 và no bypass; không P0 failure | PASS |
 | G5 — R1 release | T041–T042 | License/security/reproducibility + R1 handover; evidence và hạn chế rõ; claims đúng mức | PASS |
-| G6 — R2 release | T043–T048,T055–T068 | C055–C069 + regression; TS/Python/contracts/domain/AI lineage matrix; T048 review | NOT_RUN |
+| G6 — R2 release | T043–T048,T055–T068 | C055–C069 + regression; TS/Python/contracts/domain/AI lineage matrix; T048 review | PASS |
 | G7 — R3 review | T069–T080 | C070–C080 + regressions áp dụng; verified addon matrix; T080 dependencies DONE trước closure | NOT_RUN |
 | GU0 — Explorer base | T081–T084 | Loopback safety + graph/source split thực từ index; C081–C083 | PASS |
 | GU1 — Frontend inspect | T085–T094 | C084–C098; click preview↔graph, Inspect side effects 0, build provenance; U1_REACT_INSPECT_FIXTURE_VALIDATED; C098 live-dev NOT_RUN | PASS |
 | GU2 — Full-stack static | T095–T100 | C099–C106; FE→operation→BE→DB và reverse links; U2_FULL_STACK_STATIC_VALIDATED phạm vi E944–E946 | PASS |
-| GU3 — Observed overlay | T101–T104 | C107–C112; trace causality/revision/privacy và explicit interaction permission | NOT_RUN |
+| GU3 — Observed overlay | T101–T104 | C107–C112; trace causality/revision/privacy và explicit interaction permission | PASS |
 
 G0–G5 là gate R1 tuần tự; G6/G7 áp dụng roadmap R2/R3. GU0–GU3 là nhánh Explorer, không là G8 sau toàn bộ R3. GU0 sau G5; GU1 cần GU0 + TS frontend capability tasks; GU2 cần GU1 + contracts/SQL/events/groups subset; GU3 cần GU2 + runtime importer T069/T070. R2 subset được mở scope để phục vụ Explorer theo S39; không mark các phần R2/R3 khác DONE/IN_PROGRESS tự động. Không có GUI preview trước quyền execution riêng. Các task cùng gate có thể song song theo dependencies/ownership.
 
@@ -1419,6 +1419,8 @@ Template ADR mới: `id; problem/evidence; options; decision; constraints preser
 **A046 — snapshot main và WAL chỉ đọc để nghiên cứu recovery, 2026-11-13:** `problem/evidence`: E577/E580 chứng minh SQLite integrity_check đơn độc không phát hiện mọi mất giao dịch; E588/E589 cho thấy VFS chỉ đọc từ main và WAL trong memory có thể đọc WAL khi locking mode exclusive, khác immutable bỏ qua WAL. `options`: immutable trực tiếp không có WAL là stale; VFS tự viết thay storage còn thiếu root/registry; snapshot riêng dưới exclusive lifecycle không ghi source nhưng không đáp ứng reader/writer product đang hoạt động. `decision`: cho phép primitive Linux nội bộ nhận hai file main/WAL hiện có dưới exclusive lifecycle đúng root, kiểm owner/nlink/root/quyền, giới hạn tổng 64 MiB, chụp và kiểm digest cả cặp trước/sau; caller phải có proof độc lập bind incarnation, cặp bytes và giao dịch đã commit, được xác minh lại. Dùng read-only VFS công khai đã pin, memory-only, query_only, foreign_keys, synchronous FULL và locking mode exclusive trước truy cập; từ chối journal, không ghi hoặc xóa sidecar. `constraints preserved`: giữ driver/schema/file layout và quyền source read-only; callback fixture không phải authority product, exclusive lifecycle chặn pool hợp tác; chưa chứng minh capture khi writer bận, root/main/WAL write containment, registry, Windows hay gate G3. Không nối CLI/core/MCP hoặc tự phục hồi state thật. `migration/rollback`: không migrate và không ghi state, đóng SQLite/VFS/handles rồi nhả lifecycle. `affected`: T028, C040/C041 và S14/S15/DB-02/DB-05; `status`: BASELINE_SPEC cho nghiên cứu nội bộ, không là capability/gate PASS. `date`: 2026-11-13.
 
 **A047 — compiler và profile TS/JS cho P07, 2026-11-21.** T043 cần lấy symbol/type từ byte snapshot bằng toolchain cố định. Chọn Compiler API chính thức TypeScript 5.9.3 trên Node 24.22.3 Linux x64 vì exact artifact đã pin ở T081, có API compiler dùng custom host, và fixture E873 xác nhận alias/re-export/project references, JSX/TSX cùng các ca unresolved. Version 6.0.3 có thay đổi compiler/config cần chạy lại matrix. Nhánh 7 native dùng đường tích hợp khác cần ADR và kiểm vật liệu riêng. TSServer có vòng đời editor và plugin loader ngoài công việc đọc snapshot. S43 TSProfile giữ "typescript_javascript", tsconfig_paths tương đối đã duyệt, compiler_digest là SHA-256 tarball kèm kiểm manifest tệp, node_digest là SHA-256 executable theo platform, provider_digest lấy từ artifact worker T055, allow_project_plugins=false và typed_when_available khi closure đã xác minh. Profile ID dùng profile-v1 hiện có. Config và declaration bind vào snapshot. Worker chỉ nhận approved capture, local config refs và dependency metadata theo policy. Thiếu closure thì báo gap hoặc syntax theo profile. T055 kiểm ownership, framed JSON, deadline/cancel và no-script trên tiến trình thật. T044 kiểm typed facts. Giữ IP-05/IP-05a và notice upstream. Đổi toolchain phải pin lại và kiểm parity/giấy phép, invalidation theo profile, không di chuyển facts giữa profile. Affected R037/C055/T043/T055/T044. BASELINE_SPEC phạm vi P07.
+
+**A047 revalidation, 2026-11-22.** Giữ Compiler API TypeScript 5.9.3, Apache-2.0 và Node 24.22.3 Linux x64 cùng notices của bản phân phối. Compiler API đáp ứng batch trên snapshot đã capture. Language Service và `tsserver` phục vụ phiên editor, còn parser cú pháp dùng cho mode `syntax`. TypeScript 6.0 tương thích API 5.9 và có thay đổi hành vi cần kiểm lại. TypeScript 7.0.2 là npm `latest` tại thời điểm kiểm và có các entry point `unstable/*`. API native ổn định tương thích với provider hiện tại chưa được xác nhận. TypeScript 7.1 Beta công bố API mới và virtual filesystem. Ví dụ compile file tường minh của upstream bỏ qua `tsconfig`/`--project`. Mọi thay đổi pin cần kiểm lại closure config, project references, C055/T044 và tạo profile ID mới theo `profile-v1`. E973 và E978 kiểm lại tarball, 132 tệp, license, Node pin, TSProfile và Compiler API trên fixture độc lập. Xem `artifacts/preflight/t043-verification-20261122/acceptance.md`.
 
 ### Evidence log
 
@@ -2419,6 +2421,30 @@ Evidence thực thi giữ phân biệt từng kiểm và phạm vi; kiểm boots
 | E969 | T067 | `artifacts/preflight/t067-20261121/race.log` `b59cd2eea6f58813b79ae437c9f12f590269bb62f0e0dad459ef65b59b1ddb2c`, `artifacts/preflight/t067-20261121/schema-normalization.json` `767f12f8f86414e6406f3ef2134da5c824830d4b4b637cc030b5c8e5e50d8bdf` | Go race Linux, normalized JSON | Current approve and stale release check. Go race architecture, AI lineage, records, schema parity. | PASS | Native architecture transport NOT_RUN. | 2026-11-21 16:48 UTC |
 | E970 | T067 | `artifacts/preflight/t067-20261121/source-snapshot-verified.json`, `artifacts/preflight/t067-20261121/snapshot.log` | B008 bundle và B009 full-scope source overlay offline | C148/C180 exact combined source, Go test/vet, npm/browser, binaries và spec. | PASS | 90/108, B009 10/10 prepared; post-commit restore/tag riêng. | 2026-11-21 16:48 UTC |
 
+| E971 | B009 | artifacts/preflight/t067-20261121/b009-restore.json SHA-256 8461dcd97687eb98f6aeb47eba0388d4349a24a325bdff950040b237bdac8f0e; verified-receipt.json SHA-256 b4052556d2d14cdffd37ed5024362c7eba5228066c553906107ad194bb8a2324; B009-verified.bundle SHA-256 460db474d6d18e40a0f47b06c3b2902c8c4046d0640d2567bd7369b7e528c21c | Clean restore trên WSL2 Linux amd64/ext4 từ B009 pretag bundle | Restore 1,188 paths trùng commit 41dcca4e5bb58d85a21d5477b1588324e1e8a6eb và tree d7d384e8adc5d0ab1a1ede8b6f8e89631821416b; Go module verify/test/vet/spec, npm offline, lint/typecheck/test/build, SDK browser và binary/assets reproduction PASS. Annotated tag object 4c10b533f7a963e6589a5f7b34a09fec93278d99; B009 complete. | PASS | Push NOT_AUTHORIZED; independent backup NOT_VERIFIED. Chỉ xác minh clean restore fixture, không là backup độc lập. | 2026-11-21 17:04 UTC |
+| E972 | T068 | `artifacts/preflight/t068-20261122/acceptance.md` SHA-256 `493b909c3d5874355c33596b594b9acca0657fe4624601b6ca1a45d112561d62`; `polyglot-tests-final.jsonl` SHA-256 `6349f3787c717ba5a22d957eaef5db2aafe468adf878382edf0e21f0c5926a64`; matrix SHA-256 `ab95dc68f97b967933dc70d4be50340c60f9d2d55759e77f45475ce8ae492e3a`; validator SHA-256 `be772285f3e8e9c5da970d5e6a940e3a5d1b27c4402ceddbf89e3d9b9a0fc874` | B009 source + T068 overlay; WSL2 Linux amd64/ext4, Go 1.27.4, Node 24.22.3, CPython 3.14.4, TypeScript 5.9.3, Vite 7.3.8 offline | 14 Go packages PASS; 93 test/subtest result events PASS, 0 FAIL, 0 SKIP; C055–C069 matrix and incremental boundary validated. | PASS | Fixture-only; numeric recall, real repo, model-host usage, token counts and context-byte proxy NOT_RUN/NOT_COMPUTED. G6 awaits T048. | 2026-11-21 17:44 UTC |
+| E973 | T043 | `artifacts/preflight/t043-revalidation-20261122/acceptance.md` SHA-256 `1af79918d48d246bc8b696deb74f2675514aeb45abd50b79a3b781fb41169745`; `material-check.json` SHA-256 `5bf68b60e094c49aff3102fe1f4aee325606af681340a4beb8d23d06f36bc238`; `compiler-api-probe.json` SHA-256 `e6fc214f8b9e9e624d3f269d0152b81e6b140e1d9166a1946da283ee27c68f5f`; `provider-survey.md` SHA-256 `cf73e86a4abe371064b001a91ca6fbcc6adac3331251fcda921d9bff4b31b251` | B009 `41dcca4e5bb58d85a21d5477b1588324e1e8a6eb`; WSL2 Linux amd64; Node 24.22.3; TypeScript 5.9.3; user+network namespace | Independent verifier xác nhận tarball/pin, 132 file manifest, Apache-2.0, Node digest và TSProfile schema/source. Probe Compiler API trên fixture in-memory xác nhận alias/re-export, symbol cùng tên, declaration captured, TSX, `any`/dynamic gap và UTF-8 range; zero emit, không child process. Không chạy script/test/build/plugin repo. Reaffirm A047 sau khảo sát TS 6/7 hiện hành. | PASS | E973 bổ sung sau T055; E872–E875 vẫn là nghiệm thu gốc trước E876. Không kiểm repo người dùng, không đổi task/schema/code. | 2026-11-21 18:45 UTC |
+
+| E974 | T048 | `artifacts/release/t048-g6/handover.md` SHA-256 `e1d8afc9c24ca071d0d4cda0d724dcd6fc1834b62a2b2a35ff2bc435259395f8`; `review.json` SHA-256 `37c9a224dc9a7fb248fbb5f01870951858ca88562d0ea07a8436d4f8c21a7356`; `regression.jsonl` SHA-256 `1eb604b6e998d5529b9e7010e2006eab985af4e8b8438d84bd76ae546ba9310d` | B009 từ bundle xác minh và overlay T068/spec/go.sum; WSL2 Linux amd64/ext4; Go 1.27.4, Node 24.22.3, TS 5.9.3, CPython 3.14.4, Vite 7.3.8; namespace loopback | T048 review C055–C069 và hai ca incremental theo test ID, Go regression 47 gói có test PASS, 1750 test/subtest PASS, 44 skip, 0 FAIL. Module verify/vet/spec/build và CLI smoke PASS. TS fixture proxy 9731 byte DTO context và 131 byte hai tệp nguồn. G6 PASS trên fixture, P11 DONE. | PASS | Giữ guard hồi quy FAIL do `--version` không hợp lệ và smoke `version --json` PASS trên cùng binary. Các ngưỡng S18 đã FAIL giữ nguyên. Repo thật, host tokens NOT_RUN; numeric recall NOT_COMPUTED. | 2026-11-21 18:53 UTC |
+
+| E975 | T069 | `artifacts/acceptance/t069-c070/acceptance.md` SHA-256 `db417c355dc485df20415c3e936f5458d1da84a9c386b90f3c7dc0e3c87a9fe5`; `native-c070.log` SHA-256 `5ccbeb6ab7b58b5866739a0e7cc7f038e9f3cbba11c440ab358865140e9736a5`; `source-sha256.json` SHA-256 `dbd2ddc1972d7ee0b8e6c13a992f8fdc213c368dfc840d31fbcabb14418c4802` | B009 và overlay E974/T069 ghim từng tệp; Linux amd64 WSL2/ext4, Go 1.27.4, protected owner UID 1000 ở namespace chỉ có loopback; Windows SQLite package fixture | C070 strict local trace metadata, allowlist/digest/time/sampling, PII/oversize bị từ chối. Schema V2 cần upgrade được duyệt và exclusive lease. Commit atomically ghi artifact/items/epoch cùng WAL head. Revocation rollback, retry/reopen giữ epoch, revision chưa xác minh lưu unbound. 5 gói Go/Linux và vet/build PASS. | PASS | Owner library trên protected Linux profile giả. Windows kiểm package/DB fixture, protected importer Windows NOT_RUN. T070 tiếp nhận observed projection, T101 đối chiếu build với source. | 2026-11-21 19:01 UTC |
+
+| E976 | T070 | `artifacts/acceptance/t070-c071/acceptance.md` SHA-256 `015326e71a39a91bf9c004daf20faf1d2d380646b860a7747062451536794fa4`; `native-c071.log` SHA-256 `9384c39c02752bf4dccbf62827901bcca5588fc528e749a988be0e9b6c3baee5`; `source-sha256.json` SHA-256 `6610cc25a69e238f4000f169d2581d533a08738d437309e76b951aa32463b78a` | B009 và overlay T069/T070 ghim từng tệp; WSL2 Linux amd64/ext4, Go 1.27.4, protected owner UID 1000; Windows package fixture | C071 sampled async, 6 nodes, hai retries riêng ID, hai parent edges và một cross-trace link; thiếu/ambiguous/cycle giữ gap, khác environment không link. Native reopen từ protected records và projection observed-only PASS. 6 gói Go, 386 test/subtest PASS, 35 skip, vet/build PASS. | PASS | Chỉ graph từ metadata trace đã nhập, không có source mapping, interaction/transport runtime hoặc GU3 claim. T101 tiếp theo. | 2026-11-21 19:06 UTC |
+
+| E977 | T101 | `artifacts/acceptance/t101-observed/acceptance.md` SHA-256 `46bfeead9a8d2be3e50dd4a506b0b64ec629880d752f8e884a35214b25ccdf40`; `integration.jsonl` SHA-256 `69a81114b9a3046b003255ed2bd8fa5ea59d070ea3c5e47e9acbcdecd9e39df4`; `source-sha256.json` SHA-256 `d41d2a613e92b248aba6a9557f2b5dca609628746e1ff6635bec3d037db27761` | B009 cùng overlay E975–E976 và T101. WSL2 Linux amd64, Go 1.27.4, Node 24.22.3, dependency cache offline; Windows package regression | C107–C109 adapter: exact authority, pinned source/build, parent causality và retries tách biệt, rollback/unknown sau SQL success. SQLite integration đọc artifact, encode observed FlowData, revocation trước giao kết quả. Frontend lint/typecheck/build/tests và client mode/scope/evidence checks PASS. | PASS | Adapter fixture với explicit owner. Observe arming, browser runtime, export từ test app và GU3 ở T102–T104. | 2026-11-21 19:17 UTC |
+
+| E978 | T043 | `artifacts/preflight/t043-verification-20261122/acceptance.md` SHA-256 `67fb2e4373d99e866b1761df457f42bfd83cad304ccfad03b8e6d618b1a0d343`; `verification.json` SHA-256 `ab0d2a6809d1bba9a2057157e02c6415124efce3d6a8f1d78b7aec0978498635`; `verify.py` SHA-256 `433b4b83c79d42ead1ff84608607fdbad3b41e88edca826f65b5596940707d10` | B009, WSL2 Linux amd64, Node 24.22.3, TS 5.9.3, user+network namespace lo down | Kho vật liệu khớp SHA-512 SRI/SHA-256, 132 tệp, license/notices, Node và TSProfile. Fixture in-memory PASS, emit 0. Kiểm sáu SHA-256 và mốc E872–E875 trước E876. A047 cập nhật mô tả 7.0.2 unstable API và giữ pin. | PASS | Xác minh bổ sung, không chạy script repo đích. Project references và plugin dựa trên E873. P07 6/6 DONE, G6 PASS trên fixture theo E974. | 2026-11-21 19:22 UTC |
+
+| E979 | T102 | `artifacts/acceptance/t102-observe/acceptance.md` SHA-256 `6755b3c891d67f01ffb0b40b2bc66266dec004cd6f63723ec835fefe5ec5a464`; `observe-integration.log` SHA-256 `2badd0081106eb8b21f5cbfbd07c44cae0e47a1513bdab263525652035d8353a`; `source-sha256.json` SHA-256 `4528c93441ea6d2a46363e6de9f3ac9721b29aa020f4da4892a8e307862449d2`; guard SHA-256 `da58f79c39540e02588978f24415fff0e6316d3c4efb8ba760bb2bbe0218924d` | B009 + overlay WSL2/ext4, pinned Node 24.22.3, Chromium 159.0.8154.6, Go 1.27.4, namespace loopback | C107/C108/C110 propagation. Trusted arming sau ACK, hai request tương quan độc lập, CORS từ chối preflight và redirect bị chặn. Import 3 artifact, SQLite reopen epoch 3, parent correlation đúng. Từ chối binding thiếu proof; observed-only bootstrap/query loopback và revoke PASS. Frontend lint/typecheck/test/build, 8 gói regression, vet/spec/CLI build PASS. | PASS | Fixture rõ scope, 432 pass/1 skip regression. C110 frame/COOP và C109/C111/C112 fault suite ở T103. T104 nghiệm thu GU3. | 2026-11-21 19:34 UTC |
+
+| E980 | T103 | `artifacts/acceptance/t103-observe-faults/acceptance.md` SHA-256 `06e141d0c3a9572dfa27d4c55885b18c01498dd12bc3ecec879a44d523e2251b`; `browser-faults.log` SHA-256 `8d88b124c3201484c0c367e34541866adf2973062f6d28dbefbe902fedbdd101`; `race.log` SHA-256 `2bbcbb42d4f9ca29a844c272980702213f833f1e145624519380ddd9a7bd21b7`; `source-sha256.json` SHA-256 `2e57e1f9371978bd9de1c2afd3636c0aef6d8e7cfa65e669e8915cbb575e5f1c` | B009 + T102 overlay + T103; WSL2/ext4 loopback, Chromium 159.0.8154.6, Node 24.22.3, Go 1.27.4, GCC 15.2.0 | C108–C112: retry 503→204, cache/background unbound, real SQLite rollback và unknown partial, CORS/CSP/COOP, reject raw export trước persistence, HMR và ba reload, stale binding refusal. Caps 128 request và 32 action. Race chọn lọc, 8 gói regression, lint/typecheck/test/build, vet và spec PASS. | PASS | Chỉ fixture cục bộ, 419 ms nhóm ca lỗi một lượt. T104 cần GUI/owner representative review và số đo. | 2026-11-21 19:42 UTC |
+
+| E981 | T104 | `artifacts/release/t104-gu3/handover.md` SHA-256 `f980070079cb53539588aaa1fc7b0656fe5a524d9e1075b56b34662f29f704d5`; `packaged-observe.log` SHA-256 `2659d0febe3dfb8afcd5244e94ed6bf0df3440e972ab5b77fd10e62a04304b81`; `browser-metrics.json` SHA-256 `d24b1f7aabb06092eea1213bbc8a671df2242f4bfc96bad88a3a5f940455aa42`; `binary-sha256.json` SHA-256 `9acec36619efd0c4216c4a07500dfe58562228b9cf7f8b49e5d31d8aaffbf333` | B009 + T103 overlay + T104, WSL2 Linux amd64/ext4, Chromium 159.0.8154.6, SDK test app Node 24.22.3, Go 1.27.4, Vite 7.3.8 | C107–C112. Thao tác browser → request thật → verified build/revision → local export/import → SQLite → 2 observed steps và exact source trong AppShell built assets. Inspect requests=0, wrong artifact 403, no mutation. 36 trace/source samples p95 51/23 ms, 3 graph samples p95 179 ms. Regression/race/vet/lint/typecheck/spec/CLI và embedded build/smoke PASS. | PASS | GU3 U3_OBSERVED_RUN_VALIDATED với cooperative JS/HTTP fixture có owner; repo người dùng/production nằm ngoài scope kiểm. T071 sẵn sàng, G7 NOT_RUN. | 2026-11-21 19:50 UTC |
+
+| E982 | T071 | `artifacts/acceptance/t071-test-evidence/acceptance.md` SHA-256 `72fa29cc69d9d22f97f5c77e8c73b13a9d1617056fe61c909617ed066936b812`; `native-c072.log` SHA-256 `81761c8def1ba043dd8c9ca7b56faee358c6384bb1f9d05db1c4bd932e08b19d`; `c072-regression.log` SHA-256 `b83c287280543e3937fcf1e226af00047ece18b9943fa9466fa9a3ca9d1f2795`; `source-sha256.json` SHA-256 `005872cde737388828d44bd1e79f7e23871bb8807fcfdb884211c2a68cc1375e` | B009 + T104 overlay + T071, WSL2 Linux amd64/ext4, Go 1.27.4, protected owner UID 1000 | C072 closed test/coverage metadata, revision/capture/profile pin, historical và unbound, pass không sinh assertion, coverage không sinh result, UTF-8 range. records_002 atomic migration/append/replay/revocation, native WAL reopen. 9 gói regression 417 PASS 43 skip, vet/spec/build/module verify PASS. | PASS | Local normalized reports và Linux protected owner. Test trace cũ chạy lại, canary filesystem giữ nguyên. T072 tiếp theo. | 2026-11-21 19:58 UTC |
+
+| E983 | T072 | `artifacts/acceptance/t072-test-selection/acceptance.md` SHA-256 `43edfd3a51e815e407bc269412f570c655b010ce08449c7c85f5f17657609295`; `c073.log` SHA-256 `52c5dc5d7dbbc2cf623267f57ccd562a02d5153b4a6d71738d9b7580ec86d23a`; `source-sha256.json` SHA-256 `b6d0c492acedac3a7cc8d37b5da79eb3a3ad75566749fae6274b2c518b4e6f33`; `docs/checkpoints/B010.md` | B009 + T071 overlay + T072, WSL2 Linux amd64, Go 1.27.4 | C073 pinned TEST_REF and capture, schema/global/shared/unknown full regression fallback, stale coverage và cap gaps, required suites giữ mọi ca, deterministic. Oracle 4 ca đo candidate recall 3/8, không tính full fallback. 7 gói regression 219 PASS, 0 fail/skip; vet/spec PASS. | PASS | Fixture oracle, không chạy target suite. B010 đủ 10 task, T073 chờ clean restore/tag S53. | 2026-11-21 20:02 UTC |
+
 Format result: PASS, FAIL, NOT_RUN. NOT_RUN phải có lý do trong record. Hash tree dùng khi chưa commit; không bịa commit SHA. Absolute local paths chỉ trong private evidence khi cần, không publish; log sanitized. File artifact không tồn tại thì không tạo pointer giả. DONE task MUST trỏ >=1 evidence record PASS bao phủ test scope; gate reviewer kiểm tra không chỉ string “PASS”.
 
 ### Metadata áp dụng cho task/lệnh — không thêm tracker
@@ -3263,34 +3289,34 @@ Kiểm `go list -m all` có 38 module và `go list -deps -test` có 18 module d�
 
 ### Metadata checkpoint Git — không phải tracker task thứ hai
 
-S53 điều hành nhịp commit; các task vẫn chỉ có trạng thái ở S19. Record sau là trạng thái khởi đầu, chưa quan sát repository/Git thật. Khi có run, ghi batch metadata vào S21, derive summary S22, reconcile actual log/trailers/tag; không tự ghi đã commit/push/restore khi chưa làm.
+S53 điều hành nhịp commit; các task vẫn chỉ có trạng thái ở S19. Record hiện tại đã đối chiếu checkout: B009 restore/tag PASS ở E971; B010 bắt đầu từ commit/tree của B009. Khi có run tiếp theo, ghi batch metadata vào S21, derive summary S22, reconcile actual log/trailers/tag; không tự ghi đã commit/push/restore khi chưa làm.
 
 ```yaml
 git_batch_control:
   policy: S53
   batch_size: 10
   counting_order: S47
-  active_batch_id: B009
+  active_batch_id: B010
   batch_type: full
   assignment_scope_final: false
   authority_ref: null
-  active_task_ids: [T099, T100, T057, T058, T062, T063, T064, T065, T066, T067]
+  active_task_ids: [T068, T048, T069, T070, T101, T102, T103, T104, T071, T072]
   active_done_count: 10
   related_task_ids: []
-  base_commit_oid: 0a30cd0c41a405cdd9622e8046652a57ed8c734d
+  base_commit_oid: 41dcca4e5bb58d85a21d5477b1588324e1e8a6eb
   branch: main
   commit_binding: containing_commit
   current_commit_oid: null
   current_tree_oid: null
-  planned_checkpoint_tag: mce4d/checkpoints/B009
-  last_verified_checkpoint_oid: 0a30cd0c41a405cdd9622e8046652a57ed8c734d
-  last_verified_checkpoint_tag: mce4d/checkpoints/B008
+  planned_checkpoint_tag: mce4d/checkpoints/B010
+  last_verified_checkpoint_oid: 41dcca4e5bb58d85a21d5477b1588324e1e8a6eb
+  last_verified_checkpoint_tag: mce4d/checkpoints/B009
   remote_alias: origin
   remote_branch: null
   push_status: NOT_AUTHORIZED
   independent_backup_status: NOT_VERIFIED
-  interim_snapshot_ref: artifacts/preflight/t067-20261121/source-snapshot-verified.json
-  project_restore_verification: PASS
+  interim_snapshot_ref: artifacts/acceptance/t072-test-selection/overlay-restore.json
+  project_restore_verification: NOT_RUN
 ```
 
 Commit hiện hành được nhận diện từ containing commit/trailers và tag theo GIT-05, không tự lưu own SHA trong source đã commit. OID/tag của batch trước chỉ đi vào spec ở lần batch tiếp theo khi cần; không commit phụ để cập nhật receipt. Không đưa bản ghi này vào wire/schema/SQLite của engine.
@@ -3446,7 +3472,7 @@ Discrepancy register (điền khi có bằng chứng về docs/source/policy/env
 
 **T084 — DONE / GU0 PASS, 2026-11-21:** Phiếu S47 #056, owner codex, mode implement. E867–E871 nghiệm thu C081–C083 trên binary đóng gói, index SQLite từ fixture Go, Chromium 159.0.8154.6 và WSL2. Scope review gồm AppShell, loopback, authorization, CSP, policy canary và source read-only. Fixture race được đồng bộ. AppShell vẽ graph theo trang đã xác minh để giảm thời gian đến lát đầu. Nhãn U0_GRAPH_SOURCE_VALIDATED áp dụng cho môi trường fixture đã kiểm. P07/T043 là phiếu tiếp theo khi mở phạm vi. B006 6/10, R1 52/52, U0 4/4 và toàn roadmap 56/108.
 
-**T043 — DONE, 2026-11-21.** Phiếu S47 #057, owner codex, mode implement. P07 mở theo yêu cầu người dùng. A047 chốt TypeScript 5.9.3, Node 24.22.3, Apache-2.0 và profile TS/JS đóng. E872–E875 xác minh nguồn, C055 discovery no-script và restore offline. T055 tiếp theo. T044/T045/T056/T047 TODO theo S47. B006 7/10 và toàn roadmap 57/108.
+**T043 — DONE, 2026-11-21; kiểm lại E973 và E978, 2026-11-22.** Phiếu S47 #057, owner codex, mode implement. P07 mở theo yêu cầu người dùng. A047 giữ TypeScript 5.9.3, Node 24.22.3, Apache-2.0 và TSProfile đóng. Nghiệm thu gốc E872–E875 ghi lúc 08:19 UTC trước T055/E876 lúc 09:54 UTC cùng ngày. E978 kiểm lại pin, license, profile và probe độc lập, đối chiếu API TS 6/7 theo nguồn upstream. T055 đã DONE theo E876–E878 và P07 đã DONE 6/6. B006 7/10 và toàn roadmap 57/108 tại mốc T043 ban đầu.
 
 **T055 — DONE, 2026-11-21.** Phiếu S47 #058, owner codex, mode implement. E876–E878 nghiệm thu LanguageProvider, S43 process adapter và no-script với Node pin trên WSL2, gồm admission, timeout/cancel và race. T044 nhận Compiler API và việc tạo typed facts. B006 8/10, 58/108 task DONE.
 
@@ -3578,16 +3604,54 @@ Discrepancy register (điền khi có bằng chứng về docs/source/policy/env
 
 **T067 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #090, E967 baseline. A052 ghép intended declaration đã approve với evidence tĩnh từ member/module có scope. C068 kiểm ordered witness, exemption hiệu lực/hết hạn, unknown provider và stale approval. Chỉ báo drift. Chuẩn hóa hai JSON schema của T062/T066 về LF trong B009 để staged blob khớp bytes đã kiểm, nghiệp vụ schema giữ nguyên. Xác minh 10/10, commit/restore/tag trước T068.
 
-**T067 — DONE.** E968–E970 nghiệm thu intended architecture và C068. B009 đủ 10 task; T068 chờ kết quả checkpoint S53.
+**T067 — DONE.** E968–E970 nghiệm thu intended architecture và C068. B009 đủ 10 task; clean restore và annotated tag được xác minh ở E971.
+
+**B009 — checkpoint verified, 2026-11-21 17:04 UTC.** Commit 41dcca4e5bb58d85a21d5477b1588324e1e8a6eb, tree d7d384e8adc5d0ab1a1ede8b6f8e89631821416b, tag mce4d/checkpoints/B009, tag object 4c10b533f7a963e6589a5f7b34a09fec93278d99. Clean restore 1,188 paths, verification receipt E971; bundle SHA-256 460db474d6d18e40a0f47b06c3b2902c8c4046d0640d2567bd7369b7e528c21c. Push NOT_AUTHORIZED, independent backup NOT_VERIFIED.
+
+**T068 — DONE, 2026-11-22.** Phiếu S47 #091, owner codex, baseline E971/B009. E972 xác nhận capability matrix đóng C055–C069 và full cohort trên fixture synthetic: 14 gói PASS; 93 test/subtest events PASS, không fail/skip. Incremental chỉ kiểm Go invalidation và retained snapshot diff; không có claim cache tăng dần cho TS/Python/contracts/domain. Host/model/token metrics và real-repository comparison giữ NOT_RUN/null; recall dạng số chưa tính vì chưa có gold-fact count chuẩn hóa.
+
+**T048 — DONE / G6 PASS trên fixture, 2026-11-22.** Phiếu S47 #092, owner codex. E974 đối chiếu C055–C069 tại B009 và overlay T068, chạy hồi quy toàn bộ gói Go, build và CLI smoke. Bàn giao capability/giới hạn ở artifacts/release/t048-g6. S18 giữ các ngưỡng đã FAIL, host/real-repo NOT_RUN và proxy byte ghi riêng. R2 20/20, roadmap 92/108, B010 2/10. Yêu cầu hoàn tất 108 task mở P12 theo S47. T069 tiếp theo, quyền mở target runtime vẫn lấy theo S37.
+
+**T069 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #093, owner codex, B009 và overlay E974. Phạm vi gồm `internal/evidence/importtrace/`, migration records_002 đã seal và writer records.sqlite. Nhập export metadata JSON đóng theo root/path/hash đã duyệt, giới hạn byte/timestamps/spans/links, kiểm allowlist của owner trước persistence. Revision và build là metadata tự khai của export cho đến khi owner xác nhận binding độc lập với snapshot. C070 kiểm metadata nhạy cảm, quá giới hạn và revision chưa rõ. T070 chờ import đã lưu atomically và có cycle phục hồi/đọc được kiểm.
+
+**T069 — DONE, 2026-11-22.** E975 nghiệm thu importer trace chỉ đọc tệp local đã duyệt, schema đóng, cap và allowlist. Protected owner migration/append ghi chung một giao dịch, revocation rollback, WAL head xác nhận khi reopen, replay giữ epoch. Revision chưa đối chiếu lưu unbound; không merge static graph. T070 sẵn sàng, B010 3/10 và 93/108 task DONE.
+
+**T070 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #094, owner codex, baseline E975. Đọc các artifact ID tường minh trong giao dịch records được authorize và recheck quyền. Projection observed lưu từng occurrence, chỉ nối parent/span link hiện diện và duy nhất cùng app/environment. Missing, ambiguous, sampled và instrumentation unknown có gap; nhiều retry giữ SpanID riêng. Phạm vi bổ sung `internal/evidence/importtrace/` cho kiểm lại DTO đã lưu, `internal/store/sqlite/records/read_trace.go` cho reader và fixture C071. Không gắn source, không suy thứ tự/dependency nghiệp vụ từ timestamp, không tạo cạnh static.
+
+**T070 — DONE, 2026-11-22.** E976 nghiệm thu reader trace theo artifact ID và auth trước/sau, projection observed-only theo parent/span link, explicit gaps khi sampled/missing/ambiguous/cyclic và giữ riêng các retry. Fixture native đọc từ WAL records đã publish rồi dựng graph. P12 xong, mở P13 theo yêu cầu 108 task. B010 4/10, 94/108 DONE. T101 tiếp theo. GU3/G7 NOT_RUN.
+
+**T101 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #095, owner codex, baseline E976. Tái dùng record trace và projection T070, bắt đầu từ request/span có interaction ID, build và traceparent đã xác nhận. Chỉ dùng parent edge tường minh cho đường nhân quả và giữ span link là metadata quan sát. Đối chiếu build/revision/profile và source bytes ở đúng pinned scope trước khi gắn vào flow. SQL attempt, statement success và kết quả transaction có chứng cứ riêng. C107–C109 dùng synthetic fixture. T102 tiếp nhận Observe runtime, không mở permission target tại T101.
+
+**T101 — DONE, 2026-11-22.** E977 nghiệm thu adapter từ records.sqlite qua pinned flow route, exact build/revision/source, correlation bằng traceparent và artifact, giữ retry và output một phần. SQL success, rollback và unknown giữ evidence riêng. FlowPanel kiểm scope và endpoint proofs, hiển thị nhãn observed. Fixture owner chỉ phát kết quả khi quyền còn hiệu lực. T102 tiếp theo để nối Observe thật trên test app. 95/108 DONE, B010 5/10, GU3 NOT_RUN.
+
+**T102 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #096 trên E977. Dev app tích hợp Observe tường minh vào SDK được ghim, giữ 23 bridge variants hiện có. Chỉ arm sau Interact đã ACK và có grant fixture theo đúng build, env, destination và TTL. Mỗi trusted action tạo handle riêng. Propagation chỉ do action wrapper gọi, giữ header đã có, từ chối redirect khi gắn trace, không thu body/query/header secrets. SDK clear quyền và pending export khi disarm/reload/hidden/build-change/expiry. Kiểm local test app với request–parent span–export/import–owner flow, C107/C108/C110. Không áp dụng quyền thực thi lên repo đích ngoài fixture.
+
+**T102 — DONE, 2026-11-22.** E979 nghiệm thu trusted Observe capture và CORS trong Chromium, local export/import vào SQLite và đối chiếu receipt. Nối owner vào reader/HTTP capability và Flow panel để mở ID đã import. Có binding nguồn fixture riêng với flow route thật và revocation. Triển khai mở rộng các điểm nối reader/transport/client cần cho luồng này, giữ schema và bridge đã seal. Owner chưa được cấu hình thì capability tắt. B010 6/10, 96/108 DONE, T103 tiếp theo, GU3 NOT_RUN.
+
+**T103 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #097 trên E979 và B010 6/10. Scope tests/acceptance/explorer* và kiểm importer/projection đã có. Mở rộng fixture cục bộ để kiểm retry/cache/background, kết quả transaction khi trace có hoặc thiếu rollback, CORS/CSP/COOP theo trình duyệt, dữ liệu ngoài schema, lifecycle và cap Observe. Dùng dữ liệu và destination test, chưa cấp quyền target. Nếu phát hiện lỗi, sửa điểm thực thi tương ứng và chạy lại hồi quy trước ghi nghiệm thu.
+
+**T103 — DONE, 2026-11-22.** E980 ghi ma trận C108–C112 và hồi quy đã xác minh. SDK đổi cách mã hóa byte hex để chạy với Node pin, giữ traceparent cùng format. Fixture browser và Go/SQLite chứng minh fault boundaries, race chọn lọc PASS. B010 7/10, roadmap 97/108. T104 tiếp theo để đóng GU3 nếu đạt kiểm bắt buộc.
+
+**T104 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #098 trên snapshot E980 đã khôi phục. Nghiệm thu AppShell assets đóng gói với index/records thật và owner fixture, kiểm nhập artifact được duyệt, flow/source, refusal khi revoke, số đo và giới hạn. Đối chiếu pipeline browser → test server → export/import/SQLite đã chạy thật và matrix C107–C112. Bổ sung fixture kiểm các giao điểm chưa có bằng chứng. Không tự kích hoạt target của người dùng.
+
+**T104 — DONE / GU3 PASS, 2026-11-22.** E981 bàn giao U3_OBSERVED_RUN_VALIDATED cho fixture cooperative đã nêu. Chrome đi từ explicit Observe tới source byte proof qua local artifacts và SQLite, ba lượt AppShell. Hồi quy, race, portability scope và nhãn private owner ghi trong handover. P13 DONE, B010 8/10 và 98/108. P14 mở theo yêu cầu 108 task, bắt đầu T071.
+
+**T071 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #099 trên E981 đã khôi phục. Nhập report local dạng metadata đóng do host cung cấp, pin byte đầu vào, revision/capture/profile và command đã duyệt. Phân biệt kết quả test, hit coverage và invariant claim do host cung cấp. Scope thêm cổng records_002 và owner cục bộ để ghi/đọc atomic, tái dùng migration/lease/WAL của T069. Kiểm C072 với revision cũ, scope sai, test pass không có assertion, coverage không suy ra invariant và import/reopen bằng SQLite fixture. Không thực thi lệnh trong report.
+
+**T071 — DONE, 2026-11-22.** E982 nghiệm thu test-evidence-v1 và records_002 dưới protected owner Linux. Metadata revision/profile/capture, SHA-256 export, lệnh do host cấp đã duyệt, outcome và coverage độc lập. PASS native WAL/reopen/replay, revoke rollback và trace regression. B010 9/10, 99/108. T072 tiếp theo.
+
+**T072 — IN_PROGRESS, 2026-11-22.** Phiếu S47 #100 trên E982 và B010 9/10. Scope internal/evidence/selection* cùng oracle C073. Dùng approved static TEST_REF, alignment T071, suite bắt buộc do host cấp, và lý do fallback khi đổi schema/global config/shared hoặc evidence thiếu. Aggregate coverage là ngữ cảnh của command đã quan sát. Đo recall candidate theo expected set độc lập, không cộng full-suite fallback vào numerator. Khi T072 DONE phải đóng checkpoint B010 theo S53 trước T073.
+
+**T072 — DONE / B010 prepared, 2026-11-22.** E983 nghiệm thu C073 và giữ 3/8 recall candidate trên oracle có trường hợp thiếu mapping, kèm đề xuất full regression. B010 có đủ mười task đúng thứ tự S47 và hồ sơ docs/checkpoints/B010.md. Checkpoint local còn qua stage, kiểm tree, commit, clean restore và verified tag. B009 là last verified checkpoint. T073 chưa nhận task.
 
 ## S22 — Trạng thái tiếp tục cho phiên AI sau
 
 ```yaml
 resume:
   spec_version: 1.6.9
-  implementation_revision: 7150ceb8bb65b1dc49cc014e42bd24cfed144b21
+  implementation_revision: 41dcca4e5bb58d85a21d5477b1588324e1e8a6eb
   release_label: R1_VALIDATED_ON_FIXTURES
-  gate: G5
+  gate: G7
   design_seal: PASS
   construction_plan: S47
   policy_registry: S50
@@ -3595,10 +3659,10 @@ resume:
   audit_closure: S52
   git_batch_policy: S53
   git_batch_size: 10
-  git_batch_current_id: B009
+  git_batch_current_id: B010
   git_batch_done_count: 10
-  last_git_checkpoint: B008
-  git_project_restore: PASS
+  last_git_checkpoint: B009
+  git_project_restore: NOT_RUN
   git_remote_status: CONFIGURED_PUSH_NOT_AUTHORIZED
   audit_baseline: 1.4.0
   canonical_codec: MCE-C14N1
@@ -3609,30 +3673,30 @@ resume:
   last_request_mode: implement
   next_task_mode: implement
   foundation_sequence: [T001, T002, T003, T105, T106, T107, T108]
-  next_task: T068
+  next_task: null
   active_task: null
   active_owner: null
   done_r1_tasks: 52
   total_r1_tasks: 52
-  deferred_r2_tasks: 1
-  deferred_r3_tasks: 12
-  explorer_requested_tracks: [U0, U1, U2]
-  explorer_active_gate: GU2
+  deferred_r2_tasks: 0
+  deferred_r3_tasks: 8
+  explorer_requested_tracks: [U0, U1, U2, U3]
+  explorer_active_gate: GU3
   explorer_u0_todo: 0
   explorer_u1_todo: 0
   explorer_u2_todo: 0
-  explorer_u3_deferred: 4
-  explorer_implementation_status: U2_FULL_STACK_STATIC_VALIDATED
+  explorer_u3_deferred: 0
+  explorer_implementation_status: U3_OBSERVED_RUN_VALIDATED
   preview_execution_permission: NOT_GRANTED_FOR_ANY_TARGET
   total_roadmap_tasks: 108
   product_build: PASS
   product_tests: PASS
-  product_benchmark: NOT_RUN
+  product_benchmark: "R1_S_M_L_FIXTURE_PASS; R2_TS_FIXTURE_BYTE_PROXY_MEASURED; R2_HOST_TOKEN_COMPARISON_NOT_RUN"
   blocking_user_decision: null
   discovery_gaps: [K001, K002, K003, K007, K008, K009, K010, K011, K013, K014, K015, K016, K017, K018]
   known_limits: [K005, K006, K012]
-  last_evidence_id: E970
-  last_checked_at_utc: 2026-11-21T16:48:00Z
+  last_evidence_id: E983
+  last_checked_at_utc: 2026-11-21T20:02:56Z
 ```
 
 MUST cập nhật resume chỉ sau khi tracker/evidence nhất quán; là summary derived, không nguồn thay thế task rows. Không lưu chain-of-thought vào tài liệu. Chỉ lưu quyết định, bằng chứng, lỗi tái hiện được và hành động tiếp theo.
@@ -3938,9 +4002,15 @@ RT01 R3 chỉ import file export local được user cho phép. Explorer U3 tái
 
 RT02 OpenTelemetry spans/links có thể hỗ trợ theo dõi chuỗi asynchronous; một trace là bằng chứng một execution đã quan sát, không là danh sách mọi execution. Các lần retry, duplicate delivery, batch fan-in/out có quan hệ riêng; order thời gian không tự là data dependency. Import sai định dạng/PII/payload quá lớn bị từ chối/che trước persistence. Không bật agent instrumentation hoặc kết nối collector/prod tự động [REF28].
 
+T069 dùng export nội bộ `runtime-trace-v1` theo hợp đồng E975. Nhập một service mỗi artifact, tối đa 1 MiB, 1.024 spans và 32 links mỗi span, kiểm SHA-256 và quyền đọc trước lưu. Owner duyệt các label, unknown field bị từ chối. Revision/build/profile do export khai báo không cấp source binding. `ImportProtectedTrace` lấy exclusive maintenance lease và writer của worktree, nâng records_002 khi được duyệt, append và tăng epoch trong một giao dịch. Nhập lại cùng artifact đối chiếu normalized content và không tăng epoch. T070 dựng observed graph, T101 xác minh source binding theo build/revision và scope.
+
 TE01 Test evidence record: test ID/file, source revision/digest, test environment/profile, command supplied by host, result, coverage scope, artifact hash, time. Static TEST_REF != runtime covered != assertion checked invariant. Coverage hit không chứng minh behavior đúng; test pass thuộc phiên bản cũ là historical.
 
+T071 dùng export nội bộ `test-evidence-v1`. Shape đóng `{metadata,tests,coverage}`. Metadata giữ kind, worktree/profile/revision/capture digest, environment, argv đã lọc do host cung cấp và thời điểm UTC. Kind `test_report` có test outcome và assertion IDs do host khai báo; kind `coverage_report` có path/hash, range byte và hit count. Tối đa 1 MiB và 1.024 item, SHA-256 chính xác của export. Owner chỉ import tệp local được duyệt qua records_002, dùng chung writer/epoch/upgrade policy của trace. Source alignment kiểm với snapshot đã được owner duyệt. Revision/snapshot cũ là historical, scope hoặc bytes/range sai là unbound. Kết quả matching capture không tự cấp source binding hay xác nhận invariant.
+
 TE02 Suggested test selection là danh sách có rationale/coverage gaps, không quyền bỏ regression suite. Khi thay schema/global config/shared core hoặc evidence không đủ, gợi ý broaden/full suite của repo nếu đã biết command. Engine không chạy target tests. Host permission/execution/reporting tách riêng.
+
+T072 nhận static TEST_REF trong capture và đối chiếu cả hai source hashes trước khi đề xuất candidate. Current aggregate coverage chỉ cung cấp ngữ cảnh hit, không gán hit vào test riêng. Evidence historical hoặc sai scope không dùng để lấp gap. Output giữ suite bắt buộc, reason theo file, gap khi cap và full-suite ID của host nếu biết. Oracle độc lập đo hit của candidate so với expected affected tests. Việc chỉ định full suite không tính như candidate đã tìm thấy.
 
 ED01 Unsaved buffer bridge chỉ R3: editor session ID/version, base disk hash, buffer bytes, scope và lifecycle explicit; snapshots buffer không lẫn disk snapshot. Model/analyzer không được tự ghi buffer ra file. Multi-editor divergence, save/reload/delete, secret policy, UTF-16 conversions và cache invalidation phải có test trước bật capability.
 
@@ -6100,8 +6170,8 @@ Read mặc định cho mọi hàng: S00/S22/S41/S46 và S53 GIT-01/GIT-02/batch 
 | 091 | T068 | S24,S28–S30,S43–S45 | `tests/acceptance/polyglot*,tools/bench/` | DF14,DF15,DF19 | C055..C069 |
 | 092 | T048 | S24,S28–S30,S43–S45 | `artifacts/release/` | DF03–DF07 | C055..C069 |
 | 093 | T069 | S27,S31,S43–S45 | `internal/evidence/import*,internal/store/sqlite/records*` | DF16,DF19 | C070 |
-| 094 | T070 | S27,S31,S43–S45 | `internal/evidence/traces*` | DF16,DF19 | C071 |
-| 095 | T101 | S34–S39,S43–S45 | `internal/flowview/observed*,web/explorer/src/features/flow/` | DF11,DF16 | C107,C108,C109 |
+| 094 | T070 | S27,S31,S43–S45 | `internal/evidence/traces*,internal/evidence/importtrace/,internal/store/sqlite/records/read_trace.go` | DF16,DF19 | C071 |
+| 095 | T101 | S34–S39,S43–S45 | `internal/flowview/observed*,internal/compose/explorer*.go,internal/compose/core_authority.go,web/explorer/src/features/flow/` | DF11,DF16 | C107,C108,C109 |
 | 096 | T102 | S34–S39,S43–S45 | `packages/preview-sdk/observe*,internal/explorer/sessions*,web/explorer/src/features/preview/` | DF11,DF16 | C107,C108,C110 |
 | 097 | T103 | S34–S39,S43–S45 | `tests/acceptance/explorer*,testdata/malicious/` | DF11,DF16 | C108..C112 |
 | 098 | T104 | S34–S39,S43–S45 | `artifacts/release/` | DF11,DF16 | C107..C112 |

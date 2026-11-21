@@ -1,9 +1,12 @@
+import { createTraceObserver } from './observe.mjs';
+
 const hash = /^[0-9a-f]{64}$/;
 const nonce = /^[A-Za-z0-9_-]{43}$/;
 
 // The target dev app supplies the pinned S43 decoder, its exact allowed
 // Explorer origin and its current build map. This SDK receives no credentials.
-export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBridgeMessage, onBound, onDispose, allowScroll = false }) {
+export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBridgeMessage, onBound, onDispose,
+  allowScroll = false, observeApproval }) {
   const parent = window.parent;
   const origin = new URL(parentOrigin);
   if (origin.origin !== parentOrigin || !['http:', 'https:'].includes(origin.protocol) ||
@@ -15,6 +18,9 @@ export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBrid
   let stopObservation;
   let mode = 'inspect';
   let authorizationEpoch = 0;
+  if (observeApproval && observeApproval.buildMapID !== buildMapID) throw new Error('Observe build does not match the SDK binding');
+  const observations = observeApproval && createTraceObserver(window, observeApproval, () =>
+    state === 'bound' ? { ...context, build_map_id: buildMapID, mode, authorization_epoch: authorizationEpoch } : undefined);
   let incoming = 0;
   let outgoing = 0;
   const messages = new Set();
@@ -31,7 +37,10 @@ export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBrid
     window.addEventListener(event, guard, { capture: true, passive: false, signal: input.signal });
   }
   window.document.addEventListener('visibilitychange', () => {
-    if (window.document.hidden) mode = 'inspect';
+    if (window.document.hidden) {
+      mode = 'inspect';
+      observations?.disarm();
+    }
   }, { signal: input.signal });
 
   function emit(type, payload, selectionID, replyTo) {
@@ -88,6 +97,7 @@ export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBrid
       const accepted = message.payload.mode === 'inspect' || !window.document.hidden;
       authorizationEpoch = message.payload.authorization_epoch;
       mode = accepted ? message.payload.mode : 'inspect';
+      observations?.disarm();
       stopTracking();
       reply('MODE_ACK', { ...message.payload, accepted }, message);
     } else if (message.type === 'PICK_AT' && state === 'bound' && mode === 'inspect') {
@@ -124,6 +134,7 @@ export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBrid
     window.removeEventListener('message', receive);
     window.removeEventListener('pagehide', dispose);
     input.abort();
+    observations?.disarm();
     stopTracking();
     registry?.dispose();
     registry = undefined;
@@ -137,6 +148,7 @@ export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBrid
     if (state !== 'bound' || !hash.test(nextBuildMapID) || nextBuildMapID === buildMapID) return false;
     mode = 'inspect';
     state = 'stale';
+    observations?.disarm();
     stopTracking();
     registry?.dispose();
     registry = undefined;
@@ -146,5 +158,5 @@ export function installPreviewSDK({ window, parentOrigin, buildMapID, decodeBrid
 
   window.addEventListener('message', receive);
   window.addEventListener('pagehide', dispose, { once: true });
-  return Object.assign(dispose, { buildChanged });
+  return Object.assign(dispose, { buildChanged, observations });
 }

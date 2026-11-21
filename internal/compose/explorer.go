@@ -18,17 +18,31 @@ import (
 // response accounting as the core application. One instance belongs to one
 // foreground Explorer session.
 type ExplorerReader struct {
-	core       *CoreBackend
-	registry   *contracts.Registry
-	limits     model.ExplorerRuntimeLimits
-	codec      *contextpack.CursorCodec
-	projection chan struct{}
-	graphs     explorerGraphs
-	selection  *app.CoreService
-	staticFlow staticFlowOwner
+	core         *CoreBackend
+	registry     *contracts.Registry
+	limits       model.ExplorerRuntimeLimits
+	codec        *contextpack.CursorCodec
+	projection   chan struct{}
+	graphs       explorerGraphs
+	selection    *app.CoreService
+	staticFlow   staticFlowOwner
+	observedFlow ObservedRunAuthority
 }
 
 func NewExplorerReader(core *CoreBackend, cfg model.RuntimeConfig) (*ExplorerReader, error) {
+	return newExplorerReader(core, cfg, nil)
+}
+
+// NewExplorerReaderWithObservedRuns enables the existing flow route only for
+// runs provided by the current owner. It does not grant Observe or target access.
+func NewExplorerReaderWithObservedRuns(core *CoreBackend, cfg model.RuntimeConfig, owner ObservedRunAuthority) (*ExplorerReader, error) {
+	if owner == nil {
+		return nil, app.ErrCoreInput
+	}
+	return newExplorerReader(core, cfg, owner)
+}
+
+func newExplorerReader(core *CoreBackend, cfg model.RuntimeConfig, owner ObservedRunAuthority) (*ExplorerReader, error) {
 	if !core.valid() {
 		return nil, app.ErrCoreInput
 	}
@@ -48,7 +62,8 @@ func NewExplorerReader(core *CoreBackend, cfg model.RuntimeConfig) (*ExplorerRea
 	// These are process-local graph result limits, independent of SQLite
 	// worktree quotas and build tooling output budgets.
 	return &ExplorerReader{core: core, registry: registry, limits: cfg.Explorer, codec: codec,
-		projection: make(chan struct{}, 1), graphs: explorerGraphs{entries: make(map[string]explorerGraph),
+		observedFlow: owner,
+		projection:   make(chan struct{}, 1), graphs: explorerGraphs{entries: make(map[string]explorerGraph),
 			ttl: time.Duration(min(cfg.Core.ResultTtlSeconds, 900)) * time.Second}}, nil
 }
 
@@ -64,6 +79,10 @@ func (e *ExplorerReader) Check(ctx context.Context) error {
 	return coreStoreError(err)
 }
 
+func (e *ExplorerReader) SupportsObservedFlow() bool {
+	return e.observedFlow != nil
+}
+
 func (e *ExplorerReader) Read(ctx context.Context, request model.Request, options app.CoreCallOptions) (explorer.ReadResult, error) {
 	principal, err := e.core.Authority.Authenticate(ctx)
 	if err != nil {
@@ -71,6 +90,7 @@ func (e *ExplorerReader) Read(ctx context.Context, request model.Request, option
 	}
 	var op string
 	var blocks [][]byte
+	var observedRecheck func(context.Context) error
 	switch value := request.(type) {
 	case model.StatusRequest:
 		op = "GET /workspace"
@@ -83,7 +103,11 @@ func (e *ExplorerReader) Read(ctx context.Context, request model.Request, option
 		blocks, err = e.readGraph(ctx, principal, value, options)
 	case model.FlowQueryRequest:
 		op = "POST /flow/query"
-		blocks, err = e.readFlow(ctx, principal, value, options)
+		if value.Mode != nil && *value.Mode == "observed" {
+			blocks, observedRecheck, err = e.readObservedFlow(ctx, principal, value, options)
+		} else {
+			blocks, err = e.readFlow(ctx, principal, value, options)
+		}
 	case model.PackRequest:
 		return e.selectionPack(ctx, principal, value, options)
 	default:
@@ -100,6 +124,11 @@ func (e *ExplorerReader) Read(ctx context.Context, request model.Request, option
 		return explorer.ReadResult{}, app.ErrCoreBackend
 	}
 	recheck := func(ctx context.Context) error {
+		if observedRecheck != nil {
+			if err := observedRecheck(ctx); err != nil {
+				return coreStoreError(err)
+			}
+		}
 		return coreStoreError(e.core.Authority.AuthorizeResponse(ctx, principal, op, request, response))
 	}
 	return explorer.ReadResult{Body: blocks[0], Recheck: recheck}, nil

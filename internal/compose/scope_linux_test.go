@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +151,14 @@ func scopeJSON(t *testing.T, value any) []byte {
 // Git is run only on that synthetic repo; principal and publication proof are
 // explicitly fixture callbacks, while SQLite and Linux locks are real.
 func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
+	checkScopeReaderFixture(t, false, "")
+}
+
+func TestT101ExplorerReadsObservedFlowFromRecords(t *testing.T) {
+	checkScopeReaderFixture(t, true, "")
+}
+
+func checkScopeReaderFixture(t *testing.T, observedFlow bool, observeBrowserNode string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 360*time.Second)
 	defer cancel()
 	base := t.TempDir()
@@ -283,6 +292,18 @@ func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
 	if err := recordsMaintenance.Close(); err != nil {
 		t.Fatal(err)
 	}
+	var observedArtifact string
+	var browserObserved *browserObserveRun
+	var recordEpoch int64
+	if observeBrowserNode != "" {
+		browserObserved = stageObservedBrowserFixture(t, ctx, base, recordsPath, registration.WorktreeID,
+			registration.ProfileID, observeBrowserNode, exclusive, writer)
+		recordEpoch = 3
+	} else if observedFlow {
+		observedArtifact = stageObservedFixture(t, ctx, base, recordsPath, registration.WorktreeID,
+			registration.ProfileID, exclusive, writer)
+		recordEpoch = 1
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +365,21 @@ func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
 	documentHash, documentLength := documentFile.ContentHash(), int64(documentFile.Len())
 	vocabularyHash, vocabularyLength := vocabularyFile.ContentHash(), int64(vocabularyFile.Len())
 	manifest := model.CaptureManifest{SchemaVersion: 1, WorktreeID: registration.WorktreeID, ProfileID: registration.ProfileID, PolicyDigest: registration.PolicyDigest, ProviderDigest: provider, Files: []model.ManifestFile{{Path: "design.md", Status: "captured", ContentHash: &documentHash, ByteLength: &documentLength}, {Path: "go.mod", Status: "captured", ContentHash: &moduleHash, ByteLength: &moduleLength}, {Path: "main.go", Status: "captured", ContentHash: &contentHash, ByteLength: &length}, {Path: "other.go", Status: "captured", ContentHash: &otherHash, ByteLength: &otherLength}, {Path: "vocabulary.json", Status: "captured", ContentHash: &vocabularyHash, ByteLength: &vocabularyLength}}, DependencyInputDigests: []string{}}
-	captured, err := snapshot.Freeze(manifest, []snapshot.File{documentFile, moduleFile, file, other, vocabularyFile}, 8192, 8192)
+	captureFiles := []snapshot.File{documentFile, moduleFile, file, other, vocabularyFile}
+	fileKinds := []index.FileClassification{{Path: "design.md", Kind: "document"}, {Path: "go.mod", Kind: "module"}, {Path: "main.go", Kind: "go"}, {Path: "other.go", Kind: "go"}, {Path: "vocabulary.json", Kind: "document"}}
+	hasObserveSite := browserObserved != nil && browserObserved.site != nil
+	if hasObserveSite {
+		site := browserObserved.site
+		if err := os.WriteFile(filepath.Join(repo, observeSite), site.Bytes(), 0600); err != nil {
+			t.Fatal(err)
+		}
+		hash, size := site.ContentHash(), int64(site.Len())
+		manifest.Files = append(manifest.Files, model.ManifestFile{Path: observeSite, Status: "captured", ContentHash: &hash, ByteLength: &size})
+		captureFiles = append(captureFiles, *site)
+		fileKinds = append(fileKinds, index.FileClassification{Path: observeSite, Kind: "source"})
+		sort.Slice(fileKinds, func(i, j int) bool { return fileKinds[i].Path < fileKinds[j].Path })
+	}
+	captured, err := snapshot.Freeze(manifest, captureFiles, 8192, 8192)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +393,7 @@ func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := index.CaptureWrite{GenerationID: scopeGeneration, JobID: scopeJob, PolicyEpoch: 1, Snapshot: captured, Writer: writer, Authorize: authorize, Scanner: scanner, MaxManifestBytes: 8192, MaxSourceBytes: 8192}
-	if err := idx.StageFiles(ctx, index.StageFilesRequest{Capture: capture, Files: []index.FileClassification{{Path: "design.md", Kind: "document"}, {Path: "go.mod", Kind: "module"}, {Path: "main.go", Kind: "go"}, {Path: "other.go", Kind: "go"}, {Path: "vocabulary.json", Kind: "document"}}}); err != nil {
+	if err := idx.StageFiles(ctx, index.StageFilesRequest{Capture: capture, Files: fileKinds}); err != nil {
 		t.Fatal(err)
 	}
 	if err := idx.StageSearchDocuments(ctx, index.StageSearchDocumentsRequest{Capture: capture, AuthorizeGeneration: authorize, Paths: []string{"main.go", "other.go"}, MaxBatchBytes: 8192}); err != nil {
@@ -379,6 +414,18 @@ func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
 		relations = append(relations, model.RelationFact{RelationID: fmt.Sprintf("call-%02d", i), SourceSymbolID: symbol, TargetSymbolID: &symbol, Kind: "CALLS_DIRECT", EvidenceKind: "type_resolved", SitePath: filePath, Range: model.ByteRange{StartByte: call, EndByte: call + 7}})
 	}
 	batch := model.ProviderBatch{ProviderProtocol: 1, Type: "analyze_batch", JobID: scopeJob, Sequence: 1, Packages: []model.PackageFact{{PackageKey: pkg, ImportPath: "example.invalid/fixture", ModuleKey: moduleID, Variant: "production", InputDigest: captured.Manifest().SnapshotDigest, SemanticStatus: "partial"}}, Symbols: []model.SymbolFact{{SymbolID: symbol, Path: &filePath, PackageKey: &pkg, Kind: "function", Name: "Example", QualifiedName: "fixture.Example", ScopeKey: pkg, Range: &model.ByteRange{StartByte: declaration, EndByte: declaration + 7}}, {SymbolID: "file-main", Path: &filePath, PackageKey: &pkg, Kind: "file", Name: "main.go", QualifiedName: "fixture.main.go", ScopeKey: pkg, Range: &model.ByteRange{StartByte: 0, EndByte: int64(len(source))}}, {SymbolID: "file-other", Path: &otherPath, PackageKey: &pkg, Kind: "file", Name: "other.go", QualifiedName: "fixture.other.go", ScopeKey: pkg, Range: &model.ByteRange{StartByte: 0, EndByte: int64(len(otherSource))}}}, Relations: relations, Diagnostics: []model.DiagnosticFact{}}
+	if hasObserveSite {
+		for _, name := range []string{"sendObserved", "captureObservedArrival"} {
+			path := observeSite
+			start := int64(bytes.Index(browserObserved.site.Bytes(), []byte("function "+name))) + int64(len("function "))
+			if start < int64(len("function ")) {
+				t.Fatalf("missing source declaration %s", name)
+			}
+			batch.Symbols = append(batch.Symbols, model.SymbolFact{SymbolID: name, Path: &path,
+				PackageKey: &pkg, Kind: "function", Name: name, QualifiedName: "fixture." + name, ScopeKey: pkg,
+				Range: &model.ByteRange{StartByte: start, EndByte: start + int64(len(name))}})
+		}
+	}
 	stream, err = idx.StageProviderBatch(ctx, index.StageProviderRequest{Capture: capture, Stream: stream, Batch: batch, MaxFrameBytes: 65536})
 	if err != nil {
 		t.Fatal(err)
@@ -404,7 +451,7 @@ func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
 	}
 	reader := &ScopeReader{Catalog: cat, Index: idx, Records: recordStore, WorktreeRoot: root, CommonRoot: common, WorktreeID: registration.WorktreeID, ProfileID: registration.ProfileID, Access: access, MaxHeads: 100, MaxManifestBytes: 8192}
 	first, err := reader.Resolve(ctx, principal, "")
-	if err != nil || first.Vector.Members[0].GenerationID != scopeGeneration || first.Records.RecordEpoch != 0 || first.Records.ApprovedHeads != 0 {
+	if err != nil || first.Vector.Members[0].GenerationID != scopeGeneration || first.Records.RecordEpoch != recordEpoch || first.Records.ApprovedHeads != 0 {
 		t.Fatalf("initial scope: %+v %v", first, err)
 	}
 	if none, err := reader.NoApprovedRecords(ctx, principal, first.Vector); err != nil || !none {
@@ -412,7 +459,8 @@ func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
 	}
 	blockedPath := ""
 	authority := &BoundCoreAuthority{Reader: reader, AuthenticatePrincipal: func(context.Context) (app.CorePrincipal, error) { return principal, nil }, AuthorizePath: func(_ context.Context, _ app.CorePrincipal, p model.PolicyConfig, path string) error {
-		if path == blockedPath || len(p.AllowedRoots) == 0 || p.AllowedRoots[0] != repo || path != "main.go" && path != "other.go" && path != "go.mod" && path != "design.md" && path != "vocabulary.json" {
+		if path == blockedPath || len(p.AllowedRoots) == 0 || p.AllowedRoots[0] != repo ||
+			path != "main.go" && path != "other.go" && path != "go.mod" && path != "design.md" && path != "vocabulary.json" && !(hasObserveSite && path == observeSite) {
 			return denied
 		}
 		p.AllowedRoots[0] = "mutated fixture copy"
@@ -473,6 +521,20 @@ func TestScopeReaderComposesRealStoresAndRejectsChanges(t *testing.T) {
 	backend, err := NewCoreBackend(config, reader, authority, codec, cache, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if browserObserved != nil {
+		verifyObservedBrowserFixture(t, ctx, backend, first, graphRef, principal, captured, browserObserved)
+		if hasObserveSite {
+			finalBytes, err := os.ReadFile(filepath.Join(repo, observeSite))
+			if err != nil || !bytes.Equal(finalBytes, browserObserved.site.Bytes()) {
+				t.Fatalf("observed fixture source changed: %v", err)
+			}
+		}
+		return
+	}
+	if observedFlow {
+		verifyObservedFixture(t, ctx, backend, first, captured, ref, symbol, observedArtifact)
+		return
 	}
 	service, err := app.NewCoreService(config, authority, backend, nil)
 	if err != nil {

@@ -100,7 +100,7 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	switch op {
 	case bootstrap, workspace, graph, source:
 	case flow:
-		if !s.options.StaticFlow {
+		if !s.options.StaticFlow && !s.supportsObservedFlow() {
 			s.reject(w, http.StatusNotFound, "UNSUPPORTED_CAPABILITY")
 			return
 		}
@@ -290,6 +290,9 @@ func (s *Server) exchange(ctx context.Context, w http.ResponseWriter, request mo
 	if s.options.StaticFlow {
 		capabilities = append(capabilities, "flow_query")
 	}
+	if s.supportsObservedFlow() {
+		capabilities = append(capabilities, "observed_flow")
+	}
 	response.Data = model.BootstrapData{Operation: "bootstrap", Bearer: bearer,
 		ExpiresAt: end.Format(time.RFC3339Nano), Capabilities: capabilities}
 	body, err := encode(response)
@@ -299,6 +302,11 @@ func (s *Server) exchange(ctx context.Context, w http.ResponseWriter, request mo
 		return
 	}
 	sendJSON(w, http.StatusOK, body)
+}
+
+func (s *Server) supportsObservedFlow() bool {
+	reader, ok := s.options.Reader.(interface{ SupportsObservedFlow() bool })
+	return ok && reader.SupportsObservedFlow()
 }
 
 func emptyResponse() model.Response {

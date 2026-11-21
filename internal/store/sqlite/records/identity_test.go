@@ -58,7 +58,11 @@ func (w *fixtureWriter) CheckWriter(ctx context.Context, worktree, job string) e
 func fixtureDB(t *testing.T) *sql.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "records.sqlite")
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	uriPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	dsn := (&url.URL{Scheme: "file", Path: uriPath}).String()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +128,7 @@ func TestRecordsRejectUnknownAndNewSchemaBeforeJournalChange(t *testing.T) {
 		t.Fatalf("journal changed on unknown store: %q %v", mode, err)
 	}
 	ctx, db, _, lease, _ := initialized(t)
-	if _, err := db.Exec(`UPDATE schema_meta SET schema_version=2,min_reader_version=2`); err != nil {
+	if _, err := db.Exec(`UPDATE schema_meta SET schema_version=3,min_reader_version=3`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Open(ctx, db, fixtureWorktree, lease); !errors.Is(err, ErrSchemaTooNew) {

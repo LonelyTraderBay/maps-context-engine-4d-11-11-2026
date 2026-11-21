@@ -264,7 +264,8 @@ export function App() {
             setPreview(true);
             dispatch({ type: 'pane', value: 'right' });
           }}>Preview</button>}
-        {connected && scope && node && client.flowEnabled() && (node.ref.kind === 'symbol' || node.ref.kind === 'entity') &&
+        {connected && scope && node && (client.flowEnabled() || client.observedFlowEnabled()) &&
+          (node.ref.kind === 'symbol' || node.ref.kind === 'entity') &&
           <button className="quiet-button" ref={flowButton} type="button"
             aria-pressed={exactFlow !== null && exactFlow.root.node_id === node.node_id}
             onClick={() => openFlow(node, scope)}>Flow backend</button>}

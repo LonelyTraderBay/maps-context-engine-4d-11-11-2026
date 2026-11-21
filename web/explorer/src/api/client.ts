@@ -45,7 +45,8 @@ async function responseBytes(response: Response, limit: number): Promise<Uint8Ar
 }
 
 export function createExplorerClient() {
-  let session: { bearer: string; expires: number; deadline: number; preview: boolean; records: boolean; context: boolean; flow: boolean } | undefined;
+  let session: { bearer: string; expires: number; deadline: number; preview: boolean; records: boolean; context: boolean;
+    flow: boolean; observedFlow: boolean } | undefined;
 
   async function exchange<R extends Route>(route: R, input: Body<R>, signal: AbortSignal):
   Promise<HTTPResponse<R> & { scrollAllowed: boolean }> {
@@ -95,7 +96,8 @@ export function createExplorerClient() {
       signal.throwIfAborted();
       session = { bearer: data.bearer, expires, deadline: performance.now() + remaining,
         preview: data.capabilities.includes('preview_attach'), records: data.capabilities.includes('mapping_propose'),
-        context: data.capabilities.includes('context_pack'), flow: data.capabilities.includes('flow_query') };
+        context: data.capabilities.includes('context_pack'), flow: data.capabilities.includes('flow_query'),
+        observedFlow: data.capabilities.includes('observed_flow') };
     },
     workspace: (signal: AbortSignal) => exchange('GET /workspace', undefined, signal),
     graph: (request: HTTPRequest<'POST /graph/query'>, signal: AbortSignal) => exchange('POST /graph/query', request, signal),
@@ -104,6 +106,7 @@ export function createExplorerClient() {
     recordsEnabled: () => session?.records === true,
     contextEnabled: () => session?.context === true,
     flowEnabled: () => session?.flow === true,
+    observedFlowEnabled: () => session?.observedFlow === true,
     flow: (request: HTTPRequest<'POST /flow/query'>, signal: AbortSignal) => exchange('POST /flow/query', request, signal),
     contextPack: (request: HTTPRequest<'POST /context/pack'>, signal: AbortSignal) => exchange('POST /context/pack', request, signal),
     previewAttach: (request: HTTPRequest<'POST /preview/attach'>, signal: AbortSignal) => exchange('POST /preview/attach', request, signal),

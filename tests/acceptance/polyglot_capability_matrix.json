@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "cohort_id": "mce4d-polyglot-fixture-v1",
+  "corpus_kind": "synthetic",
+  "oracle_policy": "Expected behavior is authored from the case contracts and fixture declarations; engine output is never used to define expected output.",
+  "cases": [
+    {
+      "id": "C055",
+      "domain": "typescript_javascript",
+      "profile": "TSProfile typescript_javascript; plugins disabled; captured config and declaration closure",
+      "capability": "Typed local alias, re-export, scope and project-reference bindings; unresolved JS any and dynamic imports remain gaps.",
+      "tests": [
+        {"source": "packages/ts-provider/worker_linux_test.go", "name": "TestTypedBindings"},
+        {"source": "packages/ts-provider/worker_linux_test.go", "name": "TestTypedCoverageAndAdmission"},
+        {"source": "packages/ts-provider/index_linux_test.go", "name": "TestTSFactsReachSharedContext"}
+      ]
+    },
+    {
+      "id": "C056",
+      "domain": "frontend",
+      "profile": "TSProfile typescript_javascript with captured frontend files and approved service binding",
+      "capability": "Route, client and handler links require typed source evidence and service namespace; equal path strings alone do not bind.",
+      "tests": [
+        {"source": "packages/ts-provider/frontend_linux_test.go", "name": "TestFrontendWorkerBindsCapturedClientToApprovedService"}
+      ]
+    },
+    {
+      "id": "C057",
+      "domain": "python",
+      "profile": "PythonProfile syntax or typed_when_available with pinned CPython and standard library",
+      "capability": "Captured AST definitions preserve lexical scope and byte ranges; imports, decorators, monkey patches and dynamic execution remain unknown.",
+      "tests": [
+        {"source": "packages/python-provider/worker_linux_test.go", "name": "TestPinnedPythonParsesCaptureWithoutExecution"},
+        {"source": "packages/python-provider/worker_linux_test.go", "name": "TestPythonTypedFactsAndNotebookMetadata"}
+      ]
+    },
+    {
+      "id": "C058",
+      "domain": "python_notebooks",
+      "profile": "PythonProfile with bounded notebook metadata reader",
+      "capability": "Notebook metadata is read as captured JSON; code cells, startup hooks, virtual environments and outputs are not executed or treated as facts.",
+      "tests": [
+        {"source": "packages/python-provider/worker_linux_test.go", "name": "TestPinnedPythonParsesCaptureWithoutExecution"},
+        {"source": "packages/python-provider/worker_linux_test.go", "name": "TestPythonTypedFactsAndNotebookMetadata"}
+      ]
+    },
+    {
+      "id": "C059",
+      "domain": "mysql",
+      "profile": "Explicit MySQL dialect and engine profile",
+      "capability": "Static schema, object lineage and literal SQL are source-bound; dynamic SQL and unknown session modes retain gaps.",
+      "tests": [
+        {"source": "internal/contracts/sql/analysis_test.go", "name": "TestMySQLCapturedLineageKeepsObjectKindsAndSourceRanges"},
+        {"source": "internal/contracts/sql/analysis_test.go", "name": "TestMySQLUnresolvedSyntaxDoesNotInventTargets"},
+        {"source": "internal/contracts/sql/analysis_test.go", "name": "TestMySQLStopsAtUnknownSessionMode"}
+      ]
+    },
+    {
+      "id": "C060",
+      "domain": "http_schema_proto",
+      "profile": "Captured OpenAPI, JSON Schema and Proto declarations with explicit local reference limits",
+      "capability": "Local versioned fields and explicitly verified handlers are distinguished from remote, cyclic, unresolved or declaration-only references.",
+      "tests": [
+        {"source": "internal/contracts/schema/analysis_test.go", "name": "TestC060LocalSchemasPreserveVersionFieldsAndByteOffsets"},
+        {"source": "internal/contracts/schema/analysis_test.go", "name": "TestC060RemoteCyclesScopeAndMalformedJSONProduceGaps"},
+        {"source": "internal/contracts/schema/analysis_test.go", "name": "TestC060Proto3TypedMessagesLocalImportsAndWireNumbers"},
+        {"source": "internal/contracts/http/analysis_test.go", "name": "TestC060OpenAPIWithoutHandlerAndExplicitTypedBinding"},
+        {"source": "internal/contracts/http/analysis_test.go", "name": "TestC060HTTPRouteScopeAmbiguityAndMissingCodeBytes"}
+      ]
+    },
+    {
+      "id": "C061",
+      "domain": "events_cache",
+      "profile": "Captured AsyncAPI/cache declarations with broker, environment and version namespace",
+      "capability": "Producer/consumer links require explicit matching evidence; retries, acknowledgements, replay and delivery guarantees remain declaration-only.",
+      "tests": [
+        {"source": "internal/contracts/events/analysis_test.go", "name": "TestC061DeclaredDeliveryAndExplicitProducerConsumer"},
+        {"source": "internal/contracts/events/analysis_test.go", "name": "TestC061SameTopicDifferentBrokerEnvAndSchemaHaveNoBridge"},
+        {"source": "internal/contracts/events/analysis_test.go", "name": "TestC061MalformedAckAndReplayDoNotBecomeDeliveryEvidence"}
+      ]
+    },
+    {
+      "id": "C062",
+      "domain": "state_machine",
+      "profile": "Approved captured mce4d-state-model-v1 record at a pinned scope",
+      "capability": "Declarations and approved constraints are checked statically; guards and actions are not run and stale approvals do not authorize reads.",
+      "tests": [
+        {"source": "internal/domain/state/definition_test.go", "name": "TestStateModelFormatAndStructuralReferences"},
+        {"source": "internal/history/records_state_linux_test.go", "name": "TestStateModelApprovedHeadUsesCapturedBytesAndCAS"}
+      ]
+    },
+    {
+      "id": "C063",
+      "domain": "federated_flow",
+      "profile": "Explicit group membership, pinned member snapshots and contract bridge",
+      "capability": "Cross-service traversal follows declared, source-bound links only; stale or denied members remain partial and withhold source.",
+      "tests": [
+        {"source": "internal/contracts/federation/flow_test.go", "name": "TestC063FederatedFlowTraversesOnlyExplicitContractDeclarations"},
+        {"source": "tests/acceptance/explorer_fullstack_linux_test.go", "name": "TestT100AuthoredFullstackStaticChain"}
+      ]
+    },
+    {
+      "id": "C064",
+      "domain": "semantic_diff",
+      "profile": "Two retained, exact profile/provider and generation snapshots",
+      "capability": "Diff preserves ambiguity, provider changes and missing generations; it does not fall back to latest.",
+      "tests": [
+        {"source": "internal/history/diff_test.go", "name": "TestC064SemanticSnapshotDiffPreservesAmbiguityAndApprovalDrift"},
+        {"source": "tests/acceptance/semantic_diff_linux_test.go", "name": "TestT064RetainedSQLiteSemanticComparison"}
+      ]
+    },
+    {
+      "id": "C065",
+      "domain": "trading",
+      "profile": "Approved trading profile with declared precision and state evidence",
+      "capability": "Reserve, retry, partial fill, cancel and ledger obligations remain evidence-bound; money precision and finality are never inferred from names.",
+      "tests": [
+        {"source": "internal/domain/profiles/profile_test.go", "name": "TestC065TradingProfilesRequireDeclaredProofAndDoNotInferMoney"}
+      ]
+    },
+    {
+      "id": "C066",
+      "domain": "commerce",
+      "profile": "Approved commerce profile with separate order, payment and stock states",
+      "capability": "Duplicate/out-of-order webhooks and partial refunds preserve separate state machines and only verified consumers.",
+      "tests": [
+        {"source": "internal/domain/profiles/profile_test.go", "name": "TestC066CommerceKeepsIndependentMachinesAndVerifiedConsumers"}
+      ]
+    },
+    {
+      "id": "C067",
+      "domain": "ai_lineage",
+      "profile": "Captured mce4d-ai-lineage-v1 metadata with pinned scope and source hashes",
+      "capability": "Model, prompt, tokenizer, dataset, index and evaluation metadata are compared without loading rows, weights or checkpoints or calling a model.",
+      "tests": [
+        {"source": "internal/domain/ai/lineage_test.go", "name": "TestC067LineageDiffReadsOnlyCapturedMetadata"},
+        {"source": "internal/domain/ai/lineage_test.go", "name": "TestC067ClosedShapeAndFinalAuthority"}
+      ]
+    },
+    {
+      "id": "C068",
+      "domain": "architecture",
+      "profile": "Approved captured architecture declaration and observed provider coverage",
+      "capability": "Dependency witnesses and exemptions include exact sources; unsupported providers keep the result incomplete.",
+      "tests": [
+        {"source": "internal/domain/architecture/architecture_test.go", "name": "TestC068ArchitectureWitnessExemptionAndMissingProvider"},
+        {"source": "internal/domain/architecture/architecture_test.go", "name": "TestC068ArchitectureRequiresCurrentApprovalBeforeReturningWitnesses"}
+      ]
+    },
+    {
+      "id": "C069",
+      "domain": "polyglot_cohort",
+      "profile": "Authored synthetic fixtures with independent expected facts and explicit mode boundaries",
+      "capability": "The closed matrix maps every case to an existing acceptance test; incremental claims are limited to verified Go invalidation and retained snapshot comparison.",
+      "tests": [
+        {"source": "tests/acceptance/polyglot_cohort_linux_test.go", "name": "TestC069PolyglotCohortManifest"}
+      ]
+    }
+  ],
+  "modes": {
+    "baseline": {
+      "oracle": "Expected facts are authored from source fixture contracts and are independent of analyzer output.",
+      "scope": ["C055", "C056", "C057", "C058", "C059", "C060", "C061", "C062", "C063", "C064", "C065", "C066", "C067", "C068", "C069"]
+    },
+    "full": {
+      "scope": ["C055", "C056", "C057", "C058", "C059", "C060", "C061", "C062", "C063", "C064", "C065", "C066", "C067", "C068", "C069"],
+      "meaning": "Run every listed domain/provider acceptance test against its complete authored capture."
+    },
+    "incremental": {
+      "tests": [
+        {"source": "internal/indexer/invalidation_integration_linux_test.go", "name": "TestInvalidationRebuildPublicationDoesNotExposeOldEdges"},
+        {"source": "tests/acceptance/semantic_diff_linux_test.go", "name": "TestT064RetainedSQLiteSemanticComparison"}
+      ],
+      "scope": "Verified incremental behavior is limited to Go index invalidation and retained-snapshot semantic comparison. TS, Python, contract and domain providers analyze a new captured generation; no incremental provider-cache claim is made for them."
+    }
+  },
+  "benchmark": {
+    "kind": "synthetic_local_fixture",
+    "real_repository_status": "NOT_RUN",
+    "model_host_status": "NOT_RUN",
+    "usage_export_status": "UNAVAILABLE",
+    "input_tokens": null,
+    "cached_input_tokens": null,
+    "output_tokens": null,
+    "context_proxy_bytes": null,
+    "rule": "No token savings or real-repository performance claim without an authorized host export and a real repository cohort."
+  }
+}

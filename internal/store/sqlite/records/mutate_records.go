@@ -134,7 +134,7 @@ func (s *Store) mutate(ctx context.Context, request MutationRequest, kind string
 		}
 	}()
 	version, identity, epoch, err := inspect(ctx, tx, worktree)
-	if err != nil || version != 1 || identity != s.identity {
+	if err != nil || version == 0 || identity != s.identity {
 		return out, errors.Join(ErrStoreChanged, err)
 	}
 	replay, err := mutationReplay(ctx, tx, worktree, request.Mutation)

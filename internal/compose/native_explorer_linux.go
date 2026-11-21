@@ -13,11 +13,26 @@ import (
 )
 
 func OpenNativeExplorer(ctx context.Context, installation, selected, worktree, profile string, cpus int) (explorer.Options, func() error, error) {
+	return openNativeExplorer(ctx, installation, selected, worktree, profile, cpus, nil)
+}
+
+// OpenNativeExplorerWithObservedRuns is for an installation owner that already
+// admits local exports and supplies verified source bindings and receipt checks.
+func OpenNativeExplorerWithObservedRuns(ctx context.Context, installation, selected, worktree, profile string,
+	cpus int, observed ObservedRunAuthority) (explorer.Options, func() error, error) {
+	if observed == nil {
+		return explorer.Options{}, nil, app.ErrCoreInput
+	}
+	return openNativeExplorer(ctx, installation, selected, worktree, profile, cpus, observed)
+}
+
+func openNativeExplorer(ctx context.Context, installation, selected, worktree, profile string, cpus int,
+	observed ObservedRunAuthority) (explorer.Options, func() error, error) {
 	native, close, err := openNativeCoreParts(ctx, installation, selected, worktree, profile, cpus, false, false)
 	if err != nil {
 		return explorer.Options{}, nil, err
 	}
-	reader, err := NewExplorerReader(native.backend, native.effective)
+	reader, err := newExplorerReader(native.backend, native.effective, observed)
 	if err != nil {
 		return explorer.Options{}, nil, errors.Join(err, close())
 	}

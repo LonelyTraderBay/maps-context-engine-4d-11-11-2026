@@ -80,6 +80,8 @@ export function PreviewPanel({ client, scope, close, onSelect, beginSelection, g
       <button className="primary-button" type="submit" disabled={status === 'pairing'}>Ghép preview</button>
     </form>
     <p className="preview-dialog__status" role="status">{labels[status]}</p>
+    {status === 'interact' && client.observedFlowEnabled() &&
+      <p>Để ghi trace, bật Observe trong ứng dụng thử nghiệm đã tích hợp SDK.</p>}
     <div className="preview-dialog__modes">
       <button className="quiet-button" type="button" disabled={status !== 'ready'}
         onClick={() => void pairing.current?.changeMode('interact')}>Bật Interact</button>
