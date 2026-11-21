@@ -469,6 +469,10 @@ func validateLoadedGraph(root *packages.Package, modulePath string, overlay *Cap
 				if !stdlib.fileVerified(absolute) || seen[absolute] {
 					return nil, false
 				}
+				if strings.HasPrefix(current.PkgPath, "vendor/") &&
+					filepath.Dir(absolute) != filepath.Join(stdlib.rootPath, filepath.FromSlash(current.PkgPath)) {
+					return nil, false
+				}
 				seen[absolute] = true
 				continue
 			}
@@ -486,13 +490,21 @@ func validateLoadedGraph(root *packages.Package, modulePath string, overlay *Cap
 		}
 		sort.Strings(keys)
 		for _, name := range keys {
+			imported := current.Imports[name]
+			// The Go compiler qualifies imports of the toolchain's own
+			// vendored packages. Only an approved standard-library caller
+			// can take this path, and every resolved file is checked above.
+			if standard && imported != nil && imported.PkgPath == "vendor/"+name && stdlib.AllowsPackage(imported.PkgPath) {
+				stack = append(stack, imported)
+				continue
+			}
 			if name != modulePath && !strings.HasPrefix(name, modulePath+"/") && (stdlib == nil || !stdlib.AllowsPackage(name)) {
 				return nil, false
 			}
-			if current.Imports[name] == nil || current.Imports[name].PkgPath != name {
+			if imported == nil || imported.PkgPath != name {
 				return nil, false
 			}
-			stack = append(stack, current.Imports[name])
+			stack = append(stack, imported)
 		}
 	}
 	return files, true

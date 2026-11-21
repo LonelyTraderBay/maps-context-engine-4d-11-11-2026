@@ -5,7 +5,7 @@ import { utf8 } from '../json.ts';
 type Route = 'POST /session/bootstrap' | 'GET /workspace' | 'POST /graph/query' | 'POST /source/read' |
   'POST /preview/attach' | 'POST /preview/bind' | 'POST /preview/status' | 'POST /preview/invalidate' | 'POST /preview/detach' |
   'POST /preview/mode' | 'POST /preview/ack' | 'POST /mapping/resolve' | 'POST /mapping/propose' |
-  'POST /mapping/review' | 'POST /records/list' | 'POST /records/read';
+  'POST /mapping/review' | 'POST /records/list' | 'POST /records/read' | 'POST /context/pack' | 'POST /flow/query';
 type Body<R extends Route> = R extends 'GET /workspace' ? undefined : HTTPRequest<R>;
 
 export class ExplorerRequestError extends Error {
@@ -45,7 +45,7 @@ async function responseBytes(response: Response, limit: number): Promise<Uint8Ar
 }
 
 export function createExplorerClient() {
-  let session: { bearer: string; expires: number; deadline: number; preview: boolean; records: boolean } | undefined;
+  let session: { bearer: string; expires: number; deadline: number; preview: boolean; records: boolean; context: boolean; flow: boolean } | undefined;
 
   async function exchange<R extends Route>(route: R, input: Body<R>, signal: AbortSignal):
   Promise<HTTPResponse<R> & { scrollAllowed: boolean }> {
@@ -94,13 +94,18 @@ export function createExplorerClient() {
       if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Phiên Explorer đã hết hạn.');
       signal.throwIfAborted();
       session = { bearer: data.bearer, expires, deadline: performance.now() + remaining,
-        preview: data.capabilities.includes('preview_attach'), records: data.capabilities.includes('mapping_propose') };
+        preview: data.capabilities.includes('preview_attach'), records: data.capabilities.includes('mapping_propose'),
+        context: data.capabilities.includes('context_pack'), flow: data.capabilities.includes('flow_query') };
     },
     workspace: (signal: AbortSignal) => exchange('GET /workspace', undefined, signal),
     graph: (request: HTTPRequest<'POST /graph/query'>, signal: AbortSignal) => exchange('POST /graph/query', request, signal),
     source: (request: HTTPRequest<'POST /source/read'>, signal: AbortSignal) => exchange('POST /source/read', request, signal),
     previewEnabled: () => session?.preview === true,
     recordsEnabled: () => session?.records === true,
+    contextEnabled: () => session?.context === true,
+    flowEnabled: () => session?.flow === true,
+    flow: (request: HTTPRequest<'POST /flow/query'>, signal: AbortSignal) => exchange('POST /flow/query', request, signal),
+    contextPack: (request: HTTPRequest<'POST /context/pack'>, signal: AbortSignal) => exchange('POST /context/pack', request, signal),
     previewAttach: (request: HTTPRequest<'POST /preview/attach'>, signal: AbortSignal) => exchange('POST /preview/attach', request, signal),
     previewBind: (request: HTTPRequest<'POST /preview/bind'>, signal: AbortSignal) => exchange('POST /preview/bind', request, signal),
     previewStatus: (id: string, signal: AbortSignal) => exchange('POST /preview/status', { session_id: id }, signal),

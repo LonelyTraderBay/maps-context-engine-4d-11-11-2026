@@ -1174,11 +1174,11 @@ Mỗi cập nhật tracker phải read current revision, patch đúng hàng, ki�
 ### Progress ban đầu — derived từ các hàng task
 
 - R1: 52 task; DONE=52; IN_PROGRESS=0; BLOCKED=0; VERIFY=0; TODO=0; completion=52/52=100%.
-- R2: 6 DONE trong P07 và 14 DEFERRED. R2 tính riêng khỏi mẫu số R1.
+- R2: 10 DONE gồm P07 và P09, cùng 10 DEFERRED. R2 tính riêng khỏi mẫu số R1.
 - R3: 12 task DEFERRED; mở capability theo gate.
-- Explorer U0: 4 DONE + 0 TODO; U1: 8 DONE + 2 TODO; U2: 6 TODO; U3: 4 DEFERRED. TODO không đồng nghĩa prerequisites đã đủ hoặc permission runtime đã có.
-- Toàn roadmap: 108 tasks; 8 TODO + 70 DONE + 30 DEFERRED; implementation DONE=70. R1/R2/R3/U0/U1/U2/U3 tính riêng; không gọi task-count là % effort.
-- Gate hiện tại: G0 PASS; G1 PASS và G2 PASS phạm vi Linux filesystem/fixture theo S21; G3 PASS phạm vi Linux fixture/installed Codex theo E708-E714. G4 PASS phạm vi fixture cục bộ, 11/11 task DONE theo E839–E843. B005 checkpoint local/restore/tag PASS. G5 PASS phạm vi fixture theo E849–E852, 2/2 task DONE. B005 mang nhãn R1_VALIDATED_ON_FIXTURES. B006 10/10, checkpoint local/restore/tag PASS. GU0 PASS trong phạm vi U0_GRAPH_SOURCE_VALIDATED trên Chromium/WSL2 với fixture Go có SQLite index thật, T081–T084 DONE. P07 6/6 DONE. B007 10/10 với overlay S53 và metadata chuẩn bị checkpoint. T085–T092 DONE trong phạm vi frontend preview↔graph/source và hồ sơ mapping trên Linux fixture. T093 tiếp theo sau commit, restore và tag B007 theo S47/S53. GU1 và G6 NOT_RUN. Build và kiểm thử cục bộ PASS; benchmark repo thật NOT_RUN.
+- Explorer U0: 4 DONE + 0 TODO; U1: 10 DONE + 0 TODO; U2: 4 DONE + 2 TODO; U3: 4 DEFERRED. TODO không đồng nghĩa prerequisites đã đủ hoặc permission runtime đã có.
+- Toàn roadmap: 108 tasks; 2 TODO + 80 DONE + 26 DEFERRED; implementation DONE=80. R1/R2/R3/U0/U1/U2/U3 tính riêng; không gọi task-count là % effort.
+- Gate hiện tại: G0 PASS; G1 PASS và G2 PASS phạm vi Linux filesystem/fixture theo S21; G3 PASS phạm vi Linux fixture/installed Codex theo E708-E714. G4 PASS phạm vi fixture cục bộ, 11/11 task DONE theo E839–E843. B005 checkpoint local/restore/tag PASS. G5 PASS phạm vi fixture theo E849–E852, 2/2 task DONE. B005 mang nhãn R1_VALIDATED_ON_FIXTURES. B006 10/10, checkpoint local/restore/tag PASS. GU0 PASS trong phạm vi U0_GRAPH_SOURCE_VALIDATED trên Chromium/WSL2 với fixture Go có SQLite index thật, T081–T084 DONE. P07 6/6 DONE. B007 10/10, checkpoint local/restore/tag PASS. B008 10/10 với overlay S53 và metadata chuẩn bị checkpoint. T085–T098 và P09 DONE. GU1 PASS với U1_REACT_INSPECT_FIXTURE_VALIDATED trên Chromium/WSL2. Benchmark graph/source repo thật phạm vi đọc hẹp PASS, C098 live-dev NOT_RUN. P09 4/4. T099 tiếp theo sau commit, restore và tag B008. GU2 và G6 NOT_RUN.
 
 Tỷ lệ trên là task-count completion, không phải % effort hoặc % độ đúng của sản phẩm. Validator MUST tính lại khi cập nhật task, không sửa phần trăm thủ công.
 
@@ -1233,7 +1233,7 @@ Cột Cases là truy vết tới oracle nghiệm thu, không có nghĩa một ta
 | T043 | R2 | T042 | Discovery TS/JS provider độc lập, compiler/language-service license/pin/profile và ADR; không execute scripts. | R037 | C055 | DONE | codex | E872,E873,E874,E875 |
 | T044 | R2 | T043,T055 | TS/JS typed provider + aliases/reexports/scopes/project refs; shared context contract. | R037 | C055 | DONE | codex | E879,E880,E881 |
 | T045 | R2 | T042 | Chốt domain entity/link/contract schema tối thiểu S28; identity/evidence/FK/migration và adapter contracts. | R038,R104,R117 | C059,C060,C061,C114,C163,C164,C165,C166 | DONE | codex | E882,E883,E884 |
-| T046 | R2 | T045 | Declared repo groups + member scopes/policies/snapshot vectors; không same-name auto link. Group get/list/put/remove CAS+tombstones và unavailable member ledger, pinned scope resolver. | R038,R117,R119 | C063,C163,C164,C165,C166,C157,C169,C170 | DEFERRED | UNASSIGNED | NONE |
+| T046 | R2 | T045 | Declared repo groups + member scopes/policies/snapshot vectors; không same-name auto link. Group get/list/put/remove CAS+tombstones và unavailable member ledger, pinned scope resolver. | R038,R117,R119 | C063,C163,C164,C165,C166,C157,C169,C170 | DONE | codex | E921,E922,E923 |
 | T047 | R2 | T042 | RecordService trên records.sqlite: immutable versions/head CAS/mutation receipts/epoch, approved-vs-effective needs_review; no index-GC loss. Record list/read query/historical source-expired state, no reapproval after GC. | R039,R094,R097,R119,R123 | C062,C064,C120,C121,C122,C157,C169,C170,C160,C179 | DONE | codex | E888,E889,E890 |
 | T048 | R2 | T044,T046,T047,T068 | R2 release review: Go/TS/Python/contracts/domain/AI metadata matrix; regression/token/limitations và handover. | R040 | C055..C069 | DEFERRED | UNASSIGNED | NONE |
 | T049 | G2 | T012,T013,T017 | Hierarchical workspace/module/package overview; deterministic source-backed summaries và module IDs. | R041 | C049 | DONE | codex | E206,E207,E208,E218,E219 |
@@ -1246,9 +1246,9 @@ Cột Cases là truy vết tới oracle nghiệm thu, không có nghĩa một ta
 | T056 | R2 | T044,T055,T045 | Frontend TSX/routes/components/client-to-handler mappings; framework capabilities rõ. | R047 | C056 | DONE | codex | E885,E886,E887 |
 | T057 | R2 | T042 | Python safe AST/import/scope provider discovery+implementation; local profile; không execute target. | R046 | C057,C058 | DEFERRED | UNASSIGNED | NONE |
 | T058 | R2 | T057,T055 | Python typed enrichment adapter khi verified, diagnostics/dynamic gaps + notebook metadata boundaries. | R046 | C057,C058 | DEFERRED | UNASSIGNED | NONE |
-| T059 | R2 | T045 | MySQL-first SQL static lineage/migrations/views/routines/triggers/events, dialect/engine profile. | R048 | C059 | DEFERRED | UNASSIGNED | NONE |
-| T060 | R2 | T045 | OpenAPI/JSON-schema/proto supported subset, versioned fields/local refs và code binding evidence. | R049 | C060 | DEFERRED | UNASSIGNED | NONE |
-| T061 | R2 | T045 | AsyncAPI/event/cache contract producer/consumer/schema/namespace và delivery-control evidence. | R050 | C061 | DEFERRED | UNASSIGNED | NONE |
+| T059 | R2 | T045 | MySQL-first SQL static lineage/migrations/views/routines/triggers/events, dialect/engine profile. | R048 | C059 | DONE | codex | E924,E925 |
+| T060 | R2 | T045 | OpenAPI/JSON-schema/proto supported subset, versioned fields/local refs và code binding evidence. | R049 | C060 | DONE | codex | E926,E927 |
+| T061 | R2 | T045 | AsyncAPI/event/cache contract producer/consumer/schema/namespace và delivery-control evidence. | R050 | C061 | DONE | codex | E928,E929 |
 | T062 | R2 | T047,T059,T060,T061 | Approved machine/state/transition/guard/action/invariant/vocabulary và failure obligations; supported format gate. | R051 | C062 | DEFERRED | UNASSIGNED | NONE |
 | T063 | R2 | T046,T056,T058,T059,T060,T061 | Federated cross-language/cross-repo flow queries bằng explicit bridge + snapshot vectors/gaps. | R052,R117 | C063,C163,C164,C165,C166 | DEFERRED | UNASSIGNED | NONE |
 | T064 | R2 | T044,T047,T062 | Semantic snapshot diff + source-bound decision drift; ambiguity mapping và provider deltas. | R053 | C064 | DEFERRED | UNASSIGNED | NONE |
@@ -1280,12 +1280,12 @@ Cột Cases là truy vết tới oracle nghiệm thu, không có nghĩa một ta
 | T090 | U1 | T089 | Graph→preview highlight/instance chooser/scroll permission + source drawer; no auto navigate/execute; event-loop guards. Server MappingMatch continuation khác SDK instance continuation; >100 sites supported by paging. | R067,R077,R116 | C087,C088,C158,C159,C160,C161,C162 | DONE | codex | E905,E906,E907 |
 | T091 | U1 | T090 | Many-instance/ancestor/portal unsupported matrix; route/navigation/HMR build epochs, stale/unmounted transitions. Opt-in local explorer-map watch/atomic artifact import/coalesced HMR and busy-rebind status. | R067,R068,R073,R122 | C086,C088,C089,C093,C094,C177,C178 | DONE | codex | E908,E909,E910 |
 | T092 | U1 | T091,T047 | Manual UI mapping via RecordService/CAS/receipt actor from auth; source drift effective review; owned durable data survives cache GC. | R069,R082,R087,R094,R101,R119,R123 | C096,C120,C121,C130,C157,C169,C170,C160,C179 | DONE | codex | E911,E912,E913 |
-| T093 | U1 | T092,T027 | Selection→existing typed source/entity context pack + copy/export locator; server revalidation, no new write MCP or auto model call. Use selection preserves pinned_vector + RefSelector member/service, no active re-resolution. | R077,R083,R116,R117 | C097,C158,C159,C160,C161,C162,C163,C164,C165,C166 | TODO | UNASSIGNED | NONE |
-| T094 | U1 | T093 | GU1 review: bidirectional frontend E2E, Inspect safety, HMR/prod strip/security + real repository scoped benchmark. Check evidence freshness/claim và output controls trên actual UI tooling. | R066,R067,R070,R071,R072,R073,R080,R083,R086,R088,R096,R111,R112,R115,R122,R124 | C084..C098,C123,C124,C125,C126,C127,C147,C148,C154,C155,C156,C157,C177,C178,C180 | TODO | UNASSIGNED | NONE |
-| T095 | U2 | T094,T045,T059,T060 | Static backend flow projection: verified Go net/http route/binding subset + database/sql literal operations; ordered vs call-only labels. | R069,R074,R076,R084 | C099,C101,C102 | TODO | UNASSIGNED | NONE |
-| T096 | U2 | T095,T046 | Scoped FE request→operation→BE contract bridge và reverse reachability; reuse domain/group services; vector of available members. | R069,R075,R117 | C100,C103,C106,C163,C164,C165,C166 | TODO | UNASSIGNED | NONE |
-| T097 | U2 | T096 | Backend flow pane + SQL tables/op cards; graph↔flow/source interactions, return-to-preview bookmark không tự load route. | R074,R075 | C099,C103 | TODO | UNASSIGNED | NONE |
-| T098 | U2 | T097,T061 | Transaction/branch/async edges và unknown persistence; no live DB access; supported event evidence integration. | R076 | C101,C102,C104 | TODO | UNASSIGNED | NONE |
+| T093 | U1 | T092,T027 | Selection→existing typed source/entity context pack + copy/export locator; server revalidation, no new write MCP or auto model call. Use selection preserves pinned_vector + RefSelector member/service, no active re-resolution. | R077,R083,R116,R117 | C097,C158,C159,C160,C161,C162,C163,C164,C165,C166 | DONE | codex | E914,E915,E916 |
+| T094 | U1 | T093 | GU1 review: bidirectional frontend E2E, Inspect safety, HMR/prod strip/security + real repository scoped benchmark. Check evidence freshness/claim và output controls trên actual UI tooling. | R066,R067,R070,R071,R072,R073,R080,R083,R086,R088,R096,R111,R112,R115,R122,R124 | C084..C098,C123,C124,C125,C126,C127,C147,C148,C154,C155,C156,C157,C177,C178,C180 | DONE | codex | E917,E918,E919,E920 |
+| T095 | U2 | T094,T045,T059,T060 | Static backend flow projection: verified Go net/http route/binding subset + database/sql literal operations; ordered vs call-only labels. | R069,R074,R076,R084 | C099,C101,C102 | DONE | codex | E930,E931,E932 |
+| T096 | U2 | T095,T046 | Scoped FE request→operation→BE contract bridge và reverse reachability; reuse domain/group services; vector of available members. | R069,R075,R117 | C100,C103,C106,C163,C164,C165,C166 | DONE | codex | E933,E934 |
+| T097 | U2 | T096 | Backend flow pane + SQL tables/op cards; graph↔flow/source interactions, return-to-preview bookmark không tự load route. | R074,R075 | C099,C103 | DONE | codex | E935,E936,E937 |
+| T098 | U2 | T097,T061 | Transaction/branch/async edges và unknown persistence; no live DB access; supported event evidence integration. | R076 | C101,C102,C104 | DONE | codex | E938,E939,E940 |
 | T099 | U2 | T098 | Hierarchy/filter/progressive rendering, deterministic layout workers/cancellation + accessibility and per-selection metrics. | R078,R079,R123 | C081,C105,C160,C170,C179 | TODO | UNASSIGNED | NONE |
 | T100 | U2 | T099 | GU2 review: real-repo FE↔BE↔DB roundtrip, contracts/scoping/security/canary/performance/core regression and capability release. Kiểm bản kết hợp, evidence applicability và scoped production claims. | R074,R075,R080,R084,R086,R088,R111,R112,R124 | C099..C106,C147,C148,C180 | TODO | UNASSIGNED | NONE |
 | T101 | U3 | T100,T069,T070 | Observed trace overlay adapter tái dùng runtime importer; exact build/trace/span provenance và gaps. | R076,R085 | C107,C108,C109 | DEFERRED | UNASSIGNED | NONE |
@@ -1312,7 +1312,7 @@ Thứ tự thi công không theo số ID; theo S47. Trạng thái chỉ ở bả
 | G6 — R2 release | T043–T048,T055–T068 | C055–C069 + regression; TS/Python/contracts/domain/AI lineage matrix; T048 review | NOT_RUN |
 | G7 — R3 review | T069–T080 | C070–C080 + regressions áp dụng; verified addon matrix; T080 dependencies DONE trước closure | NOT_RUN |
 | GU0 — Explorer base | T081–T084 | Loopback safety + graph/source split thực từ index; C081–C083 | PASS |
-| GU1 — Frontend inspect | T085–T094 | C084–C098; click preview↔graph + no Inspect actions + build provenance; framework matrix rõ | NOT_RUN |
+| GU1 — Frontend inspect | T085–T094 | C084–C098; click preview↔graph, Inspect side effects 0, build provenance; U1_REACT_INSPECT_FIXTURE_VALIDATED; C098 live-dev NOT_RUN | PASS |
 | GU2 — Full-stack static | T095–T100 | C099–C106; FE→operation→BE→DB và reverse links, no execution/persistence overclaim | NOT_RUN |
 | GU3 — Observed overlay | T101–T104 | C107–C112; trace causality/revision/privacy và explicit interaction permission | NOT_RUN |
 
@@ -2356,6 +2356,33 @@ Evidence thực thi giữ phân biệt từng kiểm và phạm vi; kiểm boots
 | E911 | T092 | `artifacts/preflight/t092-20261121/build.log` `1ed72a36a71443806c5082301345ca6626743fe2bec37d77cc2f25b26ba095a3`, `artifacts/preflight/t092-20261121/build-record.json` `4dab04e3ecacee8f008fe4c06441c759e5fd1ef9648d502e47a9fdc8868a6ebe` | Go/Node/TypeScript offline trên WSL2 | RecordService và protected owner dùng authenticated transport guard trong mutation; HTTP/CLI/model, typecheck, contracts, assets và build PASS. | PASS | Dùng các schema sealed và records V1 hiện có. | 2026-11-21 12:26 UTC |
 | E912 | T092 | `artifacts/preflight/t092-20261121/native.log` `508e6b93d0db46e7887895e5cfb3755d6168710c92a7af7d1ae707cda9e75c1a`, `artifacts/preflight/t092-20261121/native-record.json` `1a957648c668c3e5fd5b4e199d3162de24ffd52a987a39d9adb6c5bb66c623b3`, `artifacts/preflight/t092-20261121/approved-binaries.json`, `artifacts/preflight/t092-20261121/acceptance.md` | Packaged Explorer, protected V4 và Chromium/WSL2 | C096/C120/C121/C130/C160/C170: propose/approve bằng UI, revoke qua API, replay cùng ID, body khác bị từ chối, đúng một approval thắng CAS, actor giả bị schema từ chối và cursor cũ hết hiệu lực. Drift/GC giữ declared approval/version, trả needs_review và provenance chính xác. | PASS | Human record riêng trong store; fixture source và cấu hình đối chiếu ở cuối lượt. | 2026-11-21 12:26 UTC |
 | E913 | T092 | `artifacts/preflight/t092-20261121/source-snapshot-verified.json`, `artifacts/preflight/t092-20261121/snapshot.log`, `docs/checkpoints/B007.md` | B006 + restore overlay offline | Hồi quy Go/Node/SDK browser, build/vet/spec và SHA của AppShell/binary khớp E912. | PASS | B007 10/10 và roadmap 70/108 DONE. T093 chờ clean restore/tag B007. GU1 và G6 NOT_RUN. | 2026-11-21 12:26 UTC |
+| E914 | T093 | `artifacts/preflight/t093-20261121/build.log` `62267cf481fa159aa60c1c48908f08939ab47b055f1f7231fd869dc614069be2`, `artifacts/preflight/t093-20261121/build-record.json` `e79952ef622fbdd32f5e9ecabc0dfb5106f7213ae4d1665bb63c46309bb5bf46` | Go/Node/TypeScript offline trên WSL2 | Context dùng registry hiện có và CoreService. Locator tests giữ pinned scope, source hash/offset và member/service, từ chối member mơ hồ. Typecheck/contracts/build PASS. | PASS | C163–C166 phần chọn locator; federation runtime ở T046 trở đi. | 2026-11-21 12:35 UTC |
+| E915 | T093 | `artifacts/preflight/t093-20261121/native.log` `230eb844a919d9de2f1a167d5c711627696b9485af322442511324f5f8b9cf62`, `artifacts/preflight/t093-20261121/native-record.json` `09303a8539ab7dc9a69a473c58e5e3a0b063bb524e660499944600975ba4568c`, `artifacts/preflight/t093-20261121/approved-binaries.json`, `artifacts/preflight/t093-20261121/acceptance.md` | Packaged Explorer, protected V4, Chromium/WSL2 | C097/C160/C161/C162: anchor cho typed source position. Ký hiệu Go cho pack cùng vector, 11266 byte trong cap 12288, còn năm mandatory items. Copy/export locator cục bộ. GC trả SNAPSHOT_EXPIRED khi dùng lại request cũ, không fallback active. | PASS | Native một member. TSX chỉ file capture ở fixture cho locator nguồn. Không chạy model hoặc target script. | 2026-11-21 12:35 UTC |
+| E916 | T093 | `artifacts/preflight/t093-20261121/source-snapshot-verified.json`, `artifacts/preflight/t093-20261121/snapshot.log` | B007 bundle + S53 overlay offline | Restore Go/Node/SDK browser, build/vet/spec, app assets và UI binary khớp E915. | PASS | B008 1/10, toàn roadmap 71/108. T094 tiếp theo. GU1 và G6 NOT_RUN. | 2026-11-21 12:35 UTC |
+| E917 | T094 | `artifacts/preflight/t094-20261121/build.log` `60e418af48465b353f687fc475a7bdb9bc146662e4528894dcdacac60a36ad86`, `artifacts/preflight/t094-20261121/race.log` `2f9d69476cfec4ed8abf6068475dc2d7f5f42879be6f7de1732b6f6375cb5e88`, `artifacts/preflight/t094-20261121/approved-binaries.json` | Go/Node offline, WSL2 ext4 | Lint, typecheck, contract, producer CSR/SSR strip, Go tagged tests/build và race scope. FileRef depth 0 đọc capture có thẩm quyền, graph/source song song qua hai response đã revalidate. | PASS | App source preload chỉ cho lựa chọn hiện tại. | 2026-11-21 13:08 UTC |
+| E918 | T094 | `artifacts/preflight/t094-20261121/gu1-matrix.json` `7d5a2e58fda61cf99db4b0ee94c87eb9203127c3ab0766131dc87e4680e04359`, `artifacts/preflight/t094-20261121/acceptance.md` `28e014f078f3bebcb3a7f7fe5fc9c694eaf62c5797001d19b8969307efc79bf1` | Cùng binary, protected SQLite V4, Chromium fixture, loopback riêng | Bidirectional pick/scroll, HMR, CANARY, CAS, context GC, ACK trễ và mất PONG. Inspect action/fetch/submit = 0. | PASS | GU1 nhãn fixture. Windows Explorer và live target NOT_RUN. | 2026-11-21 13:08 UTC |
+| E919 | T094 | `artifacts/preflight/t094-20261121/ui_bench.log` `321c8f0bca09fdd37b9bba79d954c7ddd6c7d1a6dc6a4f022f823af043100390`, `artifacts/preflight/t094-20261121/ui_real.log` `6c58a7c4d826a04cdcfe01fb54dd1fcc3e80f76c81b131f5f28d489b249cfdc7` | S39 PLAN-UI-03, Chromium, B007 read-only | Warm p95 11.5 ms viền, 392.8 ms chọn→nguồn và 782 ms lát graph đầu. Target fixture 21/21, source B007 20/20 theo oracle byte độc lập. | PASS | Benchmark tĩnh phạm vi năm tệp B007 và fixture. C098 live-dev NOT_RUN. | 2026-11-21 13:08 UTC |
+| E920 | T094 | `artifacts/preflight/t094-20261121/source-snapshot-verified.json`, `artifacts/preflight/t094-20261121/snapshot.log` | B007 bundle + S53 overlay offline | Khôi phục exact source delta, Go/Node/build/vet và actual SDK browser; assets và UI binary khớp E918. | PASS | B008 2/10, roadmap 72/108. T046 tiếp theo; G6 NOT_RUN. | 2026-11-21 13:08 UTC |
+| E921 | T046 | `artifacts/preflight/t046-20261121/build.log` `938fac4db7c1fd4d7ec971d6b891745d454290f946adcd00ed3de96ef48b65f7`, `artifacts/preflight/t046-20261121/race.log` `01710c590e3a4a3bc658e954e8c751ca66c123bf2e3e260fceab37a562b09efe`, `artifacts/preflight/t046-20261121/approved-binaries.json` | Go/SQLite/CLI offline trên WSL2 | CAS, atomic member replacement/rollback, tombstone, digest danh sách, scope-vector/service và redacted member oracle. Go test và race scope PASS. | PASS | C063/C163–C166/C169–C170 phạm vi nhóm khai báo. | 2026-11-21 13:24 UTC |
+| E922 | T046 | `artifacts/preflight/t046-20261121/native.log` `491a2559dd5fd5824ad517e7ebc465f50996bc014a6f34a584862953f516405c`, `artifacts/preflight/t046-20261121/native-verified.json` `7acbf875d8adfa9c49d761c6ffbd8f28c6a722889106c938f44bdde0b232490d`, `artifacts/preflight/t046-20261121/acceptance.md` `25e8d6dd6e63c34b11c33ff99e80682e6fb0fad7762c1264b359c7d84fbaefa0` | Protected CLI và hai worktree SQLite thật trên ext4 | Pinned live generation và unavailable ledger giữ nguyên sau index mới. Native deny ẩn danh tính member, pin cũ bị chặn. CAS, cursor khác process và expiry, group all unavailable blocked. Engine không đổi source hoặc chạy script repo đích. | PASS | CLI group status và owner Linux. Windows group, MCP federation và graph federated runtime chưa nghiệm thu. | 2026-11-21 13:24 UTC |
+| E923 | T046 | `artifacts/preflight/t046-20261121/source-snapshot-verified.json`, `artifacts/preflight/t046-20261121/snapshot.log` | B007 bundle và S53 overlay offline | Restore chạy Go/Node/vet/spec, SDK browser và dựng đúng core binary native. | PASS | B008 3/10, 73/108. T059 tiếp theo. GU2 và G6 NOT_RUN. | 2026-11-21 13:24 UTC |
+| E924 | T059 | `artifacts/preflight/t059-20261121/check.log` `94daa2ce816b854b8bc6c993da048119b579b7e63dadf8212541836a59c5aad6`, `artifacts/preflight/t059-20261121/race.log` `fbde8586507b0db96875f054b8a5642dd7b859b327a4d4c75c90a5208ab7af75`, `artifacts/preflight/t059-20261121/acceptance.md` `daeb35a1660d9a3a9e4dbad6359b35071210951099fb2f058d370de88a6f5c70` | C059, Go offline trên WSL2 | SQL capture profile/engine, static declaration, explicit lineage, UTF-8 byte spans, dynamic/mode/ambiguity gaps, DomainAdapter contracts và SQLite migration V3. | PASS | Subset MySQL 8.0/8.4 theo profile. T095 tích hợp graph. MySQL runtime NOT_RUN. | 2026-11-21 13:38 UTC |
+| E925 | T059 | `artifacts/preflight/t059-20261121/source-snapshot-verified.json`, `artifacts/preflight/t059-20261121/snapshot.log` | B007 bundle và S53 overlay offline | Restore kiểm cả parser và các gate source hiện có, Go/Node/browser/build/vet/spec. Core binary và AppShell hiện hành tái dựng đúng. | PASS | B008 4/10, 74/108. T060 tiếp theo. GU2, G6 NOT_RUN. | 2026-11-21 13:38 UTC |
+| E926 | T060 | `artifacts/preflight/t060-20261121/check.log` `d9d113524d497eb7d05273128e59ee727bef7dc42dee05e8b85ce29b1f4700b4`, `artifacts/preflight/t060-20261121/race.log` `47281d4c110194a5e8da7f7fb1359bdb16711bfeb154e3d45d4eee114166fb08`, `artifacts/preflight/t060-20261121/acceptance.md` `57869332aececb5c9d79e85f4e2d415fcf3fa970c49d60441cd47244e172a9b5` | C060, Go offline trên WSL2 | Scope/version, OpenAPI JSON schema và code binding explicit, JSON Pointer và local refs bounded, Proto3 import/field/RPC, remote/cycle/mismatch/missing handler gap. DomainAdapterBatch kiểm wire. | PASS | Captured source subset. Runtime HTTP, codegen và target scripts NOT_RUN. | 2026-11-21 13:47 UTC |
+| E927 | T060 | `artifacts/preflight/t060-20261121/source-snapshot-verified.json`, `artifacts/preflight/t060-20261121/snapshot.log` | B007 bundle và S53 overlay offline | Restore 1089 path từ B007 và overlay; Go/Node/browser/build/vet/spec PASS, binary và Explorer assets tái dựng đúng. | PASS | B008 5/10, 75/108. T061 tiếp theo. GU2, G6 NOT_RUN. | 2026-11-21 13:47 UTC |
+| E928 | T061 | `artifacts/preflight/t061-20261121/check.log` `6a146a459dea115cf98ae0598f0b46e27d93ba392176ef9ac807ef3e19938d19`, `artifacts/preflight/t061-20261121/race.log` `1d1bf019ff8a1530de36e81c731841aba782bae1702e6e2fd12d1a99f8b0e9d3`, `artifacts/preflight/t061-20261121/acceptance.md` `00aa2bd4e3f1d80a31eeed1fa57602d68c2169dda7d086df2225170dcc57a435` | C061, Go offline trên WSL2 | AsyncAPI 3.0 JSON event direction, same topic broker/env boundary, exact producer/consumer site, schema/version/replay/ack/wildcard gaps, Redis cache namespace và TTL. | PASS | Runtime broker/cache/target scripts NOT_RUN. T098 dùng lại evidence. | 2026-11-21 13:52 UTC |
+| E929 | T061 | `artifacts/preflight/t061-20261121/source-snapshot-verified.json`, `artifacts/preflight/t061-20261121/snapshot.log` | B007 bundle và S53 overlay offline | Restore 1089 path từ B007 và overlay; Go/Node/browser/build/vet/spec PASS, binary và Explorer assets tái dựng đúng. | PASS | B008 6/10, 76/108; P09 4/4. T095 tiếp theo. GU2, G6 NOT_RUN. | 2026-11-21 13:52 UTC |
+| E930 | T095 | `artifacts/preflight/t095-20261121/check.log` `b656b56569726ef33ba24bc0a2460a7f84ee75466b070765050527f2c3db130a`, `artifacts/preflight/t095-20261121/race.log` `83db1505e392facc75e6eeea62f1acabccbb04a786b47baa157d6de002afdbd5`, `artifacts/preflight/t095-20261121/acceptance.md` `e9221a53593c44abb63e9b93ea3489dc4fcb5bf06cc0a0384a818eda5f5122d3` | WSL2 Go 1.27.4, guarded captured loader + SQL fixture | C099 backend route/source + chooser; C101 branch/return/async/nested call; C102 database/sql typed BEGIN/INSERT/UPDATE/ROLLBACK, typed table, dynamic gap và unknown outcome. Scope, revoke, bounds, race PASS. | PASS | Backend projection. C099 browser coupling và C102 transaction group tiếp ở T097/T098/T100. | 2026-11-21 14:08 UTC |
+| E931 | T095 | `artifacts/preflight/t095-20261121/native-verified.json` `72401fadfed607568c29c08799ba67942502ecf8b2210e3fd0fe108867b9c0a0`, `artifacts/preflight/t095-20261121/native.log` `9a4352af9f67213a9dfefa7bd13165d223122a8a9a9a8e66000723f3b8792227`, `artifacts/preflight/t095-20261121/approved-binaries.json` | Core rebuild, protected WSL2 native regression | C163–C166 native group regression với hai worktree, gap pin và deny/redact. Hash binary mới và canary 0 target executions/source mutations. | PASS | Hồi quy sản phẩm, không phải flow API/browser GU2. | 2026-11-21 14:08 UTC |
+| E932 | T095 | `artifacts/preflight/t095-20261121/source-snapshot-verified.json`, `artifacts/preflight/t095-20261121/snapshot.log` | B007 bundle và S53 overlay offline | Restore 1089 path từ B007 và overlay; Go/Node/browser/build/vet/spec PASS, binary và Explorer assets tái dựng đúng. | PASS | B008 7/10, 77/108. T096 tiếp theo. GU2, G6 NOT_RUN. | 2026-11-21 14:08 UTC |
+| E933 | T096 | `artifacts/preflight/t096-20261121/check.log` `c3bdf6fbf59c21be141afe9da8f294588382962bf6ffc28a157e58b2e7803e00`, `artifacts/preflight/t096-20261121/race.log` `49a26dfa481ee6049b995f1a5db809c4fb5132ff69158497e6e3d0359062a8c7`, `artifacts/preflight/t096-20261121/acceptance.md` `aa8eac8b3881c556e842b9421c7757a647ec28277f347c4f78e7b29e34ef8023` | WSL2 Go, pinned TypeScript/Node offline | C100 same-route service isolation/proxy/revision; C103 reverse refs tới nhiều FE call sites; C106/C163–C166 unavailable/stale/digest, no source read cho denied member; T056 compiler regression. | PASS | Resolver và fixtures static. C106 browser/native integrated release chờ T100. | 2026-11-21 14:14 UTC |
+| E934 | T096 | `artifacts/preflight/t096-20261121/source-snapshot-verified.json`, `artifacts/preflight/t096-20261121/snapshot.log` | B007 bundle và S53 overlay offline | Restore 1089 path từ B007 và overlay, Go/Node/browser/build/vet/spec PASS. Core và AppShell tái dựng đúng. | PASS | B008 8/10, 78/108. T097 tiếp theo. GU2, G6 NOT_RUN. | 2026-11-21 14:14 UTC |
+| E935 | T097 | `artifacts/preflight/t097-20261121/check.log` `53549e5fd0902e0fd99615cfbfeea6d6bb3991a586c59da23406329253bc9a2a`, `artifacts/preflight/t097-20261121/race.log` `971fe4b7d9383325b7df10cc2f3bb7fe12bcbfd40a6e497d793c08828010cf9d`, `artifacts/preflight/t097-20261121/acceptance.md` `c9ca45389d99bc931ce1eb5785114330c396251b62698c79504ba57f1e6279da` | Go/TS/Node offline | Flow endpoint S43 scope, typed projection/source, budget partial giữ endpoints, AppShell build/typecheck và Go race. | PASS | Scope Go/SQLite fixture. T098 transaction group, T099 performance, T100 GU2. | 2026-11-21 14:30 UTC |
+| E936 | T097 | `artifacts/preflight/t097-20261121/native-verified.json` `7372554b6dd1ac8acaac2ea15b7c20c2e26e6a4eccabbacd93b2a07951d731bd`, `artifacts/preflight/t097-20261121/native.log` `ad660df848726a3b42c9a83d20e174806e2ab28541dea4b5ce7a939674419b07`, `artifacts/preflight/t097-20261121/context.log` `1c90d222695bd425cbc3a62dcccb2ffaeb9f25943494562122564f671023b6d5` | Packaged Explorer, protected SQLite và Chromium WSL2 | C099 route/handler/graph/source hai chiều, SQL cards đọc query+schema đúng hash, keyboard, bookmark preview không auto attach, no target requests. C097 context/pinned expiry regression. | PASS | C103 full FE/BE/SQL integrated release thuộc T100. | 2026-11-21 14:30 UTC |
+| E937 | T097 | `artifacts/preflight/t097-20261121/source-snapshot-verified.json`, `artifacts/preflight/t097-20261121/snapshot.log` | B007 bundle và S53 overlay offline | Restore 1089 path từ B007 và overlay. Go/Node/browser/build/vet/spec PASS, exact AppShell và packaged fixture binary. | PASS | B008 9/10, 79/108. T098 tiếp theo. GU2, G6 NOT_RUN. | 2026-11-21 14:30 UTC |
+| E938 | T098 | `artifacts/preflight/t098-20261121/check.log` `763b89639e35d9069306ac6d415a5ade22e5e49a624e1bc5ef543585a94d974b`, `artifacts/preflight/t098-20261121/race.log` `aa9bda0107d40be73793183cea60f298e9265fc7c99185489a893f778da11683`, `artifacts/preflight/t098-20261121/acceptance.md` `2ee9b18ef37fd78751f6f6cd8557a3272ddce0f947ce655e817fba5d01031a4f` | WSL2 Go/TS offline | C101/C102 typed Tx group theo local receiver, alias/defer/retry/goroutine boundary. C104 bound T061 evidence, outbox/ack scope, async và unknown outcome. | PASS | Static supported subset. Live persistence, broker delivery và target execution NOT_RUN. | 2026-11-21 14:38 UTC |
+| E939 | T098 | `artifacts/preflight/t098-20261121/native-verified.json` `a89dc8a8fdde2f0bda6b151534c8ad1941d9c6a243a6d7c5d973da27c4cdc29a`, `artifacts/preflight/t098-20261121/native.log` `83eeef38925821e56a8a1f0b5860cb12f206b92e7c58e46f617790e28febc55b`, `artifacts/preflight/t098-20261121/approved-binaries.json` | Packaged Explorer với protected SQLite V4 và Chromium | Ba transaction links nguồn exact cùng BEGIN, hiển thị outcome unknown, C099 SQL/schema click và canary 0 thay đổi. | PASS | Native Linux fixture, GU2 chờ T099/T100. | 2026-11-21 14:38 UTC |
+| E940 | T098 | `artifacts/preflight/t098-20261121/source-snapshot-verified.json`, `artifacts/preflight/t098-20261121/snapshot.log`, `docs/checkpoints/B008.md` | B007 bundle và S53 overlay offline | Restore 1089 path từ B007 và overlay. Go/Node/browser/build/vet/spec PASS, binary và AppShell đúng bản nghiệm thu. | PASS | B008 đủ 10/10, 80/108. T099 chờ clean restore/tag B008. | 2026-11-21 14:38 UTC |
 
 Format result: PASS, FAIL, NOT_RUN. NOT_RUN phải có lý do trong record. Hash tree dùng khi chưa commit; không bịa commit SHA. Absolute local paths chỉ trong private evidence khi cần, không publish; log sanitized. File artifact không tồn tại thì không tạo pointer giả. DONE task MUST trỏ >=1 evidence record PASS bao phủ test scope; gate reviewer kiểm tra không chỉ string “PASS”.
 
@@ -3208,26 +3235,26 @@ git_batch_control:
   policy: S53
   batch_size: 10
   counting_order: S47
-  active_batch_id: B007
+  active_batch_id: B008
   batch_type: full
   assignment_scope_final: false
   authority_ref: null
-  active_task_ids: [T056, T047, T085, T086, T087, T088, T089, T090, T091, T092]
+  active_task_ids: [T093, T094, T046, T059, T060, T061, T095, T096, T097, T098]
   active_done_count: 10
   related_task_ids: []
-  base_commit_oid: c8a9e556fcf313edb3d1b67764fe7532c3dacbbb
+  base_commit_oid: e17afb4e710cc0a469315e3b1e499d5028c80cfb
   branch: main
   commit_binding: containing_commit
   current_commit_oid: null
   current_tree_oid: null
-  planned_checkpoint_tag: mce4d/checkpoints/B007
-  last_verified_checkpoint_oid: c8a9e556fcf313edb3d1b67764fe7532c3dacbbb
-  last_verified_checkpoint_tag: mce4d/checkpoints/B006
+  planned_checkpoint_tag: mce4d/checkpoints/B008
+  last_verified_checkpoint_oid: e17afb4e710cc0a469315e3b1e499d5028c80cfb
+  last_verified_checkpoint_tag: mce4d/checkpoints/B007
   remote_alias: origin
   remote_branch: null
   push_status: NOT_AUTHORIZED
   independent_backup_status: NOT_VERIFIED
-  interim_snapshot_ref: artifacts/preflight/t092-20261121/source-snapshot-verified.json
+  interim_snapshot_ref: artifacts/preflight/t098-20261121/source-snapshot-verified.json
   project_restore_verification: PASS
 ```
 
@@ -3434,6 +3461,48 @@ Discrepancy register (điền khi có bằng chứng về docs/source/policy/env
 
 **T092 — DONE.** E911–E913 nghiệm thu manual mapping dùng RecordService thật, CAS/receipt theo actor xác thực cùng policy scope, effective status khi source drift/GC. B007 đủ 10 task, roadmap 70/108. Thực hiện checkpoint trước T093.
 
+**B007 — checkpoint đã xác minh, 2026-11-21.** Commit `e17afb4e710cc0a469315e3b1e499d5028c80cfb`, tree `0d4be79bd4381792765abb04c9947368d9980881`, annotated tag `mce4d/checkpoints/B007`, tag object `fb3cf44c0e7d380fb20308d5a8283f112aba121c`. Clean restore kiểm 1089 paths, Go/Node, SDK Chromium, spec và binary hash. Biên nhận ở `artifacts/preflight/t092-20261121/verified-receipt.json`. Bundle cục bộ SHA-256 `495a55860ebdd65f46023e3899830162b229e6037127033c84e3e92d6f005490`. Push NOT_AUTHORIZED, independent backup NOT_VERIFIED.
+
+**T093 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #071, owner codex, baseline B007 đã khôi phục và gắn tag. Nối lựa chọn Explorer vào context pack hiện có, giữ typed refs, member/service và pinned vector. Hiển thị và copy/export locator theo thao tác explicit. Kiểm revalidation mỗi request, pending/oversized trước GC và snapshot hết hạn. T094 chờ T093.
+
+**T093 — DONE.** E914–E916 nối typed selection locator vào CoreService, giữ pinned scope, budget và pending. Chromium kiểm source position, pack theo RefSelector, copy/export và snapshot expiry sau GC. B008 1/10, roadmap 71/108. T094 tiếp theo và GU1 chưa chốt.
+
+**T094 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #072, owner codex, baseline B007 + E916. Chạy lại fixture bidirectional, mode, browser/SDK lifecycle, context và records trên cùng build. Đo latency warm/cold và correctness với oracle độc lập. Benchmark source/index từ lát repo MCE4D đã được duyệt, tách C098 live-dev theo quyền hiện có. Cập nhật GU1 theo bằng chứng và supported matrix. T046 chờ T094 theo S47.
+
+**T094 — DONE.** E917–E920 nghiệm thu GU1 U1_REACT_INSPECT_FIXTURE_VALIDATED. Warm p95 11.5 ms viền, 392.8 ms chọn→nguồn và 782 ms lát graph đầu. C098 live-dev NOT_RUN. B008 2/10, 72/108 DONE. T046 tiếp theo theo S47.
+
+**T046 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #073, owner codex. Mở P09 sau GU1 và T045. Baseline B007 cùng overlay E920 đã khôi phục. Dùng catalog hiện có cho get/list/put/remove với CAS, tombstone và cursor có thẩm quyền. Resolver kiểm từng member theo CT-06 và giữ nguyên unavailable ledger khi dùng pinned vector. Chạy fixture cục bộ với SQLite thật và scope riêng từng worktree. T059 chờ nghiệm thu T046.
+
+**T046 — DONE.** E921–E923 xác minh quản trị nhóm khai báo, group CAS/tombstone, cursor ký và resolver giữ pinned scope trên hai worktree thật của fixture. B008 3/10, roadmap 73/108. T059 tiếp theo trong P09.
+
+**T059 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #074, owner codex, baseline B007 và overlay E923. Triển khai analyzer MySQL có profile dialect/engine, giới hạn token và fact, source hash/range và domain-adapter records. Kiểm table/column, migration, view, routine, trigger, event và literal lineage. Ghi gap cho dynamic SQL và các dạng chưa hỗ trợ. Kiểm locally trên bytes của fixture, không thực thi SQL. T060 chờ T059.
+
+**T059 — DONE.** E924–E925 nghiệm thu C059 với MySQL source capture, profile engine, lineage theo byte range và gap explicit. B008 4/10, roadmap 74/108. T060 tiếp theo.
+
+**T060 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #075, owner codex, baseline B007 cùng overlay E925. Phân tích contract đã capture, kiểm phiên bản và giới hạn local refs, giữ intended riêng với code binding có bằng chứng. Kiểm C060 cục bộ trên fixtures. T061 chờ T060.
+
+**T060 — DONE.** E926–E927 nghiệm thu C060 với versioned contract, refs local, Proto3 declarations và HTTP code binding có bằng chứng. B008 5/10, roadmap 75/108. T061 tiếp theo.
+
+**T061 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #076, owner codex, baseline B007 và overlay E927. Giới hạn phân tích AsyncAPI/event/cache trong capture đã duyệt. Tách declaration, typed code binding và delivery metadata. Kiểm C061 trên fixture cục bộ, T095 chờ T061.
+
+**T061 — DONE.** E928–E929 nghiệm thu C061 với event/cache declarations theo broker/environment, typed producer/consumer evidence và delivery boundary. B008 6/10, roadmap 76/108. P09 hoàn tất, T095 tiếp theo.
+
+**T095 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #077, owner codex, baseline B007 và overlay E929. Tái dùng typed Go load, SQL/MySQL T059 và contract identity T060 để chiếu route và flow có source, cạnh call/control riêng và unknown persistence. Kiểm fixture cục bộ, T096 chờ T095.
+
+**T095 — DONE.** E930–E932 nghiệm thu backend projection, net/http typed binding, SQL lineage và static branch/call. B008 7/10, roadmap 77/108. T096 tiếp theo, GUI flow chờ T097/T100.
+
+**T096 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #078, owner codex, baseline B007 và overlay E932. Dùng ScopeVector từ catalog/group, evidence TS client và Go/backend contract; kiểm namespace, prefix, revision và typed source. Tạo reverse reachability có giới hạn theo table ref, giữ boundary cho member không khả dụng. T097 chờ T096.
+
+**T096 — DONE.** E933–E934 nghiệm thu bridge static theo service/proxy/pinned scope và reverse reachability có giới hạn. B008 8/10, roadmap 78/108. T097 tiếp theo.
+
+**T097 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #079, owner codex, baseline B007 và overlay E934. Thêm pane backend flow với wire S43, exact scope/source, trạng thái/lựa chọn bàn phím và bookmark preview không auto-attach. Kiểm fixture Browser cục bộ. T098 chờ T097.
+
+**T097 — DONE.** E935–E937 nghiệm thu flow pane, SQL/source cards, scope và bookmark Preview trên packaged Chromium/WSL2 fixture. B008 9/10, roadmap 79/108. T098 tiếp theo.
+
+**T098 — IN_PROGRESS, 2026-11-21.** Phiếu S47 #080, owner codex, baseline B007 và overlay E937. Chiếu transaction theo typed Tx identity và source evidence, giữ outcome unknown và các ranh giới branch/async. Dùng event contract T061 khi có binding verified. Kiểm fixture cục bộ và đóng checkpoint B008 trước T099.
+
+**T098 — DONE.** E938–E940 nghiệm thu nhóm Tx tĩnh, branch/async và event evidence có scope. B008 đủ 10 task, roadmap 80/108. Thực hiện checkpoint trước T099.
+
 ## S22 — Trạng thái tiếp tục cho phiên AI sau
 
 ```yaml
@@ -3449,9 +3518,9 @@ resume:
   audit_closure: S52
   git_batch_policy: S53
   git_batch_size: 10
-  git_batch_current_id: B007
+  git_batch_current_id: B008
   git_batch_done_count: 10
-  last_git_checkpoint: B006
+  last_git_checkpoint: B007
   git_project_restore: PASS
   git_remote_status: CONFIGURED_PUSH_NOT_AUTHORIZED
   audit_baseline: 1.4.0
@@ -3463,18 +3532,18 @@ resume:
   last_request_mode: implement
   next_task_mode: implement
   foundation_sequence: [T001, T002, T003, T105, T106, T107, T108]
-  next_task: T093
+  next_task: T099
   active_task: null
   active_owner: null
   done_r1_tasks: 52
   total_r1_tasks: 52
-  deferred_r2_tasks: 14
+  deferred_r2_tasks: 10
   deferred_r3_tasks: 12
   explorer_requested_tracks: [U0, U1, U2]
-  explorer_active_gate: GU1
+  explorer_active_gate: GU2
   explorer_u0_todo: 0
-  explorer_u1_todo: 2
-  explorer_u2_todo: 6
+  explorer_u1_todo: 0
+  explorer_u2_todo: 2
   explorer_u3_deferred: 4
   explorer_implementation_status: IN_PROGRESS
   preview_execution_permission: NOT_GRANTED_FOR_ANY_TARGET
@@ -3485,8 +3554,8 @@ resume:
   blocking_user_decision: null
   discovery_gaps: [K001, K002, K003, K007, K008, K009, K010, K011, K013, K014, K015, K016, K017, K018]
   known_limits: [K005, K006, K012]
-  last_evidence_id: E913
-  last_checked_at_utc: 2026-11-21T12:26:34Z
+  last_evidence_id: E940
+  last_checked_at_utc: 2026-11-21T14:38:10Z
 ```
 
 MUST cập nhật resume chỉ sau khi tracker/evidence nhất quán; là summary derived, không nguồn thay thế task rows. Không lưu chain-of-thought vào tài liệu. Chỉ lưu quyết định, bằng chứng, lỗi tái hiện được và hành động tiếp theo.
@@ -4107,13 +4176,13 @@ Số task là theo dõi công việc, không ước lượng thời gian hoặc 
 
 C082/C084/C086/C087/C088/C089/C090/C095/C099/C102/C103/C106 là critical path, không được bỏ để gọi MVP xong. C095 SSR fixture là negative support/consistency test nếu SSR chưa supported, không buộc triển khai toàn SSR. Bộ integration có ít nhất một repository fixture FE+BE+SQL do dự án tạo, index từ bytes, build frontend từ chính bytes đó; expected bindings lập độc lập. Test có fixture mock backend phải label runtime mock, không giả relation xuất phát từ request thật tới BE.
 
-### PLAN-UI-03 — Performance objectives, chưa đo
+### PLAN-UI-03 — Performance objectives và bằng chứng T094
 
 Default graph viewport 200 nodes/500 edges; hard per-view cap 500/1500 (cấu hình chỉ tăng sau profiling); backend flow default <=100 steps/300 edges; full source graph giữ ở core, không tải toàn bộ vào browser. Khi chạm cap hiển thị counts/unknown/pagination/gap, không nói không có thêm dependency. Collapsing là projection và expand_ref giữ original edges. Không render 50.000 nodes rồi ẩn bằng CSS.
 
 Hover picker tối đa 15 hit-tests/giây, coalesce theo frame/latest pointer, không backend RPC trên mỗi hover; selection click resolve tách, tối đa một active resolution/request-type mỗi panel, cancel previous. UI cache key scope-vector+build+policy+query; layout key subgraph digest, hover không relayout. DOM registry discovery lazy + bounded MutationObserver/ResizeObserver chỉ active/selected boundary; full document scan mỗi mousemove bị cấm.
 
-Target test machine được ghi rõ: local outline feedback p95 <=100ms; click→matched selected node/source p95 <=500ms sau ready/warm index; graph-only initial slice p95 <=1500ms. Không tính cold app load/type index vào warm metric; report riêng. p95 fail giữ fail hoặc ADR số liệu, không quảng cáo instant. Source graph scale M/L theo S27 độc lập render cap; mới target, chưa measurement.
+Target test machine được ghi rõ: local outline feedback p95 <=100ms; click→matched selected node/source p95 <=500ms sau ready/warm index; graph-only initial slice p95 <=1500ms. Không tính cold app load/type index vào warm metric; report riêng. p95 fail giữ fail hoặc ADR số liệu, không quảng cáo instant. Source graph scale M/L theo S27 độc lập render cap. E919 xác minh benchmark warm trên fixture React và lát tĩnh B007. Warm p95 11.5 ms viền, 392.8 ms chọn→nguồn và 782 ms lát graph đầu. Warm graph slice đo từ request đầu tới lát xuất hiện. Cold và reload đến ký hiệu đã biết được ghi riêng.
 
 ### PLAN-UI-04 — Verification và release labels
 

@@ -9,6 +9,25 @@ import signal
 import subprocess
 
 
+def prepare_real_scope(root, implementation):
+    commit = "e17afb4e710cc0a469315e3b1e499d5028c80cfb"
+    tree = "0d4be79bd4381792765abb04c9947368d9980881"
+    git = ["/usr/bin/git", "-c", "safe.directory=" + str(implementation), "-C", str(implementation)]
+    assert subprocess.check_output(git + ["rev-parse", commit + "^{tree}"], timeout=5).decode().strip() == tree
+    paths = ["go.mod", "go.sum", "internal/model/canonical.go", "internal/model/canonical_test.go",
+             "web/explorer/src/shell/App.tsx"]
+    hashes = {}
+    for path in paths:
+        raw = subprocess.check_output(git + ["cat-file", "blob", commit + ":" + path], timeout=5)
+        local = root / "target" / path
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_bytes(raw)
+        hashes[path] = sha256(raw).hexdigest()
+    proof = {"case": "T094_REAL_SCOPE", "commit": commit, "tree": tree, "paths_sha256": hashes,
+             "approved_scope": "read-only static index and source", "live_dev": "NOT_RUN"}
+    print(json.dumps(proof), flush=True)
+
+
 def exercise_shell(root, setup, worktree, profile, active, scenario, *, gu0=False):
     console = subprocess.Popen([
         "/mce4d", "explorer", "--worktree-id", worktree, "--profile-id", profile, "--listen", "127.0.0.1:0",
@@ -32,7 +51,10 @@ def exercise_shell(root, setup, worktree, profile, active, scenario, *, gu0=Fals
         engine = origin_line.removeprefix("Explorer ")
         code = code_line.removeprefix("Bootstrap code: ")
         expected = {}
-        for symbol, path in [("Show", "a.go"), ("Read", "b.go")]:
+        symbols = [("Show", "a.go"), ("Read", "b.go")]
+        if scenario == "benchmark":
+            symbols = [(name, "internal/model/canonical.go") for name in ("CanonicalNull", "CanonicalBool")]
+        for symbol, path in symbols:
             raw = (root/"target"/path).read_bytes()
             start = raw.index(("func "+symbol).encode())+len(b"func ")
             expected[symbol] = {"path": path, "hash": sha256(raw).hexdigest(), "start": start,

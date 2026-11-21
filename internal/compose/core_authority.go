@@ -312,6 +312,40 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 		if err := checkRef(data.SourceRef); err != nil {
 			return err
 		}
+	case model.FlowData:
+		wanted, ok := request.(model.FlowQueryRequest)
+		if !ok || name != "POST /flow/query" || data.Mode != "static" || !reflect.DeepEqual(wanted.RootRef, data.RootRef) {
+			return ErrAuthority
+		}
+		if err := checkGraph(data.RootRef); err != nil {
+			return err
+		}
+		for _, step := range data.Steps {
+			for _, ref := range step.CanonicalRefs {
+				if err := checkGraph(ref); err != nil {
+					return err
+				}
+			}
+			if err := checkRefs(step.SourceRefs); err != nil {
+				return err
+			}
+			if err := checkEvidence(step.EvidenceRefs); err != nil {
+				return err
+			}
+			if err := checkGaps(step.Limitations); err != nil {
+				return err
+			}
+		}
+		for _, edge := range data.Edges {
+			if edge.ConditionSourceRef != nil {
+				if err := checkRef(*edge.ConditionSourceRef); err != nil {
+					return err
+				}
+			}
+			if err := checkEvidence(edge.EvidenceRefs); err != nil {
+				return err
+			}
+		}
 	case model.PackData:
 		for _, ref := range data.TargetRefs {
 			if err := checkGraph(ref); err != nil {

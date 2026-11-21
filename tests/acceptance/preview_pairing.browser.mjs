@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { chromium } from 'playwright';
 import { exerciseManualMappings } from './manual_mappings.browser.mjs';
+import { exerciseSelectionContext } from './selection_context.browser.mjs';
 
 const stream = createInterface({ input: process.stdin });
 const lines = stream[Symbol.asyncIterator]();
@@ -57,9 +58,10 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
   const frame = dial.locator('iframe');
   assert.equal(await frame.evaluate(element => element.inert && element.tabIndex === -1 &&
     getComputedStyle(element).pointerEvents === 'none'), true);
-  const target = page.frame({ url: peer.href });
+  let target = page.frame({ url: peer.href });
   assert.ok(target);
   await target.waitForFunction(() => Number(document.documentElement.dataset.heartbeat) > 0);
+  assert.ok(Number(await target.locator('html').getAttribute('data-background-ticks')) > 0);
   assert.equal(await target.locator('html').getAttribute('data-bound'), 'true');
   assert.equal(await target.locator('html').getAttribute('data-unexpected'), null);
   const status = await (await statusResponse).json();
@@ -85,6 +87,7 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
     await page.keyboard.press('Space');
     assert.equal(await counter(), '0');
     assert.equal(await target.locator('html').getAttribute('data-submits'), '0');
+    assert.equal(await target.locator('html').getAttribute('data-action-fetches'), '0');
     assert.equal(await frame.evaluate(element => element.inert && element.tabIndex === -1), true);
     let ackUnderShield = false;
     await page.route('**/api/explorer/v1/preview/ack', async route => {
@@ -98,6 +101,7 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
     assert.equal(await frame.evaluate(element => element.inert), false);
     await action.click();
     assert.equal(await counter(), '1');
+    assert.equal(await target.locator('html').getAttribute('data-action-fetches'), '1');
     let modeDisarmedFirst = false;
     await page.route('**/api/explorer/v1/preview/mode', async route => {
       const body = route.request().postDataJSON();
@@ -109,21 +113,54 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
     assert.equal(modeDisarmedFirst, true);
     await page.mouse.click(x, y);
     assert.equal(await counter(), '1');
+    const stale = dial.getByText('Preview chưa sẵn sàng. Kiểm tra build và quyền rồi ghép lại.');
+    const attach = async () => {
+      await dial.getByRole('button', { name: 'Ghép preview' }).click();
+      await dial.getByText('Preview sẵn sàng ở chế độ Inspect.').waitFor();
+      target = page.frame({ url: peer.href });
+      assert.ok(target);
+      assert.equal(await frame.evaluate(element => element.inert), true);
+    };
+    const ackHeld = Promise.withResolvers();
+    const ackRelease = Promise.withResolvers();
+    await page.route('**/api/explorer/v1/preview/ack', async route => {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      ackHeld.resolve();
+      await ackRelease.promise;
+      await route.fulfill({ response }).catch(() => {});
+    }, { times: 1 });
+    await activate();
+    await ackHeld.promise;
+    try {
+      assert.equal(await frame.evaluate(element => element.inert), true);
+      await dial.getByRole('button', { name: 'Về Inspect' }).click();
+      await stale.waitFor();
+    } finally {
+      ackRelease.resolve();
+    }
+    assert.equal(await frame.getAttribute('src'), null);
+    await attach();
     await activate();
     await dial.getByText('Interact đang bật trong môi trường thử nghiệm.').waitFor();
-    await target.waitForFunction(() => Number(document.documentElement.dataset.heartbeat) >= 3);
-    assert.equal(await counter(), '1');
-    console.log(JSON.stringify({ case: 'T088_BROWSER_INTERACT', status: 'PASS', inspectActions: 0,
-      interactActions: 1, ackUnderShield, modeDisarmedFirst }));
+    await target.waitForFunction(() => Number(document.documentElement.dataset.heartbeat) >= 1);
+    const serverAlive = page.waitForResponse(response => response.url().endsWith('/preview/status') && response.ok());
+    await target.evaluate(() => window.stopFixtureSDK());
+    await serverAlive;
+    await stale.waitFor();
+    assert.equal(await frame.evaluate(element => element.inert), true);
+    assert.equal(await frame.getAttribute('src'), null);
+    await attach();
+    await activate();
+    await dial.getByText('Interact đang bật trong môi trường thử nghiệm.').waitFor();
+    console.log(JSON.stringify({ case: 'T088_BROWSER_INTERACT', status: 'PASS', inspectActions: 0, inspectFetches: 0,
+      backgroundContinuedInInspect: true,
+      interactActions: 1, ackUnderShield, modeDisarmedFirst, staleAckUnderShield: true, detachedDespiteLiveServer: true }));
+  } else if (data.benchmark) {
+    const { workspaceRow, click } = await preparePick(page, target);
+    await measurePreview(page, target, workspaceRow, click, data);
   } else if (data.pick) {
-    await page.getByRole('button', { name: 'Danh sách', exact: true }).click();
-    const button = target.locator('#fixture-action36');
-    const box = await button.boundingBox();
-    assert.ok(box);
-    const click = () => page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    const workspaceTitle = await page.locator('.symbol-row__title').first().textContent();
-    assert.ok(workspaceTitle);
-    const workspaceRow = page.locator('.symbol-row').filter({ has: page.getByText(workspaceTitle, { exact: true }) }).first();
+    const { workspaceRow, click } = await preparePick(page, target);
     let paused;
     const pausedResolve = new Promise(resolve => { paused = resolve; });
     let release;
@@ -146,6 +183,8 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
     assert.equal(await workspaceRow.getAttribute('aria-pressed'), 'true');
     await page.unroute(endpoint);
     const resolveCall = page.waitForResponse(response => response.url().endsWith('/mapping/resolve') && response.ok());
+    const graphCall = page.waitForResponse(response => response.url().endsWith('/graph/query') && response.ok() &&
+      response.request().postDataJSON().root.kind === 'ref');
     await click();
     const resolved = await (await resolveCall).json();
     assert.equal(resolved.data.mapping_status, 'exact_in_supported_scope');
@@ -158,15 +197,19 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
     await page.getByLabel('Mã nguồn của snapshot').getByText('<button', { exact: true }).waitFor();
     assert.equal(await target.locator('html').getAttribute('data-actions'), '0');
     assert.equal(await target.locator('html').getAttribute('data-submits'), '0');
+    assert.equal(await target.locator('html').getAttribute('data-action-fetches'), '0');
     await page.getByRole('button', { name: 'Lựa chọn trước' }).click();
     assert.equal(await workspaceRow.getAttribute('aria-pressed'), 'true');
     await page.getByRole('button', { name: 'Lựa chọn sau' }).click();
     await page.locator('.symbol-row[aria-pressed="true"]').filter({ hasText: 'entry.tsx' }).waitFor();
-    if (data.reverse) {
-      const reversed = page.waitForResponse(response => response.url().endsWith('/mapping/resolve') && response.ok());
+    if (data.context_case) {
+      await exerciseSelectionContext(page, lines, base, resolved);
+    } else if (data.reverse) {
+      const reversed = page.waitForResponse(response => response.url().endsWith('/mapping/resolve'));
       await dial.getByRole('button', { name: 'Hiện nút trong preview' }).click();
       const first = await reversed;
       const firstPage = await first.json();
+      assert.equal(first.status(), 200, firstPage.error?.code);
       assert.equal(firstPage.data.mapping_status, 'candidate');
       assert.equal(firstPage.pagination.enumeration_complete, false);
       assert.ok(firstPage.pagination.next_cursor);
@@ -306,8 +349,18 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
       console.log(JSON.stringify({ case: 'T091_BROWSER_HMR', status: 'PASS', matching_binding_required: true,
         navigation_detached: true, explicit_pairing: true, target_actions: 0 }));
     } else {
+      const graphRequest = (await graphCall).request();
+      const graphInput = graphRequest.postDataJSON();
+      const invalid = await page.request.post(graphRequest.url(), {
+        headers: { Authorization: (await graphRequest.allHeaders()).authorization, Origin: base.origin, 'X-MCE4D-Intent': 'explorer' },
+        data: { ...graphInput, root: { ...graphInput.root, ref: { ...graphInput.root.ref, content_hash: '0'.repeat(64) } } },
+      });
+      const denied = await invalid.json();
+      assert.equal(denied.error.code, 'SOURCE_PRECONDITION_FAILED');
+      assert.equal(denied.data, null);
       console.log(JSON.stringify({ case: 'T089_BROWSER_PICK', status: 'PASS', target_instance: 37, instances: 100,
-        graph_and_source_match: true, subsequent_graph_selection_preserved: true, target_actions: 0 }));
+        graph_and_source_match: true, subsequent_graph_selection_preserved: true, target_actions: 0,
+        wrong_file_hash_rejected: true }));
     }
   } else {
     console.log(JSON.stringify({ case: 'T087_BROWSER_BOUND', status: 'PASS', heartbeat: true }));
@@ -319,4 +372,83 @@ async function exercisePreview(page, lines, data, peer, refused, errors) {
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ case: data.pick ? 'T089_BROWSER_REVOKED' : data.interact ? 'T088_BROWSER_REVOKED' : 'T087_BROWSER_REVOKED',
     status: 'PASS', removed_frame: true }));
+}
+
+async function preparePick(page, target) {
+  await page.getByRole('button', { name: 'Danh sách', exact: true }).click();
+  const box = await target.locator('#fixture-action36').boundingBox();
+  assert.ok(box);
+  const workspaceTitle = await page.locator('.symbol-row__title').first().textContent();
+  assert.ok(workspaceTitle);
+  const workspaceRow = page.locator('.symbol-row').filter({ has: page.getByText(workspaceTitle, { exact: true }) }).first();
+  return { workspaceRow, click: () => page.mouse.click(box.x + box.width / 2, box.y + box.height / 2) };
+}
+
+async function measurePreview(page, target, workspaceRow, click, data) {
+  const expected = data.benchmark;
+  const samples = [];
+  const timed = request => {
+    const timing = request.timing();
+    assert.ok(timing.responseEnd >= timing.requestStart && timing.requestStart >= 0, JSON.stringify(timing));
+    return timing.responseEnd - timing.requestStart;
+  };
+  for (let i = 0; i < 21; i++) {
+    await workspaceRow.click();
+    await page.locator('.preview-pick-outline').waitFor({ state: 'hidden' });
+    await page.evaluate(text => {
+      const sample = { start: null, outline: null, selected: null };
+      window.previewSample = sample;
+      const shield = document.querySelector('.preview-dialog__shield');
+      shield.addEventListener('click', () => { sample.start = performance.now(); }, { capture: true, once: true });
+      const monitor = new MutationObserver(() => {
+        if (sample.start === null) return;
+        if (sample.outline === null && document.querySelector('.preview-pick-outline')) {
+          sample.outline = performance.now() - sample.start;
+        }
+        if (document.querySelector('.symbol-row[aria-pressed="true"]')?.textContent.includes('entry.tsx') &&
+            document.querySelector('.source-code')?.textContent === text) {
+          sample.selected = performance.now() - sample.start;
+          monitor.disconnect();
+        }
+      });
+      monitor.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    }, expected.text);
+    const mapping = page.waitForResponse(response => response.url().endsWith('/mapping/resolve') && response.ok());
+    const graph = page.waitForResponse(response => response.url().endsWith('/graph/query') && response.ok() &&
+      response.request().postDataJSON().root.kind === 'ref');
+    const source = page.waitForResponse(response => response.url().endsWith('/source/read') && response.ok() &&
+      response.request().postDataJSON().source_ref.path === expected.path);
+    await click();
+    const mappingReply = await mapping;
+    const match = (await mappingReply.json()).data.matches[0];
+    assert.equal(match.anchor_ref.anchor_id, data.anchor);
+    const graphReply = await graph;
+    await graphReply.finished();
+    const sourceReply = await source;
+    const response = (await sourceReply.json()).data;
+    for (const ref of [match.source_refs[0], response.source_ref]) {
+      assert.equal(ref.path, expected.path);
+      assert.equal(ref.content_hash, expected.content_hash);
+      assert.deepEqual(ref.range, expected.range);
+    }
+    assert.equal(response.content, expected.text);
+    await page.waitForFunction(() => window.previewSample.selected !== null);
+    const sample = await page.evaluate(() => window.previewSample);
+    assert.ok(sample.outline !== null && sample.outline > 0 && sample.selected >= sample.outline, JSON.stringify(sample));
+    samples.push({ outline_ms: sample.outline, selected_source_ms: sample.selected,
+      mapping_ms: timed(mappingReply.request()), graph_ms: timed(graphReply.request()), source_ms: timed(sourceReply.request()) });
+  }
+  const counters = await target.locator('html').evaluate(html => [html.dataset.actions, html.dataset.actionFetches, html.dataset.submits]);
+  assert.deepEqual(counters, ['0', '0', '0']);
+  const summarize = metric => {
+    const times = samples.slice(1).map(sample => sample[metric]);
+    return { p95_ms: times.toSorted((a, b) => a - b)[Math.ceil(times.length * 0.95) - 1], samples_ms: times };
+  };
+  const outline = summarize('outline_ms');
+  const selection = summarize('selected_source_ms');
+  const status = outline.p95_ms <= 100 && selection.p95_ms <= 500 ? 'PASS' : 'FAIL';
+  console.log(JSON.stringify({ case: 'T094_PREVIEW_LATENCY', status, first_after_ready: samples[0],
+    outline, selection, mapping: summarize('mapping_ms'), graph: summarize('graph_ms'), source: summarize('source_ms'),
+    correct: samples.length, attempts: 21, stale_false_matches: 0, counters, oracle: expected }));
+  assert.equal(status, 'PASS', 'PLAN-UI-03 warm preview bounds');
 }

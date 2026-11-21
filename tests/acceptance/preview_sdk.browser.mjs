@@ -63,6 +63,25 @@ try {
     return route.abort();
   });
   const page = await context.newPage();
+  await page.addInitScript(() => {
+    const active = { MutationObserver: 0, ResizeObserver: 0 };
+    for (const name of Object.keys(active)) {
+      window[name] = class extends window[name] {
+        #attached = false;
+        observe(...args) {
+          super.observe(...args);
+          if (!this.#attached) active[name]++;
+          this.#attached = true;
+        }
+        disconnect() {
+          super.disconnect();
+          if (this.#attached) active[name]--;
+          this.#attached = false;
+        }
+      };
+    }
+    window.fixtureObservers = () => ({ ...active });
+  });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin);
@@ -96,12 +115,16 @@ try {
   assert.ok(!result.afterDetach.items.some(item => item.instance_ref.instance_id === result.selected.instance_id));
   assert.equal(result.actions, 0);
   assert.equal(result.submits, 0);
+  assert.equal(result.attachedObservers.MutationObserver - result.initialObservers.MutationObserver, 1);
+  assert.equal(result.attachedObservers.ResizeObserver - result.initialObservers.ResizeObserver, 1);
+  assert.deepEqual(result.finalObservers, result.initialObservers);
   const { build_map_id: _, ...identity } = result.identity;
   const message = { protocol_version: 1, ...identity, message_id: identity.session_id, reply_to: identity.session_id,
     seq: 1, selection_id: null, type: 'PICK_RESULT', payload: result.nested };
   assert.deepEqual(decodeBridgeMessage(JSON.stringify(message), 'sdk_to_parent', 1_000_000), message);
   console.log(JSON.stringify({ case: 'T086_DOM_REGISTRY', status: 'PASS', browser_sha256: browserDigest,
-    instances: 100, selected: 37, separate_rects: 2, invalidated: true, actions: 0, submits: 0 }));
+    instances: 100, selected: 37, separate_rects: 2, invalidated: true, actions: 0, submits: 0,
+    leaked_sdk_observers: 0 }));
 } finally {
   await browser?.close();
   server.close();

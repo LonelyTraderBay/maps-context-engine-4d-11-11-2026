@@ -5,9 +5,16 @@ import { decodeBridgeMessage } from '../../web/explorer/src/bridge.ts';
 const marker = document.documentElement.dataset;
 marker.actions = '0';
 marker.submits = '0';
+marker.actionFetches = '0';
+marker.backgroundTicks = '0';
 marker.heartbeat = '0';
 marker.scrolls = '0';
-document.getElementById('fixture-form').addEventListener('click', () => { marker.actions = String(Number(marker.actions) + 1); });
+setInterval(() => { marker.backgroundTicks = String(Number(marker.backgroundTicks) + 1); }, 40);
+document.getElementById('fixture-form').addEventListener('click', () => {
+  marker.actions = String(Number(marker.actions) + 1);
+  marker.actionFetches = String(Number(marker.actionFetches) + 1);
+  void fetch('/fixture-action', { method: 'POST' });
+});
 document.getElementById('fixture-form').addEventListener('submit', event => {
   event.preventDefault();
   marker.submits = String(Number(marker.submits) + 1);
@@ -23,6 +30,7 @@ const sdk = installPreviewSDK({
   },
 });
 window.changeFixtureBuild = sdk.buildChanged;
+window.stopFixtureSDK = sdk;
 window.addEventListener('message', event => {
   if (event.source !== window.parent || event.origin !== marker.parentOrigin) return;
   try {

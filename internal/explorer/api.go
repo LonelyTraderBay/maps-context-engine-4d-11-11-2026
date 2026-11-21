@@ -23,6 +23,7 @@ const (
 	bootstrap = "POST /session/bootstrap"
 	workspace = "GET /workspace"
 	graph     = "POST /graph/query"
+	flow      = "POST /flow/query"
 	source    = "POST /source/read"
 )
 
@@ -98,6 +99,16 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	switch op {
 	case bootstrap, workspace, graph, source:
+	case flow:
+		if !s.options.StaticFlow {
+			s.reject(w, http.StatusNotFound, "UNSUPPORTED_CAPABILITY")
+			return
+		}
+	case "POST /context/pack":
+		if !s.options.SelectionContext {
+			s.reject(w, http.StatusNotFound, "UNSUPPORTED_CAPABILITY")
+			return
+		}
 	case previewAttach, previewBind, previewStatus, previewMode, previewAck, previewInvalidate, previewDetach, previewMapping:
 		if s.options.Preview == nil {
 			s.reject(w, http.StatusNotFound, "UNSUPPORTED_CAPABILITY")
@@ -151,7 +162,7 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := int64(131072)
-	if op == graph {
+	if op == graph || op == flow {
 		limit = 1048576
 	}
 	result, err := s.options.Reader.Read(ctx, request, app.CoreCallOptions{RequestID: id, MaxOutputBytes: limit, DeliveryMode: "http"})
@@ -171,11 +182,15 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	status := http.StatusOK
 	if response.Error != nil || response.Data == nil {
-		if op != source || response.Error == nil || response.Error.Code != "RESULT_TOO_LARGE" || response.Data != nil {
+		switch {
+		case response.Error != nil && response.Data == nil && op == "POST /context/pack":
+			status = errorHTTPStatus(response.Error.Code)
+		case response.Error != nil && response.Data == nil && op == source && response.Error.Code == "RESULT_TOO_LARGE":
+			status = http.StatusRequestEntityTooLarge
+		default:
 			s.reject(w, http.StatusInternalServerError, "INTERNAL_ERROR")
 			return
 		}
-		status = http.StatusRequestEntityTooLarge
 	}
 	if err := result.Recheck(ctx); err != nil {
 		s.readError(w, op, ctx, err)
@@ -269,6 +284,12 @@ func (s *Server) exchange(ctx context.Context, w http.ResponseWriter, request mo
 	if s.options.Records != nil {
 		capabilities = append(capabilities, "records_list", "mapping_propose")
 	}
+	if s.options.SelectionContext {
+		capabilities = append(capabilities, "context_pack")
+	}
+	if s.options.StaticFlow {
+		capabilities = append(capabilities, "flow_query")
+	}
 	response.Data = model.BootstrapData{Operation: "bootstrap", Bearer: bearer,
 		ExpiresAt: end.Format(time.RFC3339Nano), Capabilities: capabilities}
 	body, err := encode(response)
@@ -337,28 +358,32 @@ func (s *Server) readError(w http.ResponseWriter, op string, ctx context.Context
 		err = ctx.Err()
 	}
 	info := app.CoreErrorInfo(op, err)
-	status := http.StatusInternalServerError
-	switch info.Code {
+	s.errorResponse(w, errorHTTPStatus(info.Code), info)
+}
+
+func errorHTTPStatus(code string) int {
+	switch code {
 	case "ACCESS_DENIED", "SECRET_BLOCKED":
-		status = http.StatusForbidden
+		return http.StatusForbidden
 	case "AUTH_REQUIRED":
-		status = http.StatusUnauthorized
+		return http.StatusUnauthorized
 	case "INVALID_ARGUMENT", "BUDGET_TOO_SMALL", "CANCELLED":
-		status = http.StatusBadRequest
+		return http.StatusBadRequest
 	case "CURSOR_INVALID", "STORE_REPLACED", "SOURCE_PRECONDITION_FAILED", "FRESHNESS_UNKNOWN", "AMBIGUOUS_SYMBOL", "CONTEXT_INCOMPLETE":
-		status = http.StatusConflict
+		return http.StatusConflict
 	case "INDEX_MISSING", "UNSUPPORTED_CAPABILITY":
-		status = http.StatusNotFound
+		return http.StatusNotFound
 	case "SNAPSHOT_EXPIRED", "CURSOR_EXPIRED", "RESULT_EXPIRED":
-		status = http.StatusGone
+		return http.StatusGone
 	case "RESULT_TOO_LARGE":
-		status = http.StatusRequestEntityTooLarge
+		return http.StatusRequestEntityTooLarge
 	case "RESOURCE_LIMIT":
-		status = http.StatusTooManyRequests
+		return http.StatusTooManyRequests
 	case "TIMEOUT":
-		status = http.StatusGatewayTimeout
+		return http.StatusGatewayTimeout
+	default:
+		return http.StatusInternalServerError
 	}
-	s.errorResponse(w, status, info)
 }
 
 func (s *Server) errorResponse(w http.ResponseWriter, status int, info model.ErrorInfo) {

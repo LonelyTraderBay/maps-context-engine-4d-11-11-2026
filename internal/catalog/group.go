@@ -29,41 +29,55 @@ func (s *Store) GroupMetadata(ctx context.Context, groupID string) (model.GroupS
 	}
 	var output model.GroupSummary
 	err := s.read(ctx, func(tx *sql.Tx) error {
-		var name, status string
-		var revision int64
-		err := tx.QueryRowContext(ctx, `SELECT name,status,revision FROM repo_groups WHERE group_id=? AND length(name)<=256`, groupID).Scan(&name, &status, &revision)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrGroupUnavailable
-		}
-		if err != nil {
-			return err
-		}
-		if revision < 1 || revision > maxExactRevision || (status != "active" && status != "removed") {
-			return ErrUnrecognizedStore
-		}
-		members, err := readGroupMembers(ctx, tx, groupID)
-		if err != nil {
-			return err
-		}
-		raw, err := json.Marshal(struct {
-			GroupID string           `json:"group_id"`
-			Name    string           `json:"name"`
-			Members []groupMemberRow `json:"members"`
-		}{groupID, name, members})
-		if err != nil {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		config, err := model.DecodeGroupConfigJSON(raw, maxAdminBytes)
-		if err != nil {
-			return errors.Join(ErrUnrecognizedStore, err)
-		}
-		output = model.GroupSummary{Config: config, Revision: revision, Status: status}
-		return nil
+		var err error
+		output, err = groupMetadata(ctx, tx, groupID)
+		return err
 	})
 	if err != nil {
 		return model.GroupSummary{}, err
 	}
 	return output, nil
+}
+
+func (s *Store) ObserveGroup(ctx context.Context, groupID string) (model.GroupSummary, string, error) {
+	group, err := s.GroupMetadata(ctx, groupID)
+	if err != nil {
+		return model.GroupSummary{}, "", err
+	}
+	return group, s.incarnation, nil
+}
+
+func groupMetadata(ctx context.Context, tx *sql.Tx, groupID string) (model.GroupSummary, error) {
+	var name, status string
+	var revision int64
+	err := tx.QueryRowContext(ctx, `SELECT name,status,revision FROM repo_groups WHERE group_id=? AND length(CAST(name AS BLOB))<=1024`,
+		groupID).Scan(&name, &status, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.GroupSummary{}, ErrGroupUnavailable
+	}
+	if err != nil {
+		return model.GroupSummary{}, err
+	}
+	if revision < 1 || revision > maxExactRevision || (status != "active" && status != "removed") {
+		return model.GroupSummary{}, ErrUnrecognizedStore
+	}
+	members, err := readGroupMembers(ctx, tx, groupID)
+	if err != nil {
+		return model.GroupSummary{}, err
+	}
+	raw, err := json.Marshal(struct {
+		GroupID string           `json:"group_id"`
+		Name    string           `json:"name"`
+		Members []groupMemberRow `json:"members"`
+	}{groupID, name, members})
+	if err != nil {
+		return model.GroupSummary{}, errors.Join(ErrUnrecognizedStore, err)
+	}
+	config, err := model.DecodeGroupConfigJSON(raw, maxAdminBytes)
+	if err != nil {
+		return model.GroupSummary{}, errors.Join(ErrUnrecognizedStore, err)
+	}
+	return model.GroupSummary{Config: config, Revision: revision, Status: status}, nil
 }
 
 func readGroupMembers(ctx context.Context, tx *sql.Tx, groupID string) (members []groupMemberRow, resultErr error) {

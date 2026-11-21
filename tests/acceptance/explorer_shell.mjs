@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const scenario = process.argv[2];
-assert.ok(scenario === 'empty' || scenario === 'indexed');
+assert.ok(['empty', 'indexed', 'benchmark'].includes(scenario));
 let inputText = '';
 process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) {
@@ -75,6 +75,76 @@ function summarize(samples) {
     p95_ms: Math.round(ordered[Math.ceil(ordered.length * 0.95) - 1]) };
 }
 
+async function benchmarkGraphAndSource(page, expected, coldStart) {
+  const graph = page.locator('#graph-pane');
+  const row = (name) => graph.getByRole('button', { name: new RegExp('^Chọn ' + name + ',') });
+  await row('CanonicalNull').waitFor();
+  const coldInitialMS = performance.now() - coldStart;
+  const graphTimes = [];
+  const reloadTimes = [];
+  const sourceTimes = [];
+  const retry = page.getByRole('button', { name: 'Tải lại', exact: true });
+  const readyToReload = () => page.waitForFunction(() => {
+    const reload = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Tải lại');
+    return reload && !reload.disabled;
+  }, undefined, { polling: 16 });
+  for (let i = 0; i < 20; i++) {
+    await readyToReload();
+    const graphResponse = page.waitForResponse(reply => {
+      if (!reply.url().endsWith('/graph/query')) return false;
+      const request = reply.request().postDataJSON();
+      return request.root.kind === 'workspace' && !request.cursor;
+    });
+    const start = performance.now();
+    await retry.click();
+    const reply = await graphResponse;
+    assert.equal(reply.status(), 200);
+    const result = await reply.json();
+    assert.ok(result.data.nodes.length <= 200);
+    const firstTitles = result.data.nodes.map(node => node.label).filter(Boolean);
+    const marker = await page.waitForFunction(titles => {
+      const rows = document.querySelectorAll('#graph-pane .fact-node__label');
+      return Array.from(rows).some(row => titles.includes(row.textContent)) ?
+        performance.timeOrigin + performance.now() : 0;
+    }, firstTitles, { polling: 16 });
+    const painted = await marker.jsonValue();
+    const sliceMS = painted - reply.request().timing().startTime;
+    assert.ok(sliceMS > 0);
+    graphTimes.push(sliceMS);
+    await row('CanonicalNull').waitFor();
+    reloadTimes.push(performance.now() - start);
+    assert.equal(await page.locator('iframe').count(), 0);
+  }
+  await readyToReload();
+  const source = page.locator('#source-pane');
+  for (let i = 0; i < 20; i++) {
+    const name = i % 2 === 0 ? 'CanonicalNull' : 'CanonicalBool';
+    const oracle = expected[name];
+    const pending = page.waitForResponse(reply => reply.url().endsWith('/source/read'));
+    const start = performance.now();
+    await row(name).click();
+    const reply = await pending;
+    assert.equal(reply.status(), 200);
+    const result = (await reply.json()).data;
+    assert.equal(result.source_ref.path, oracle.path);
+    assert.equal(result.source_ref.content_hash, oracle.hash);
+    assert.deepEqual(result.source_ref.range, { start_byte: oracle.start, end_byte: oracle.end });
+    assert.equal(result.content, oracle.text);
+    await source.getByText(oracle.text, { exact: true }).last().waitFor();
+    await page.waitForFunction(text => document.querySelector('.source-code')?.textContent === text, oracle.text,
+      { polling: 16 });
+    sourceTimes.push(performance.now() - start);
+  }
+  const graphLatency = summarize(graphTimes);
+  const sourceLatency = summarize(sourceTimes);
+  const status = graphLatency.p95_ms <= 1500 ? 'PASS' : 'FAIL';
+  console.log(JSON.stringify({ check: 'T094_REAL_GRAPH_SOURCE', status, cold_known_node_ms: Math.round(coldInitialMS),
+    graph_warm: graphLatency, graph_reload_warm: summarize(reloadTimes), source_warm: sourceLatency,
+    correct_source: sourceTimes.length, source_attempts: 20,
+    oracle: expected, live_dev: 'NOT_RUN' }));
+  assert.equal(status, 'PASS', 'PLAN-UI-03 graph-only p95');
+}
+
 try {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 880 }, reducedMotion: 'reduce',
@@ -101,6 +171,7 @@ try {
     if (path.endsWith('/graph/query')) requests.graph++;
     if (path.endsWith('/source/read')) requests.source++;
   });
+  const coldStart = performance.now();
   const appDocument = await page.goto(base.href, { timeout: 10000 });
   if (input.gu0) {
     const headers = appDocument.headers();
@@ -120,6 +191,8 @@ try {
     assert.equal(requests.source, 0);
     assert.equal(await page.locator('.react-flow__node').count(), 0);
     assert.equal(await page.locator('.source-code').count(), 0);
+  } else if (scenario === 'benchmark') {
+    await benchmarkGraphAndSource(page, input.expected, coldStart);
   } else {
     const graph = page.locator('#graph-pane');
     const source = page.locator('#source-pane');
@@ -266,7 +339,7 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(unexpected, []);
   console.log(JSON.stringify({ check: 'C082', scenario, status: 'PASS', chromium: browser.version(),
-    browser_sha256: browserSHA, requests, proof: scenario === 'indexed' ? 'pinned index and raw source oracle' : 'no graph or source requests',
+    browser_sha256: browserSHA, requests, proof: scenario === 'empty' ? 'no graph or source requests' : 'pinned index and raw source oracle',
   }));
 } finally {
   await browser.close();

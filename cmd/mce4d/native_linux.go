@@ -60,6 +60,19 @@ func configureNativeDependencies(deps *cli.Dependencies) {
 		}
 		return options, release, err
 	}
+	deps.GroupAdmin = func(ctx context.Context, selected string, request model.GroupAdminRequest) (model.GroupAdminData, *string, error) {
+		data, next, err := compose.RunNativeGroupAdmin(ctx, root, selected, request, deps.CPUs)
+		if errors.Is(err, sqlite.ErrProfileDenied) {
+			err = cli.ErrBindingDenied
+		}
+		if errors.Is(err, sqlite.ErrStoreRecoveryRequired) {
+			err = app.ErrCoreStoreRecovery
+		}
+		return data, next, err
+	}
+	deps.GroupScope = func(ctx context.Context, selected string, request model.StatusRequest) (model.ScopeVector, error) {
+		return compose.RunNativeGroupScope(ctx, root, selected, request, deps.CPUs)
+	}
 	if sqlite.NativeUIMapsEnabled() {
 		deps.PreviewPermission = func(ctx context.Context, selected string, request model.PreviewPermissionAdminRequest) (model.PreviewPermissionAdminData, *string, error) {
 			data, next, err := compose.RunNativePreviewPermission(ctx, root, selected, request, deps.CPUs)

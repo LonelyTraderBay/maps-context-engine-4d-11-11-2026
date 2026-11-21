@@ -21,12 +21,12 @@ type OpenCore func(context.Context, string, string, string) (*app.CoreService, f
 // ExecuteQuery exposes status and locate through the ordinary core owner.
 // It never assumes that owner's process-local cache survives another call.
 func ExecuteQuery(ctx context.Context, action string, raw []byte, cpus int, configPath string, open OpenCore) (Result, error) {
-	return executeQuery(ctx, action, raw, cpus, configPath, open, nil)
+	return executeQuery(ctx, action, raw, cpus, configPath, open, nil, nil)
 }
 
 // executeQuery allows retained packs and rename results only through a
 // separate owner explicitly supplied by the trusted process.
-func executeQuery(ctx context.Context, action string, raw []byte, cpus int, configPath string, open, retainedOpen OpenCore) (Result, error) {
+func executeQuery(ctx context.Context, action string, raw []byte, cpus int, configPath string, open, retainedOpen OpenCore, group RunGroupScope) (Result, error) {
 	if ctx == nil || cpus < 1 {
 		return Result{}, errors.New("invalid CLI configuration")
 	}
@@ -58,6 +58,31 @@ func executeQuery(ctx context.Context, action string, raw []byte, cpus int, conf
 	decoded, err := registry.DecodeRequest(contracts.MCP, name, raw, 32768, cpus)
 	if err != nil {
 		return fail("INVALID_ARGUMENT", "The query request is invalid.", "fix_request", false, 2)
+	}
+	if status, ok := decoded.(model.StatusRequest); ok && status.Scope != nil &&
+		(status.Scope.GroupID != nil || status.Scope.PinnedVector != nil && status.Scope.PinnedVector.Kind == "federated") {
+		if group == nil {
+			return fail("UNSUPPORTED_CAPABILITY", "Group status is unavailable in this binding.", "none", false, 3)
+		}
+		groupCtx, cancel := context.WithTimeout(ctx, administrativeTimeout)
+		defer cancel()
+		scope, err := group(groupCtx, configPath, status)
+		if err != nil {
+			info := app.CoreErrorInfo(name, err)
+			response := baseResponse(id, defaultOutputLimit)
+			response.Error = &info
+			response.Status, response.Readiness = "error", "blocked"
+			return marshalResponse(registry, contracts.MCP, name, response, responseExit(response), cpus)
+		}
+		if model.VerifyScopeVectorDigest(scope, 32768) != nil || scope.Kind != "federated" {
+			return fail("INTERNAL_ERROR", "The group observation is invalid.", "none", false, 5)
+		}
+		response := groupStatusResponse(id, scope)
+		result, err := marshalResponse(registry, contracts.MCP, name, response, responseExit(response), cpus)
+		if errors.Is(err, errResponseBudget) {
+			return fail("RESOURCE_LIMIT", "The group observation exceeds the output budget.", "fix_request", false, 4)
+		}
+		return result, err
 	}
 	rename := action == "rename-preview"
 	if request, ok := decoded.(model.ValidateRequest); ok && request.ResultToken != nil {

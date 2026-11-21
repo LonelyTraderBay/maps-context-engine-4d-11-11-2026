@@ -24,6 +24,8 @@ type ExplorerReader struct {
 	codec      *contextpack.CursorCodec
 	projection chan struct{}
 	graphs     explorerGraphs
+	selection  *app.CoreService
+	staticFlow staticFlowOwner
 }
 
 func NewExplorerReader(core *CoreBackend, cfg model.RuntimeConfig) (*ExplorerReader, error) {
@@ -79,6 +81,11 @@ func (e *ExplorerReader) Read(ctx context.Context, request model.Request, option
 	case model.GraphQueryRequest:
 		op = "POST /graph/query"
 		blocks, err = e.readGraph(ctx, principal, value, options)
+	case model.FlowQueryRequest:
+		op = "POST /flow/query"
+		blocks, err = e.readFlow(ctx, principal, value, options)
+	case model.PackRequest:
+		return e.selectionPack(ctx, principal, value, options)
 	default:
 		return explorer.ReadResult{}, app.ErrCoreUnsupported
 	}

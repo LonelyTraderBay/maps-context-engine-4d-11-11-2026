@@ -1,13 +1,14 @@
 import type { BridgeMessage, DOMAnchorRef, GraphNode, GraphRef, InstanceRef, MappingMatch, PreviewData, Rect, ScopeVector } from '../../../.generated/types';
 import { ExplorerRequestError } from '../../api/client.ts';
 import type { ExplorerClient } from '../../api/client.ts';
+import { readPinnedSource } from '../../api/source.ts';
 import { decodeBridgeMessage } from '../../bridge.ts';
 import { graphRefDigest, subgraphDigest } from '../../graph.ts';
 import { canonicalOrigin, checkPathname } from '../../paths.ts';
 import { verifyScopeDigest } from '../../scope.ts';
 
 type PreviewAPI = Pick<ExplorerClient, 'previewAttach' | 'previewBind' | 'previewStatus' | 'previewInvalidate' |
-  'previewDetach' | 'previewMode' | 'previewAck' | 'mapping' | 'graph'>;
+  'previewDetach' | 'previewMode' | 'previewAck' | 'mapping' | 'graph' | 'source'>;
 type PairStatus = 'pairing' | 'ready' | 'arming' | 'interact' | 'awaiting_map' | 'stale' | 'detached';
 type PairInput = { url: string; permission: string; buildMap: string; scope: ScopeVector };
 type Waiting = {
@@ -50,8 +51,9 @@ const ackMS = 3_000;
 const bridgeLimit = 16_384;
 
 export function startPreviewPairing(iframe: HTMLIFrameElement, shield: HTMLElement, api: PreviewAPI, input: PairInput,
-  report: (state: PairStatus) => void, select: (selection: PreviewSelection) => void, notice: (text: string) => void,
-  showReverse: (value: ReversePreview | null) => void, buildChanged: (id: string) => void) {
+  report: (state: PairStatus) => void, select: (selection: PreviewSelection, content: string | null) => void, notice: (text: string) => void,
+  showReverse: (value: ReversePreview | null) => void, buildChanged: (id: string) => void,
+  showPickOutline: (rects: Rect[]) => void) {
   const url = new URL(input.url);
   const origin = canonicalOrigin(url.origin);
   checkPathname(url.pathname);
@@ -126,6 +128,7 @@ export function startPreviewPairing(iframe: HTMLIFrameElement, shield: HTMLEleme
         if (invalidated.size >= 256) invalidated.delete(invalidated.values().next().value!);
         invalidated.add(id);
       }
+      if (value.selection_id === forwardSelectionID) showPickOutline([]);
       if (value.selection_id === reverse?.id) {
         reverse.instances = reverse.instances.filter(item => !invalidated.has(item.instance_ref.instance_id));
         if (reverse.selectedInstance !== null && invalidated.has(reverse.selectedInstance)) {
@@ -175,6 +178,7 @@ export function startPreviewPairing(iframe: HTMLIFrameElement, shield: HTMLEleme
   function cancelPick() {
     pickWork?.abort();
     pickWork = null;
+    showPickOutline([]);
   }
 
   function clearReverse() {
@@ -352,6 +356,7 @@ export function startPreviewPairing(iframe: HTMLIFrameElement, shield: HTMLEleme
     } finally {
       if (pickWork === job) {
         pickWork = null;
+        showPickOutline([]);
         if (!currentSelection()) notice('');
         if (!closed && !modeWork) pollTimer = window.setTimeout(() => void poll(), 2_000);
       }
@@ -371,11 +376,13 @@ export function startPreviewPairing(iframe: HTMLIFrameElement, shield: HTMLEleme
       const picked = await request('PICK_AT', { x_css: x, y_css: y, selection_kind: kind }, 'PICK_RESULT', selectionID);
       if (!active() || picked.type !== 'PICK_RESULT') return;
       const hit = picked.payload.targets[0];
-      if (!hit || hit.anchor_ref.build_map_id !== input.buildMap ||
+      if (!hit || hit.anchor_ref.build_map_id !== input.buildMap || hit.instance_ref.session_id !== current.session_id ||
+          hit.instance_ref.document_epoch !== current.document_epoch || hit.instance_ref.hmr_epoch !== current.hmr_epoch ||
           picked.payload.status !== 'exact_in_supported_scope' && picked.payload.status !== 'ancestor_fallback') {
         notice('Điểm chọn chưa có anchor được hỗ trợ.');
         return;
       }
+      showPickOutline(hit.rects);
       const result = await api.mapping({ scope: { pinned_vector: input.scope }, session_id: current.session_id,
         build_map_id: input.buildMap, document_epoch: current.document_epoch, hmr_epoch: current.hmr_epoch,
         ref: hit.anchor_ref, limit: 2 }, signal);
@@ -409,8 +416,12 @@ export function startPreviewPairing(iframe: HTMLIFrameElement, shield: HTMLEleme
         notice('Instance đã thay đổi. Chọn lại trong preview.');
         return;
       }
-      const graph = await api.graph({ root: { kind: 'ref', ref: match.target_ref, service_id: null }, scope: { pinned_vector: input.scope },
-        depth: 0, node_limit: 2, edge_limit: 1 }, signal);
+      const source = match.source_refs[0];
+      const [graph, content] = await Promise.all([
+        api.graph({ root: { kind: 'ref', ref: match.target_ref, service_id: null }, scope: { pinned_vector: input.scope },
+          depth: 0, node_limit: 2, edge_limit: 1 }, signal),
+        source ? readPinnedSource(api, input.scope, source, signal).catch(() => null) : null,
+      ]);
       if (!active() || invalidated.has(hit.instance_ref.instance_id)) return;
       if (!graph.data || !graph.scope || graph.scope.vector_digest !== input.scope.vector_digest ||
           graph.pagination.next_cursor !== null) throw new Error('Graph target unavailable');
@@ -425,7 +436,7 @@ export function startPreviewPairing(iframe: HTMLIFrameElement, shield: HTMLEleme
       if (!graphNode) throw new Error('Graph target mismatch');
       select({ selectionID, scopeDigest: input.scope.vector_digest, anchor: hit.anchor_ref, instance: hit.instance_ref,
         match, graphNode, ancestorFallback: picked.payload.status === 'ancestor_fallback',
-        instancesRead: seen.size, moreInstances: cursor !== null });
+        instancesRead: seen.size, moreInstances: cursor !== null }, content);
       notice(picked.payload.status === 'ancestor_fallback' ? 'Đã chọn ranh giới tổ tiên có bằng chứng.' : '');
     });
   }

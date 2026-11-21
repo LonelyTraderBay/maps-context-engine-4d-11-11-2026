@@ -1,6 +1,7 @@
 """Packaged Explorer and a synthetic SDK on separate private loopback origins."""
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -14,7 +15,7 @@ from threading import Thread
 
 
 def exercise(root, command, setup, worktree, profile, artifact, active, *, interact=False, pick=False, reverse=False,
-             hmr_maps=(), records_mode=False):
+             hmr_maps=(), records_mode=False, context_mode=False, benchmark=False):
     path, build = artifact
     imported = command("/mce4d", ["explorer-map", "import", "--worktree-id", worktree, "--manifest", path])
     assert imported.returncode == 0 and json.loads(imported.stdout)["status"] == "bound"
@@ -24,6 +25,13 @@ def exercise(root, command, setup, worktree, profile, artifact, active, *, inter
     current_build = build
     build_manifest = json.loads((root / path.lstrip("/")).read_bytes())
     anchor = next(item["anchor_id"] for item in build_manifest["anchors"] if item["kind"] == "element_site")
+    expected = None
+    if benchmark:
+        source = (root / "target/entry.tsx").read_bytes()
+        start = source.index(b"<button")
+        assert source.count(b"<button") == 1
+        expected = {"path": "entry.tsx", "content_hash": sha256(source).hexdigest(),
+                    "range": {"start_byte": start, "end_byte": start + len(b"<button")}, "text": "<button"}
     anchors = ','.join(item["anchor_id"] for item in build_manifest["anchors"])
     scroll = reverse and os.environ.get("MCE4D_T090_SCROLL") == "1"
     if reverse:
@@ -33,7 +41,17 @@ def exercise(root, command, setup, worktree, profile, artifact, active, *, inter
     layout = ('<style>form{display:grid;grid-template-columns:repeat(10,32px);gap:2px}button{height:18px}'
               + ('#fixture-action99{margin-top:420px}' if reverse else '') + '</style>' if pick else "")
 
+    action_requests = []
+
     class Peer(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if self.path != "/fixture-action":
+                self.send_error(404)
+                return
+            action_requests.append(self.path)
+            self.send_response(204)
+            self.end_headers()
+
         def do_GET(self):
             if (self.path == "/app" or hmr_maps and self.path == "/app/next") and explorer_origin:
                 body = (f'<!doctype html><html data-parent-origin="{html.escape(explorer_origin)}" data-build-map="{current_build}"'
@@ -51,7 +69,7 @@ def exercise(root, command, setup, worktree, profile, artifact, active, *, inter
             self.send_header("Content-Type", mime)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Security-Policy",
-                             f"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-ancestors {explorer_origin}")
+                             f"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors {explorer_origin}")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -117,14 +135,27 @@ def exercise(root, command, setup, worktree, profile, artifact, active, *, inter
                                         "reverse": reverse, "scroll": scroll, "match_count": len(build_manifest["anchors"]),
                                         "hmr": hmr_maps[-1][1] if hmr_maps else None,
                                         "records": records_mode,
+                                        "context_case": context_mode, "benchmark": expected,
                                         "permission": scenario, "code": code_line.removeprefix("Bootstrap code: ")}) + "\n").encode())
         with selectors.DefaultSelector() as select:
             select.register(driver.stdout, selectors.EVENT_READ)
-            assert select.select(50 if reverse else 30), "Browser did not complete preview exercise"
+            assert select.select(80 if benchmark or interact else 50 if reverse else 30), "Browser did not complete preview exercise"
             line = driver.stdout.readline()
         if not line:
             raise AssertionError(driver.stderr.read(8192).decode())
         first = json.loads(line)
+        if context_mode:
+            assert first["case"] == "T093_CONTEXT_PAGE" and first["status"] == "PASS", first
+            print(json.dumps(first), flush=True)
+            expire_fixture_generation(command, worktree, profile)
+            driver.stdin.write(b"context-gc\n")
+            with selectors.DefaultSelector() as select:
+                select.register(driver.stdout, selectors.EVENT_READ)
+                assert select.select(20), "Missing context expiry result"
+                line = driver.stdout.readline()
+            if not line:
+                raise AssertionError(driver.stderr.read(8192).decode())
+            first = json.loads(line)
         if records_mode:
             exercise_records(root, command, worktree, profile, driver, first)
             return
@@ -142,9 +173,15 @@ def exercise(root, command, setup, worktree, profile, artifact, active, *, inter
             if not line:
                 raise AssertionError(driver.stderr.read(8192).decode())
             first = json.loads(line)
-        expected = "T091_BROWSER_HMR" if hmr_maps else "T090_BROWSER_REVERSE" if reverse else "T089_BROWSER_PICK" if pick else "T088_BROWSER_INTERACT" if interact else "T087_BROWSER_BOUND"
-        assert first["case"] == expected and first["status"] == "PASS"
+        case = "T094_PREVIEW_LATENCY" if benchmark else "T093_CONTEXT_EXPIRED" if context_mode else "T091_BROWSER_HMR" if hmr_maps else "T090_BROWSER_REVERSE" if reverse else "T089_BROWSER_PICK" if pick else "T088_BROWSER_INTERACT" if interact else "T087_BROWSER_BOUND"
+        assert first["case"] == case and first["status"] == "PASS", first
         print(json.dumps(first), flush=True)
+        if benchmark:
+            status = (root / "proc" / str(console.pid) / "status").read_text()
+            memory = re.search(r"(?m)^VmHWM:\s+(\d+) kB$", status)
+            assert memory is not None and int(memory[1]) > 0
+            print(json.dumps({"case": "T094_EXPLORER_MEMORY", "peak_rss_kib": int(memory[1]),
+                              "scope": "packaged Explorer engine process"}), flush=True)
         revoke = command("/mce4d", ["preview-permission", "revoke", "--input-json", "-"], payload={
             "action": "revoke", "profile_id": scenario, "expected_version": 1, "reason": "Synthetic owner ended this fixture"})
         assert revoke.returncode == 0 and json.loads(revoke.stdout)["data"]["profiles"][0]["effective_status"] == "revoked"
@@ -171,8 +208,9 @@ def exercise(root, command, setup, worktree, profile, artifact, active, *, inter
         server.server_close()
         thread.join(timeout=4)
     assert console is not None and console.returncode == 0
+    assert len(action_requests) == int(interact)
     print(json.dumps({"case": "T089_PREVIEW_PRODUCT" if pick else "T088_PREVIEW_PRODUCT" if interact else "T087_PREVIEW_CLI_AND_PRODUCT",
-                      "status": "PASS", "target_executions": 0}), flush=True)
+                      "status": "PASS", "target_executions": 0, "fixture_action_network_requests": len(action_requests)}), flush=True)
 
 
 def exercise_records(root, command, worktree, profile, driver, first):
@@ -192,11 +230,7 @@ def exercise_records(root, command, worktree, profile, driver, first):
         drift = json.loads(line)
         assert drift["case"] == "T092_RECORDS_DRIFT" and drift["status"] == "PASS", drift
         print(json.dumps(drift), flush=True)
-        binding = ["--worktree-id", worktree, "--profile-id", profile]
-        for _ in range(3):
-            assert command("/mce4d", ["index", *binding, "--full"]).returncode == 0
-        report = command("/mce4d", ["store", "gc", *binding, "--apply", "--confirm"])
-        assert report.returncode == 0 and any(item["applied"] for item in json.loads(report.stdout)["generations"])
+        expire_fixture_generation(command, worktree, profile)
     finally:
         changed.write_bytes(original)
     driver.stdin.write(b"gc-complete\n")
@@ -204,3 +238,11 @@ def exercise_records(root, command, worktree, profile, driver, first):
     assert driver.returncode == 0, errors.decode()[:8192]
     assert json.loads(tail)["case"] == "T092_RECORDS_GC"
     print(tail.decode().strip(), flush=True)
+
+
+def expire_fixture_generation(command, worktree, profile):
+    binding = ["--worktree-id", worktree, "--profile-id", profile]
+    for _ in range(3):
+        assert command("/mce4d", ["index", *binding, "--full"]).returncode == 0
+    report = command("/mce4d", ["store", "gc", *binding, "--apply", "--confirm"])
+    assert report.returncode == 0 and any(item["applied"] for item in json.loads(report.stdout)["generations"])

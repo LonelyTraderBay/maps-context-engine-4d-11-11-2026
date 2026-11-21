@@ -29,6 +29,8 @@ type Dependencies struct {
 	ImportUIMap         ImportUIMap
 	WatchUIMap          WatchUIMap
 	PreviewPermission   RunPreviewPermission
+	GroupAdmin          RunGroupAdmin
+	GroupScope          RunGroupScope
 	OpenRecords         OpenRecords
 	ExplorerAssets      fs.FS
 	OpenAdmin           OpenAdmin
@@ -120,6 +122,12 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		if deps.PreviewPermission != nil {
 			text += "  mce4d preview-permission get|list|put|revoke --input-json <file-or-dash>\n"
 		}
+		if deps.GroupAdmin != nil {
+			text += "  mce4d group get|list|put|remove --input-json <file-or-dash>\n"
+		}
+		if deps.GroupScope != nil {
+			text += "Group status accepts an explicit group_id or a pinned federated vector in the query status input.\n"
+		}
 		if n, err := io.WriteString(stdout, text); err != nil || n != len(text) {
 			return diagnostic("output unavailable", 5)
 		}
@@ -138,9 +146,12 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		}
 		return runUIMapImport(ctx, args, configPath, stdout, stderr, deps.ImportUIMap)
 	}
-	if len(args) > 0 && args[0] == "preview-permission" {
+	if len(args) > 0 && (args[0] == "preview-permission" || args[0] == "group") {
 		if len(args) != 4 || args[2] != "--input-json" {
-			return diagnostic("invalid preview permission command", 2)
+			if args[0] == "preview-permission" {
+				return diagnostic("invalid preview permission command", 2)
+			}
+			return diagnostic("invalid group command", 2)
 		}
 		raw, err := readInput(ctx, args[3], stdin, 32768)
 		if err != nil {
@@ -149,9 +160,17 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 			}
 			return diagnostic("input is unavailable or exceeds its limit", 2)
 		}
-		result, err := executePreviewPermission(ctx, args[1], configPath, deps.CPUs, raw, deps.PreviewPermission)
+		var result Result
+		if args[0] == "group" {
+			result, err = executeGroupAdmin(ctx, args[1], configPath, deps.CPUs, raw, deps.GroupAdmin)
+		} else {
+			result, err = executePreviewPermission(ctx, args[1], configPath, deps.CPUs, raw, deps.PreviewPermission)
+		}
 		if err != nil {
-			return diagnostic("permission response unavailable", 5)
+			if args[0] == "preview-permission" {
+				return diagnostic("permission response unavailable", 5)
+			}
+			return diagnostic("group response unavailable", 5)
 		}
 		output := append(result.JSON, '\n')
 		if n, err := stdout.Write(output); err != nil || n != len(output) {
@@ -180,6 +199,7 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 			}
 		}
 		deps.OpenCore, deps.OpenRetainedCore = bind(deps.OpenCore), bind(deps.OpenRetainedCore)
+		deps.GroupScope = nil
 		deps.OpenRecords = bindRecords(deps.OpenRecords, worktree, profile)
 		args = args[4:]
 	}
@@ -304,7 +324,7 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 			}
 			return diagnostic("input is unavailable or exceeds its limit", 2)
 		}
-		result, err := executeQuery(ctx, args[1], raw, deps.CPUs, configPath, deps.OpenCore, deps.OpenRetainedCore)
+		result, err := executeQuery(ctx, args[1], raw, deps.CPUs, configPath, deps.OpenCore, deps.OpenRetainedCore, deps.GroupScope)
 		if err != nil {
 			return diagnostic("query unavailable", 2)
 		}

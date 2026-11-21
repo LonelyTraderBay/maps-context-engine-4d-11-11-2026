@@ -20,13 +20,14 @@ type TypedInput struct {
 	OtherPackages []TypedPackageIdentity
 	// OtherPackageCandidates supplies capture-derived identities for packages
 	// that may be selected by this load. Only its verified local closure is used.
-	OtherPackageCandidates []TypedPackageIdentity
-	SyntaxCache            *SyntaxCache // optional parse-only cache, never typed facts
-	MaxNodes               int
-	MaxDepth               int
-	MaxFacts               int
-	MaxOccurrences         int
-	MaxOutputBytes         int
+	OtherPackageCandidates   []TypedPackageIdentity
+	SyntaxCache              *SyntaxCache // optional parse-only cache, never typed facts
+	IncludeStdlibCallTargets bool         // opt-in evidence for the static flow adapter
+	MaxNodes                 int
+	MaxDepth                 int
+	MaxFacts                 int
+	MaxOccurrences           int
+	MaxOutputBytes           int
 }
 
 // Package identities are supplied by the coordinator, never guessed from
@@ -58,9 +59,10 @@ type TypedOccurrence struct {
 // TypedCallSite distinguishes a function call from a type conversion without
 // publishing go/types objects or an inferred runtime target.
 type TypedCallSite struct {
-	Path  string          `json:"path"`
-	Range model.ByteRange `json:"range"` // callable expression, not arguments
-	Kind  string          `json:"kind"`  // call, conversion, unknown
+	Path         string            `json:"path"`
+	Range        model.ByteRange   `json:"range"` // callable expression, not arguments
+	Kind         string            `json:"kind"`  // call, conversion, unknown
+	StdlibTarget *StdlibCallTarget `json:"stdlib_target,omitempty"`
 }
 
 type TypedResult struct {
@@ -472,6 +474,9 @@ func collectTyped(ctx context.Context, input TypedInput, pkg *packages.Package, 
 					}
 				}
 				item := TypedCallSite{Path: filename, Range: model.ByteRange{StartByte: start, EndByte: end}, Kind: kind}
+				if input.IncludeStdlibCallTargets && kind == "call" {
+					item.StdlibTarget = stdlibCallTarget(pkg.TypesInfo, call.Fun)
+				}
 				if len(c.output.Occurrences)+len(c.output.Calls) >= input.MaxOccurrences {
 					walkErr = ErrSyntaxLimit
 					return false

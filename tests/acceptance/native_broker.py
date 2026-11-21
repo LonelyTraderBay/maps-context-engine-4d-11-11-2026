@@ -5,7 +5,8 @@ import os,pathlib,subprocess,hashlib,fcntl,struct,stat,json,socket,time,re,shuti
 run=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_RUN']).resolve(strict=True);root=run/'rootfs';built=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_BUILD']).resolve(strict=True)
 approved=json.loads(pathlib.Path(os.environ['MCE4D_ACCEPTANCE_APPROVALS']).read_text())
 assert set(approved['binaries'])=={'mce4d','state-profile','go-toolchain'}
-suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0','records','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records')
+suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0','records','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench','ui_real','ui_flow','groups')
+preview_suites=('ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench')
 assert os.getpid()==1, 'run broker in a fresh private PID/mount/network namespace'
 import importlib.util,sys
 sys.dont_write_bytecode=True
@@ -59,6 +60,10 @@ sources['a.go']=sources['a.go'].replace('type Inner struct { Value int }','type 
 sources['untrusted.md']=fixture['untrusted_document']
 sources['execute-me.sh']='#!/bin/sh\nprintf executed > /result/repo-executed\n'
 sources['go.env.txt']='GOFLAGS=-mod=mod -toolexec=/target/execute-me.sh\n'
+if suite=='ui_flow':
+ sys.path.insert(0,str(module_path.parent))
+ import explorer_flow
+ sources.update(explorer_flow.prepare())
 if suite in ('scale','bench'):
  authored=scale.prepare(root,os.environ['MCE4D_SCALE_COHORT'])
  peer=root/'peer';peer.mkdir();peer.chmod(0o755)
@@ -73,19 +78,28 @@ elif suite in ('typed-graph','typed-mutations','typed-dependencies'):
  typed_graph.prepare(root/'target')
 elif suite=='typed-profiles':
  typed_graph.prepare_profiles(root/'target')
+elif suite=='ui_real':
+ sys.path.insert(0,str(module_path.parent))
+ from explorer_shell import prepare_real_scope,exercise_shell
+ prepare_real_scope(root,module_path.parents[2])
 else:
  for name,body in sources.items():(root/'target'/name).write_text(body)
-if suite in ('ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):
+if suite=='groups':
+ sys.path.insert(0,str(module_path.parent))
+ import native_groups
+ native_groups.prepare(root,template,run/'home')
+if suite in preview_suites:
  sys.path.insert(0,str(module_path.parent))
  import native_ui_map
  ui_source=native_ui_map.SOURCE_MANY if suite=='ui_reverse' else native_ui_map.SOURCE
  (root/'target/entry.tsx').write_text(ui_source)
 for p in [root/'target']+list((root/'target').rglob('*')):
  p.chmod(0o755 if p.is_dir() else 0o644);os.chown(p,1001,1001)
-if suite in ('security','gc','backup','restore','explorer-gu0','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):(root/'target/execute-me.sh').chmod(0o755)
+if suite in ('security','gc','backup','restore','explorer-gu0')+preview_suites:(root/'target/execute-me.sh').chmod(0o755)
 (root/'host-config/config.toml').write_bytes(b'synthetic existing host config\n')
 def tree(p):return {str(f.relative_to(p)):hashlib.sha256(f.read_bytes()).hexdigest() for f in p.rglob('*') if f.is_file()}
 before=tree(root/'target');before_config=tree(root/'host-config');active=[]
+before_peer=tree(root/'peer') if suite=='groups' else None
 def setup(uid):
  def enter():os.chroot(root);os.chdir('/');os.setgroups([]);os.setgid(uid);os.setuid(uid)
  return enter
@@ -110,6 +124,7 @@ try:
   name='.' if p==root/'toolchain' else str(p.relative_to(root/'toolchain'));st=p.stat();kind=b'd' if p.is_dir() else b'f';size=0 if p.is_dir() else st.st_size;digest=b'\0'*32 if p.is_dir() else hashlib.sha256(p.read_bytes()).digest();raw=name.encode();h.update(struct.pack('>Q',len(raw))+raw+kind+struct.pack('>QQ',stat.S_IMODE(st.st_mode),size)+digest)
  assert h.hexdigest()==toolchain_digest,'toolchain independent fingerprint mismatch'
  targets=['--target-root','/target']
+ if suite=='groups':targets+=['--target-root','/peer']
  config={}
  if suite in ('scale','bench'):
   targets+=['--target-root','/peer']
@@ -120,6 +135,8 @@ try:
   config={'pack_ttl_seconds':native_matrix.TEST_PACK_TTL,'rename_result_ttl_seconds':native_matrix.TEST_RENAME_TTL}
  if suite=='ui_hmr':
   config={'writer_lock_wait_ms':200}
+ if suite=='ui_flow':
+  config={'query_timeout_ms':30000,'max_output_bytes':65536}
  p=command('/state-profile',['create','--root','/profiles/runtime','--engine-uid','1000','--engine-gid','1000','--client-uid','1001',*targets,'--worker-executable','/mce4d'],0);assert p.returncode==0
  config_patch={'schema_version':1,'core':config}
  if suite=='ui_hmr':config_patch['explorer']={'map_watch_poll_ms':50,'map_watch_debounce_ms':250}
@@ -130,11 +147,12 @@ try:
  if suite in ('scale','bench'):policy['max_source_bytes']=32<<20
  if suite=='scale' and authored['cohort'] in scale.PACK_COHORTS:policy['max_output_bytes']=config['max_output_bytes']
  if suite in ('spec-only','self-index'):policy['trusted_rule_paths']=['design.md'] if suite=='spec-only' else []
+ if suite=='ui_real':policy['trusted_rule_paths']=[]
  p=command('/mce4d',['policy','set','--input-json','-'],payload={'worktree_id':worktree,'expected_epoch':1,'policy':policy});assert p.returncode==0
  profile={'schema_version':1,'language':'go','goos':'linux','goarch':'amd64','build_tags':[],'cgo_enabled':False,'tests_enabled':False,'module_roots':['.'],'toolchain_digest':toolchain_digest,'provider_digest':approved['binaries']['mce4d'],'module_mode':'readonly','analysis_mode':'typed_when_available','dependency_roots':[]}
  p=command('/mce4d',['profile','set','--worktree-id',worktree,'--input-json','-'],payload={'worktree_id':worktree,'profile_name':'typed','expected_revision':0,'profile':profile});assert p.returncode==0;profile_id=json.loads(p.stdout)['data']['profile_id']
  p=command('/state-profile',['worktree-create','--root','/profiles/runtime','--worktree-id',worktree],0);assert p.returncode==0
- if suite in ('ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):
+ if suite in preview_suites:
   maps=native_ui_map.import_before_index(root,command,worktree,profile_id,module_path.parents[2],ui_source,hmr=suite=='ui_hmr')
  if suite in ('explorer-shell','explorer-gu0'):
   subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
@@ -161,6 +179,21 @@ try:
   from explorer_native import exercise
   exercise(root,setup,worktree,profile_id,active)
   assert tree(root/'target')==before and tree(root/'host-config')==before_config
+ elif suite=='ui_flow':
+  explorer_flow.exercise(root,setup,worktree,profile_id,active)
+  assert tree(root/'target')==before and tree(root/'host-config')==before_config
+  assert not (root/'result/repo-executed').exists()
+  print(json.dumps({'case':'T097_TARGET_CANARY','status':'PASS','target_executions':0,'source_mutations':0}),flush=True)
+ elif suite=='ui_real':
+  subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
+  exercise_shell(root,setup,worktree,profile_id,active,"benchmark")
+  assert tree(root/'target')==before and tree(root/'host-config')==before_config
+  assert not (root/'result/repo-executed').exists()
+ elif suite=='groups':
+  native_groups.exercise(root,command,worktree,profile_id,profile,policy)
+  assert tree(root/'target')==before and tree(root/'peer')==before_peer and tree(root/'host-config')==before_config
+  assert not (root/'result/repo-executed').exists()
+  print(json.dumps({'case':'T046_TARGET_CANARY','status':'PASS','target_executions':0,'source_mutations':0}),flush=True)
  elif suite in ('explorer-shell','explorer-gu0'):
   exercise_shell(root,setup,worktree,profile_id,active,"indexed", gu0=suite=='explorer-gu0')
   if suite=='explorer-gu0':
@@ -206,12 +239,12 @@ try:
   native_ui_map.exercise(root,command,worktree,profile_id,maps)
   assert tree(root/'target')==before and tree(root/'host-config')==before_config
   assert not (root/'result/repo-executed').exists()
- elif suite in ('ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):
+ elif suite in preview_suites:
   subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
   import native_ui_preview
   native_ui_preview.exercise(root,command,setup,worktree,profile_id,maps[0],active,interact=suite=='ui_interact',
-                             pick=suite in ('ui_pick','ui_reverse','ui_hmr'),reverse=suite=='ui_reverse',
-                             hmr_maps=maps[2:] if suite=='ui_hmr' else (),records_mode=suite=='ui_records')
+                             pick=suite in ('ui_pick','ui_reverse','ui_hmr','ui_context','ui_bench'),reverse=suite=='ui_reverse',
+                             hmr_maps=maps[2:] if suite=='ui_hmr' else (),records_mode=suite=='ui_records',context_mode=suite=='ui_context',benchmark=suite=='ui_bench')
   assert tree(root/'target')==before and tree(root/'host-config')==before_config
   assert not (root/'result/repo-executed').exists()
  else:

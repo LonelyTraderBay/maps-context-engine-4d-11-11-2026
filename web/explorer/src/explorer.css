@@ -96,6 +96,36 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .pane { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; overflow: hidden; background: var(--surface); }
 .workspace-right { min-inline-size: 0; min-block-size: 0; display: flex; flex-direction: column; overflow: auto; }
 .workspace-right .source-pane { flex: 1 1 0; min-block-size: 200px; }
+.flow-pane { flex: 0 0 auto; border-block-end: 1px solid var(--line); }
+.flow-pane .pane-heading { align-items: flex-start; gap: var(--small-gap); flex-wrap: wrap; }
+.flow-root { margin: 3px 0 0; color: var(--muted); overflow-wrap: anywhere; font-size: .875rem; }
+.flow-actions { display: flex; flex-wrap: wrap; gap: var(--small-gap); }
+.flow-body, .flow-retry { padding: 0 var(--pad) var(--pad); }
+.flow-status { color: var(--muted); font-size: .875rem; }
+.flow-list { display: grid; gap: var(--small-gap); margin: 0; padding-inline-start: 1.5rem; }
+.flow-step { background: var(--canvas); border: 1px solid var(--line); border-radius: 6px; min-inline-size: 0; }
+.flow-step::marker { color: var(--muted); }
+.flow-step--sql { border-inline-start-color: var(--accent); }
+.flow-step__choose {
+  display: grid; gap: 3px; text-align: start; min-block-size: 44px; inline-size: 100%;
+  padding: 8px 10px; border: 0; border-radius: 5px; background: none;
+}
+.flow-step__choose:hover:not(:disabled), .flow-step__choose[aria-pressed="true"] { background: var(--raised); }
+.flow-step__choose[aria-pressed="true"] .flow-step__title { color: var(--accent); }
+.flow-step__title { font-weight: 650; }
+.flow-step__status, .flow-step__source, .flow-connections, .flow-step__limits, .flow-gaps {
+  font-size: .8125rem; color: var(--muted); overflow-wrap: anywhere;
+}
+.flow-step__source, .flow-step--sql .flow-step__title { font-family: var(--mono); }
+.flow-connections, .flow-step__limits { margin: 0; padding: 7px 10px; border-block-start: 1px solid var(--line); }
+.flow-step__limits summary { min-block-size: 24px; cursor: pointer; }
+.flow-step__limits ul { margin-block-end: 0; }
+.flow-sql { display: grid; gap: 4px; padding: 8px 10px; margin: 0; border-block-start: 1px solid var(--line); }
+.flow-sql > div { display: flex; flex-wrap: wrap; column-gap: var(--small-gap); font-size: .8125rem; }
+.flow-sql dt { color: var(--muted); }
+.flow-sql dd { margin: 0; }
+.flow-table-sources { display: flex; flex-wrap: wrap; gap: var(--small-gap); padding: 0 10px 8px; }
+.flow-table-sources button { white-space: normal; overflow-wrap: anywhere; }
 .pane-heading {
   display: flex;
   flex: 0 0 auto;
@@ -306,6 +336,11 @@ input::placeholder { color: var(--muted); }
 .mapping-records ul { padding: 0; list-style: none; }
 .mapping-records label { display: grid; gap: 4px; inline-size: 100%; }
 .mapping-records textarea { min-block-size: 4rem; color: inherit; background: var(--surface); border: 1px solid var(--line); padding: 8px; }
+.selection-context { padding: 12px var(--pad); border-block-start: 1px solid var(--line); }
+.selection-context h3 { margin-block: 0 8px; font-size: 15px; }
+.selection-context__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-block: 8px; }
+.selection-context textarea, .selection-context pre { inline-size: 100%; max-block-size: 16rem; overflow: auto; font: 12px var(--mono); }
+.selection-context textarea { min-block-size: 6rem; color: inherit; background: var(--surface); border: 1px solid var(--line); padding: 8px; }
 
 @media (max-width: 880px) {
   .toolbar { gap: 12px 19px; flex-wrap: wrap; padding: 11px 16px; }

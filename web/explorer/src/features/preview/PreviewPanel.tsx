@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { ExplorerClient } from '../../api/client.ts';
-import type { GraphNode, ScopeVector, SourceRef } from '../../../.generated/types';
+import type { GraphNode, Rect, ScopeVector, SourceRef } from '../../../.generated/types';
 import { startPreviewPairing } from './pairing.ts';
 import type { PreviewSelection, ReversePreview } from './pairing.ts';
 
@@ -17,7 +17,7 @@ const labels = {
 };
 
 export function PreviewPanel({ client, scope, close, onSelect, beginSelection, graphNode, onSource }: {
-  client: ExplorerClient; scope: ScopeVector; close: () => void; onSelect: (value: PreviewSelection) => void;
+  client: ExplorerClient; scope: ScopeVector; close: () => void; onSelect: (value: PreviewSelection, content: string | null) => void;
   beginSelection: () => () => boolean;
   graphNode: GraphNode | null;
   onSource: (node: string, source: SourceRef) => void;
@@ -31,9 +31,13 @@ export function PreviewPanel({ client, scope, close, onSelect, beginSelection, g
   const [kind, setKind] = useState<'element' | 'component'>('element');
   const [message, setMessage] = useState('');
   const [reverse, setReverse] = useState<ReversePreview | null>(null);
+  const [pickOutline, setPickOutline] = useState<Rect[]>([]);
   const selectionCallback = useRef(onSelect);
   useEffect(() => { selectionCallback.current = onSelect; }, [onSelect]);
-  useEffect(() => { pairing.current?.clearReverse(); }, [graphNode?.node_id]);
+  useEffect(() => {
+    pairing.current?.clearReverse();
+    setPickOutline([]);
+  }, [graphNode?.node_id]);
 
   useEffect(() => {
     mounted.current = true;
@@ -54,9 +58,10 @@ export function PreviewPanel({ client, scope, close, onSelect, beginSelection, g
         url: String(data.get('url') ?? '').trim(), buildMap: String(data.get('build') ?? '').trim(),
         permission: String(data.get('permission') ?? '').trim(), scope,
       }, value => { if (mounted.current) setStatus(value); },
-      value => selectionCallback.current(value), value => { if (mounted.current) setMessage(value); },
+      (value, content) => selectionCallback.current(value, content), value => { if (mounted.current) setMessage(value); },
       value => { if (mounted.current) setReverse(value); },
-      id => { if (buildInput.current) buildInput.current.value = id; });
+      id => { if (buildInput.current) buildInput.current.value = id; },
+      rects => { if (mounted.current) setPickOutline(rects); });
     } catch {
       setStatus('stale');
     }
@@ -96,8 +101,12 @@ export function PreviewPanel({ client, scope, close, onSelect, beginSelection, g
         onClick={event => void pairing.current?.pick(event.detail ? event.clientX : null, event.detail ? event.clientY : null,
           kind, beginSelection())}
         onContextMenu={event => event.preventDefault()} />
-      <div className="preview-markers" aria-hidden="true">{reverse?.rects.map(({ x, y, width, height }, index) =>
-        <div className="preview-marker" key={index} style={{ left: x, top: y, width, height }} />)}</div>
+      <div className="preview-markers" aria-hidden="true">
+        {pickOutline.map(({ x, y, width, height }, index) =>
+          <div className="preview-marker preview-pick-outline" key={index} style={{ left: x, top: y, width, height }} />)}
+        {reverse?.rects.map(({ x, y, width, height }, index) =>
+          <div className="preview-marker" key={index} style={{ left: x, top: y, width, height }} />)}
+      </div>
     </div>
     {message && <p className="preview-dialog__status" role="status">{message}</p>}
     {reverse && reverse.matches.length > 0 && <div className="preview-choices">

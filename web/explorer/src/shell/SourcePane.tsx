@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ExplorerClient } from '../api/client.ts';
-import { utf8, verifyScopeDigest } from '../index.ts';
+import { readPinnedSource, sourceKey } from '../api/source.ts';
 import type { GraphEdge, GraphNode, ScopeVector, SourceRef } from '../index.ts';
 import { nodeTitle } from './GraphPane.tsx';
 import type { DetailView } from './selection.ts';
@@ -10,11 +10,6 @@ type SourceState = { key: string; content: string } | { key: string; error: stri
 
 export function explain(error: unknown): string {
   return error instanceof Error ? error.message : 'Explorer gặp lỗi khi đọc index.';
-}
-
-function sourceKey(ref: SourceRef): string {
-  return JSON.stringify([ref.worktree_id, ref.profile_id, ref.generation_id, ref.path, ref.content_hash,
-    ref.range.start_byte, ref.range.end_byte]);
 }
 
 type Props = {
@@ -27,30 +22,25 @@ type Props = {
   onRange: (index: number) => void;
   onDetail: (view: DetailView) => void;
   onSessionError: (error: unknown) => void;
+  preparedSource: string | null;
   preview?: PreviewSelection;
   mappingSource?: SourceRef;
 };
 
-export function SourcePane({ client, scope, node, sourceIndex, detail, edges, onRange, onDetail, onSessionError, preview, mappingSource }: Props) {
+export function SourcePane({ client, scope, node, sourceIndex, detail, edges, onRange, onDetail, onSessionError,
+  preview, mappingSource, preparedSource }: Props) {
   const ref = mappingSource ?? preview?.match.source_refs[0] ?? node?.source_refs[sourceIndex];
   const key = ref && scope ? scope.vector_digest + sourceKey(ref) : null;
   const [state, setState] = useState<SourceState | null>(null);
-  const current = state?.key === key ? state : null;
+  const current = key && preparedSource !== null ? { key, content: preparedSource } : state?.key === key ? state : null;
 
   useEffect(() => {
-    if (!ref || !scope || !key) return;
+    if (!ref || !scope || !key || preparedSource !== null) return;
     const request = new AbortController();
     async function read(bound: ScopeVector, wanted: SourceRef, key: string) {
       try {
-        const response = await client.source({ source_ref: wanted }, request.signal);
-        if (!response.data || !response.scope || response.scope.vector_digest !== bound.vector_digest ||
-            sourceKey(response.data.source_ref) !== sourceKey(wanted) ||
-            utf8.encode(response.data.content).length !== wanted.range.end_byte - wanted.range.start_byte) {
-          throw new Error('Nguồn trả về không khớp lựa chọn.');
-        }
-        await verifyScopeDigest(response.scope, 32768);
-        request.signal.throwIfAborted();
-        setState({ key, content: response.data.content });
+        const content = await readPinnedSource(client, bound, wanted, request.signal);
+        setState({ key, content });
       } catch (error) {
         if (!request.signal.aborted) {
           setState({ key, error: explain(error) });
@@ -60,7 +50,7 @@ export function SourcePane({ client, scope, node, sourceIndex, detail, edges, on
     }
     void read(scope, ref, key);
     return () => request.abort();
-  }, [client, key, onSessionError, ref, scope]);
+  }, [client, key, onSessionError, preparedSource, ref, scope]);
 
   return <section className="pane source-pane" id="source-pane" aria-labelledby="source-heading">
     <header className="pane-heading">

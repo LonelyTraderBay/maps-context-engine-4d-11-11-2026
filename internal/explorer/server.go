@@ -46,6 +46,8 @@ type Options struct {
 	PreviewOrigins    func(context.Context, time.Time) ([]string, error)
 	Records           *app.RecordService
 	RecordOutputCap   int64
+	SelectionContext  bool
+	StaticFlow        bool
 	Assets            fs.FS
 	QueryTimeout      time.Duration
 	BearerTTL         time.Duration

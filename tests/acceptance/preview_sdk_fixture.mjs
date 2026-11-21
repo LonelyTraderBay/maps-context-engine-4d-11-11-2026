@@ -67,7 +67,9 @@ window.runSDKFixture = async () => {
   const portal = pick(id('unknown-portal'));
   const group = sdk.listInstances([pinned('root')], 4).items[0];
   const selected = exact37.targets[0].instance_ref;
+  const initialObservers = window.fixtureObservers();
   sdk.observe(selected, value => state.changes.push(value));
+  const attachedObservers = window.fixtureObservers();
   await nextLayout();
   id('scroll-area').scrollTop = 18;
   id('buttons').children[36].style.transform = 'translateX(5px)';
@@ -88,5 +90,6 @@ window.runSDKFixture = async () => {
   sdk.dispose();
   return { exact37, nested, canvas, opaque, portal, group, moved, items, selected, afterDetach, staleObserved,
     staleRejected, boundaryUnmounted, changesBeforeDetach, changes: state.changes,
+    initialObservers, attachedObservers, finalObservers: window.fixtureObservers(),
     afterDispose: sdk.pickAt(0, 0), actions: state.actions, submits: state.submits, anchors, identity };
 };

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { createExplorerClient, ExplorerRequestError } from '../api/client.ts';
-import type { ScopeVector, StatusData } from '../index.ts';
+import { sourceKey } from '../api/source.ts';
+import type { GraphNode, ScopeVector, StatusData } from '../index.ts';
 import { verifyScopeDigest } from '../index.ts';
 import { GraphPane } from './GraphPane.tsx';
 import { emptyGraph, hardNodes, loadGraph } from './map.ts';
@@ -11,7 +12,11 @@ import { explain, SourcePane } from './SourcePane.tsx';
 import { Splitter } from './Splitter.tsx';
 import { PreviewPanel } from '../features/preview/PreviewPanel.tsx';
 import { ManualMappings } from '../features/preview/ManualMappings.tsx';
+import { SelectionContext } from './SelectionContext.tsx';
+import { selectionLocator } from './context_locator.ts';
 import type { PreviewSelection } from '../features/preview/pairing.ts';
+import { FlowPanel } from '../features/flow/FlowPanel.tsx';
+import type { FlowSelection } from '../features/flow/data.ts';
 
 function Binding({ status, scope }: { status: StatusData | null; scope: ScopeVector | null }) {
   const member = scope?.members[0] ?? status?.registered_scopes[0];
@@ -33,9 +38,14 @@ export function App() {
   const [graph, setGraph] = useState(emptyGraph);
   const [width, setWidth] = useState(45);
   const [preview, setPreview] = useState(false);
+  const [flow, setFlow] = useState<{ scope: string; root: GraphNode } | null>(null);
+  const [previewBookmark, setPreviewBookmark] = useState<{ scope: string; node: string | null } | null>(null);
   const [manualMappings, setManualMappings] = useState(false);
   const [selection, dispatch] = useReducer(selectionReducer, initialSelection);
+  const [preparedSource, setPreparedSource] = useState<{ selectionID: string; content: string } | null>(null);
+  const [preparedFlow, setPreparedFlow] = useState<{ key: string; content: string } | null>(null);
   const work = useRef<AbortController | null>(null);
+  const flowButton = useRef<HTMLButtonElement | null>(null);
   const selectionOrder = useRef(0);
 
   function beginSelection() {
@@ -45,6 +55,8 @@ export function App() {
 
   function manualSelection(action: SelectionAction) {
     selectionOrder.current++;
+    setPreparedSource(null);
+    setPreparedFlow(null);
     dispatch(action);
   }
 
@@ -55,12 +67,16 @@ export function App() {
     client.disconnect();
     setConnected(false);
     setPreview(false);
+    setFlow(null);
+    setPreviewBookmark(null);
     setManualMappings(false);
     setBusy(false);
     setError(message);
     setWorkspace(null);
     setScope(null);
     setGraph(emptyGraph);
+    setPreparedSource(null);
+    setPreparedFlow(null);
     dispatch({ type: 'scope', digest: null });
   }, [client]);
 
@@ -79,7 +95,7 @@ export function App() {
     return job;
   }
 
-  function fromPreview(value: PreviewSelection) {
+  function fromPreview(value: PreviewSelection, content: string | null) {
     if (value.scopeDigest !== scope?.vector_digest) return;
     const node = value.graphNode;
     if (!graph.nodes.some(item => item.node_id === node.node_id)) {
@@ -91,11 +107,58 @@ export function App() {
         { ...current, nodes: [...current.nodes, node] });
     }
     setError(null);
+    setPreparedFlow(null);
+    setPreparedSource(content === null ? null : { selectionID: value.selectionID, content });
     dispatch({ type: 'preview', node: node.node_id, value });
+  }
+
+  function openFlow(root: GraphNode, currentScope: ScopeVector) {
+    selectionOrder.current++;
+    if (preview) setPreviewBookmark({ scope: currentScope.vector_digest, node: chosen?.node ?? null });
+    setPreview(false);
+    setFlow({ scope: currentScope.vector_digest, root });
+    dispatch({ type: 'pane', value: 'right' });
+  }
+
+  function closeFlow() {
+    selectionOrder.current++;
+    setFlow(null);
+    requestAnimationFrame(() => flowButton.current?.focus());
+  }
+
+  function returnToPreview() {
+    if (!scope || previewBookmark?.scope !== scope.vector_digest || !client.previewEnabled()) return;
+    const target = previewBookmark.node;
+    closeFlow();
+    setPreviewBookmark(null);
+    if (target && graph.nodes.some(item => item.node_id === target)) manualSelection({ type: 'choose', node: target });
+    setPreview(true);
+    dispatch({ type: 'pane', value: 'right' });
+  }
+
+  function fromFlow(value: FlowSelection) {
+    if (!scope || flow?.scope !== scope.vector_digest) return;
+    if (!graph.nodes.some(item => item.node_id === value.node.node_id)) {
+      if (busy || graph.nodes.length >= hardNodes) {
+        setError('Đã khớp nguồn của bước flow. Đồ thị đang tải hoặc đã đầy.');
+        return;
+      }
+      setGraph(current => current.nodes.some(item => item.node_id === value.node.node_id) ? current :
+        { ...current, nodes: [...current.nodes, value.node] });
+    }
+    setError(null);
+    setPreparedSource(null);
+    setPreparedFlow({ key: scope.vector_digest + sourceKey(value.source), content: value.content });
+    dispatch({ type: 'choose', node: value.node.node_id });
+    dispatch({ type: 'mapping-range', node: value.node.node_id, source: value.source });
   }
 
   async function readWorkspace(job: AbortController) {
     selectionOrder.current++;
+    setPreparedSource(null);
+    setPreparedFlow(null);
+    setFlow(null);
+    setPreviewBookmark(null);
     const response = await client.workspace(job.signal);
     const next = response.scope ?? null;
     if (!response.data) throw new Error('Thông tin workspace chưa khả dụng.');
@@ -169,6 +232,10 @@ export function App() {
   const chosen = selection.history[selection.position];
   const node = graph.nodes.find(item => item.node_id === chosen?.node) ?? null;
   const selectedSource = chosen?.mappingSource ?? chosen?.preview?.match.source_refs[0] ?? node?.source_refs[chosen?.source ?? 0];
+  const exactFlow = scope && flow?.scope === scope.vector_digest ? flow : null;
+  const flowSource = selectedSource && scope && preparedFlow?.key === scope.vector_digest + sourceKey(selectedSource)
+    ? preparedFlow.content : null;
+  const contextLocator = node && scope ? selectionLocator(node.ref, scope, selectedSource) : null;
   const relations = useMemo(() => node ? graph.edges.filter(edge =>
     edge.from_node_id === node.node_id || edge.to_node_id === node.node_id) : [], [graph.edges, node]);
   const statusText = !connected ? 'Ngắt kết nối' : busy && !workspace ? 'Đang tải' :
@@ -191,7 +258,15 @@ export function App() {
           connected ? ' status-mark--online' : '')} role="status">{statusText}</span>
         {connected && <button className="quiet-button" type="button" disabled={busy} onClick={() => void refresh()}>Tải lại</button>}
         {connected && scope && client.previewEnabled() &&
-          <button className="quiet-button" type="button" onClick={() => { setPreview(true); dispatch({ type: 'pane', value: 'right' }); }}>Preview</button>}
+          <button className="quiet-button" type="button" onClick={() => {
+            if (exactFlow) closeFlow();
+            setPreview(true);
+            dispatch({ type: 'pane', value: 'right' });
+          }}>Preview</button>}
+        {connected && scope && node && client.flowEnabled() && (node.ref.kind === 'symbol' || node.ref.kind === 'entity') &&
+          <button className="quiet-button" ref={flowButton} type="button"
+            aria-pressed={exactFlow !== null && exactFlow.root.node_id === node.node_id}
+            onClick={() => openFlow(node, scope)}>Flow backend</button>}
         {connected && client.recordsEnabled() &&
           <button className="quiet-button" type="button" aria-pressed={manualMappings}
             onClick={() => { setManualMappings(value => !value); dispatch({ type: 'pane', value: 'right' }); }}>Hồ sơ mapping</button>}
@@ -223,7 +298,7 @@ export function App() {
           <button type="button" aria-pressed={selection.compactPane === 'graph'}
             onClick={() => dispatch({ type: 'pane', value: 'graph' })}>Đồ thị</button>
           <button type="button" aria-pressed={selection.compactPane === 'right'}
-            onClick={() => dispatch({ type: 'pane', value: 'right' })}>Nguồn</button>
+            onClick={() => dispatch({ type: 'pane', value: 'right' })}>{exactFlow ? 'Flow và nguồn' : 'Nguồn'}</button>
         </nav>
       </div>
       <div className="workspace" data-pane={selection.compactPane}
@@ -233,18 +308,29 @@ export function App() {
           onMore={() => void more()} />
         <Splitter value={width} onChange={setWidth} />
         <div className="workspace-right">
+          {exactFlow && scope && <FlowPanel key={scope.vector_digest + exactFlow.root.node_id}
+            client={client} root={exactFlow.root} scope={scope} visible={graph.nodes} selected={node}
+            beginSelection={beginSelection} onSelect={fromFlow} onClose={closeFlow} onSessionError={sessionError}
+            {...(previewBookmark?.scope === scope.vector_digest ? { onReturnToPreview: returnToPreview } : {})} />}
           {preview && scope && client.previewEnabled() &&
             <PreviewPanel key={scope.vector_digest} client={client} scope={scope} close={() => setPreview(false)}
               onSelect={fromPreview} beginSelection={beginSelection} graphNode={node}
-              onSource={(node, source) => dispatch({ type: 'mapping-range', node, source })} />}
+              onSource={(node, source) => {
+                setPreparedSource(null);
+                dispatch({ type: 'mapping-range', node, source });
+              }} />}
           {manualMappings && client.recordsEnabled() &&
             <ManualMappings client={client} scope={scope} node={node} source={selectedSource} onChanged={refresh} onSessionError={sessionError} />}
           <SourcePane client={client} scope={scope} node={node} sourceIndex={chosen?.source ?? 0}
             detail={selection.detail} edges={relations}
             onRange={index => manualSelection({ type: 'range', index })}
             onDetail={value => dispatch({ type: 'detail', value })}
+            preparedSource={flowSource ?? (preparedSource && preparedSource.selectionID === chosen?.preview?.selectionID ? preparedSource.content : null)}
             onSessionError={sessionError} {...(chosen?.preview ? { preview: chosen.preview } : {})}
             {...(chosen?.mappingSource ? { mappingSource: chosen.mappingSource } : {})} />
+          {node && scope && client.contextEnabled() &&
+            <SelectionContext key={scope.vector_digest + node.node_id + JSON.stringify(selectedSource ?? null)}
+              client={client} scope={scope} locator={contextLocator} source={selectedSource} onSessionError={sessionError} />}
         </div>
       </div>
     </>}

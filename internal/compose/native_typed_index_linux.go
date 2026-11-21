@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	golanganalysis "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/analysis/golang"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/flowview"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/inventory"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
@@ -27,9 +28,19 @@ type nativeTypedIndex struct {
 	relations []model.RelationFact
 	selected  int
 	proof     *runtime.GoToolchainProof
+	program   *flowview.Program
 }
 
-func (i *nativeInventory) typedIndex(ctx context.Context, captured nativeCapture, available map[string]golanganalysis.TypedPackageIdentity) (_ *nativeTypedIndex, resultErr error) {
+type nativeFlowLoad struct {
+	directory string
+	member    model.ScopeMember
+}
+
+func (i *nativeInventory) typedIndex(ctx context.Context, captured nativeCapture, available map[string]golanganalysis.TypedPackageIdentity) (*nativeTypedIndex, error) {
+	return i.loadTypedIndex(ctx, captured, available, nil)
+}
+
+func (i *nativeInventory) loadTypedIndex(ctx context.Context, captured nativeCapture, available map[string]golanganalysis.TypedPackageIdentity, flow *nativeFlowLoad) (_ *nativeTypedIndex, resultErr error) {
 	n := i.scope
 	profile := n.binding.Profile
 	manifest := captured.snapshot.Manifest()
@@ -165,6 +176,9 @@ func (i *nativeInventory) typedIndex(ctx context.Context, captured nativeCapture
 	result := &nativeTypedIndex{proof: proof}
 	byID := map[string]model.RelationFact{}
 	for _, dir := range dirs {
+		if flow != nil && dir != flow.directory {
+			continue
+		}
 		unit := available[dir]
 		others := make([]golanganalysis.TypedPackageIdentity, 0, len(dirs)-1)
 		for _, other := range dirs {
@@ -173,8 +187,18 @@ func (i *nativeInventory) typedIndex(ctx context.Context, captured nativeCapture
 			}
 		}
 		loader.PackageDir = dir
-		graph, err := golanganalysis.AnalyzeCapturedGraph(ctx, golanganalysis.GraphInput{MaxRelations: 10000, MaxOutputBytes: 8 << 20, Typed: golanganalysis.TypedInput{
-			Loader: loader, PackageKey: unit.PackageKey, ModuleKey: unit.ModuleKey, OtherPackageCandidates: others, MaxNodes: 100000, MaxDepth: 512, MaxFacts: 10000, MaxOccurrences: 10000, MaxOutputBytes: 8 << 20}})
+		input := golanganalysis.GraphInput{MaxRelations: 10000, MaxOutputBytes: 8 << 20, Typed: golanganalysis.TypedInput{
+			Loader: loader, PackageKey: unit.PackageKey, ModuleKey: unit.ModuleKey, OtherPackageCandidates: others, MaxNodes: 100000, MaxDepth: 512, MaxFacts: 10000, MaxOccurrences: 10000, MaxOutputBytes: 8 << 20}}
+		if flow != nil {
+			program, err := flowview.Load(ctx, flowview.Input{Graph: input, Member: flow.member, ServeMuxModern: true})
+			if err != nil {
+				return nil, err
+			}
+			result.program = program
+			retained = true
+			return result, nil
+		}
+		graph, err := golanganalysis.AnalyzeCapturedGraph(ctx, input)
 		if errors.Is(err, golanganalysis.ErrSyntaxLimit) {
 			return nil, nil
 		}

@@ -134,15 +134,15 @@ func TestRetainedQueryRequiresExplicitOwnerAndBackendCapability(t *testing.T) {
 		return service, func() error { released++; return nil }, nil
 	}
 	raw := []byte(`{"selector":{"kind":"workspace"},"task_kind":"explore"}`)
-	result, err := executeQuery(context.Background(), "context", raw, 4, "", nil, nil)
+	result, err := executeQuery(context.Background(), "context", raw, 4, "", nil, nil, nil)
 	if err != nil || result.ExitCode != 3 || opened != 0 {
 		t.Fatalf("missing owner was accepted: %v", err)
 	}
-	result, err = executeQuery(context.Background(), "context", raw, 4, "", nil, retainedOpen)
+	result, err = executeQuery(context.Background(), "context", raw, 4, "", nil, retainedOpen, nil)
 	if err != nil || result.ExitCode != 3 || opened != 1 || released != 1 || backend.calls.Load() != 0 {
 		t.Fatalf("owner without retention capability was accepted: %v", err)
 	}
-	result, err = executeQuery(context.Background(), "context", []byte(`{"unknown":"private"}`), 4, "", nil, retainedOpen)
+	result, err = executeQuery(context.Background(), "context", []byte(`{"unknown":"private"}`), 4, "", nil, retainedOpen, nil)
 	if err != nil || result.ExitCode != 2 || opened != 1 {
 		t.Fatal("invalid request opened the retained owner")
 	}

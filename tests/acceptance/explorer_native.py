@@ -89,7 +89,11 @@ def exercise(root, setup, worktree, profile_id, active, *, gu0=False, canary_onl
               amend=lambda h: h.update({"Host": f"localhost:{port}"}))
         query("GET", API + "/workspace", bearer=bearer, status=403,
               amend=lambda h: h.update({"Origin": "null"}))
-        query("POST", API + "/preview/status", {"session_id": worktree}, bearer, status=404)
+        preview_ready = "preview_status" in bootstrap["data"]["capabilities"]
+        preview = query("POST", API + "/preview/status", {"session_id": worktree}, bearer,
+                        status=403 if preview_ready else 404)
+        if preview_ready:
+            assert preview["error"]["code"] == "PREVIEW_NOT_APPROVED" and preview["scope"] is None
         query("POST", API + "/preview-permission", {"action": "list"}, bearer, status=404)
         workspace = query("GET", API + "/workspace?verify=none", bearer=bearer)
         scope = workspace["scope"]
@@ -187,8 +191,14 @@ def verify_canary(query, bearer, scope, name, marker):
                range={"start_byte": 0, "end_byte": len(marker)})
     denied = query("POST", API + "/source/read", {"source_ref": ref}, bearer, status=403)
     assert denied["scope"] is None and denied["error"]["code"] == "ACCESS_DENIED"
+    file_ref = {key: value for key, value in ref.items() if key != "range"}
+    blocked_node = query("POST", API + "/graph/query", {
+        "root": {"kind": "ref", "ref": dict(file_ref, kind="file"), "service_id": None},
+        "scope": {"pinned_vector": scope}, "depth": 0,
+    }, bearer, status=403)
+    assert blocked_node["scope"] is None and blocked_node["error"]["code"] == "ACCESS_DENIED"
     print(json.dumps({"check": "C083_POLICY_CANARY", "status": "PASS", "policy_epoch": 3,
-                      "denied_path": 403, "canary_disclosures": 0}), flush=True)
+                      "denied_path": 403, "denied_file_node": 403, "canary_disclosures": 0}), flush=True)
 
 
 def verify_gu0(query, bearer, expiry, ref):

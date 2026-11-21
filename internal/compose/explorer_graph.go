@@ -126,6 +126,12 @@ func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, req
 			return nil, err
 		}
 		cap = observed.Binding.Policy.MaxOutputBytes
+		if selected, ok := request.Root.(*model.RefSelector); ok && depth == 0 {
+			if ref, ok := selected.Ref.(*model.FileRef); ok {
+				options.MaxOutputBytes = min(options.MaxOutputBytes, cap, e.core.limits.MaxOutputBytes)
+				return e.readFileNode(ctx, p, observed, selected, ref, options)
+			}
+		}
 		binding := contextpack.CursorBinding{Purpose: "list", PrincipalDigest: p.Digest, BindingDigest: p.BindingDigest,
 			Scope: observed.Vector, RequestDigest: digest, OrderVersion: explorerGraphOrder}
 		entry, err = e.projectGraph(ctx, p, observed, request, binding, guard)
@@ -242,6 +248,68 @@ func (e *ExplorerReader) projectGraph(ctx context.Context, p app.CorePrincipal, 
 	return explorerGraph{pager: pager, scope: observed.Vector, coverage: graph.Coverage, expires: time.Now().Add(e.graphs.ttl)}, nil
 }
 
+// readFileNode serves an exact depth-zero FileRef from captured bytes. A
+// single node has no continuation and needs no provider graph materialization.
+func (e *ExplorerReader) readFileNode(ctx context.Context, p app.CorePrincipal, observed ScopeObservation,
+	selected *model.RefSelector, ref *model.FileRef, options app.CoreCallOptions) ([][]byte, error) {
+	member, err := model.MatchPinnedMember(observed.Vector, ref, selected.ServiceID)
+	if err != nil {
+		return nil, ErrAuthority
+	}
+	input, maxSource, err := e.publishedRead(p, observed)
+	if err != nil {
+		return nil, err
+	}
+	input.Path = ref.Path
+	input.MaxFileBytes = int(min(int64(input.MaxFileBytes), maxSource))
+	file, err := e.core.Reader.Index.ReadPublishedFile(ctx, input)
+	if errors.Is(err, index.ErrSnapshotUnavailable) {
+		return nil, ErrScopeSnapshotExpired
+	}
+	if errors.Is(err, index.ErrPublishedFileUnavailable) {
+		return nil, app.ErrValidationPrecondition
+	}
+	if err != nil {
+		return nil, err
+	}
+	if file.IndexIncarnation != member.IndexIncarnation || file.SnapshotDigest != member.SnapshotDigest ||
+		file.PolicyDigest != member.PolicyDigest || file.PolicyEpoch != member.PolicyEpoch {
+		return nil, ErrScopeChanged
+	}
+	if ref.ContentHash == nil || *ref.ContentHash != file.ContentHash {
+		return nil, app.ErrValidationPrecondition
+	}
+	node, err := explorerFileNode(ref, int64(len(file.Bytes)))
+	if err != nil {
+		return nil, err
+	}
+	nodes, edges := []model.GraphNode{node}, []model.GraphEdge{}
+	digest, err := model.SubgraphDigest(observed.Vector, nodes, edges, maxProjectionBytes)
+	if err != nil {
+		return nil, err
+	}
+	response := baseResponse(options, observed.Vector)
+	response.Coverage.ScopeDescription = "Exact captured file node. Provider graph coverage was not inspected."
+	response.Data = model.GraphData{Operation: "graph_query", Nodes: nodes, Edges: edges, SubgraphDigest: digest}
+	response.Pagination.ReturnedCount = 1
+	blocks, err := encodeResponse(response)
+	if err != nil {
+		return nil, contextpack.ErrItemTooLarge
+	}
+	return blocks, nil
+}
+
+func explorerFileNode(ref *model.FileRef, size int64) (model.GraphNode, error) {
+	id, err := model.GraphRefDigest(ref, 8192)
+	if err != nil {
+		return model.GraphNode{}, err
+	}
+	source := model.SourceRef{WorktreeID: ref.WorktreeID, ProfileID: ref.ProfileID, GenerationID: ref.GenerationID,
+		Path: ref.Path, ContentHash: *ref.ContentHash, Range: model.ByteRange{EndByte: size}}
+	return model.GraphNode{NodeID: id, Ref: ref, Kind: "file", Label: path.Base(ref.Path),
+		Plane: "observed_static", SourceRefs: []model.SourceRef{source}, EvidenceRefs: []model.EvidenceRef{}}, nil
+}
+
 func explorerGraphFacts(ctx context.Context, graph *index.PublishedGraph, scope model.ScopeVector,
 	request model.GraphQueryRequest, maxNodes, maxEdges int,
 ) ([]model.GraphNode, []model.GraphEdge, error) {
@@ -268,15 +336,11 @@ func explorerGraphFacts(ctx context.Context, graph *index.PublishedGraph, scope 
 			if !ok || ref.ContentHash == nil || *ref.ContentHash != file.ContentHash() {
 				return nil, nil, app.ErrValidationPrecondition
 			}
-			id, err := model.GraphRefDigest(ref, 8192)
+			node, err := explorerFileNode(ref, int64(file.Len()))
 			if err != nil {
 				return nil, nil, err
 			}
-			source := model.SourceRef{WorktreeID: member.WorktreeID, ProfileID: member.ProfileID, GenerationID: member.GenerationID,
-				Path: ref.Path, ContentHash: file.ContentHash(), Range: model.ByteRange{EndByte: int64(file.Len())}}
-			fileRoot = ref
-			fileNode = model.GraphNode{NodeID: id, Ref: ref, Kind: "file", Label: path.Base(ref.Path),
-				Plane: "observed_static", SourceRefs: []model.SourceRef{source}, EvidenceRefs: []model.EvidenceRef{}}
+			fileRoot, fileNode = ref, node
 			if *request.Depth == 0 {
 				return []model.GraphNode{fileNode}, []model.GraphEdge{}, ctx.Err()
 			}
