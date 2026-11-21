@@ -191,6 +191,7 @@ type nativeCoreParts struct {
 	backend   *CoreBackend
 	config    *app.RuntimeConfigService
 	effective model.RuntimeConfig
+	scope     *nativeScope
 }
 
 func openNativeCoreParts(ctx context.Context, installation, selected, worktree, profile string, cpus int, retained, rename bool) (_ *nativeCoreParts, release func() error, resultErr error) {
@@ -303,7 +304,7 @@ func openNativeCoreParts(ctx context.Context, installation, selected, worktree, 
 			return nil, nil, err
 		}
 	}
-	return &nativeCoreParts{backend: backend, config: config, effective: effective}, release, nil
+	return &nativeCoreParts{backend: backend, config: config, effective: effective, scope: n}, release, nil
 }
 
 func nativeLinkedRelative(target *paths.Root, common string) (string, error) {

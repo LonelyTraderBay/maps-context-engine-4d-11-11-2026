@@ -98,6 +98,16 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	switch op {
 	case bootstrap, workspace, graph, source:
+	case previewAttach, previewBind, previewStatus, previewMode, previewAck, previewInvalidate, previewDetach, previewMapping:
+		if s.options.Preview == nil {
+			s.reject(w, http.StatusNotFound, "UNSUPPORTED_CAPABILITY")
+			return
+		}
+	case recordList, recordRead, mappingPropose, mappingReview:
+		if s.options.Records == nil {
+			s.reject(w, http.StatusNotFound, "UNSUPPORTED_CAPABILITY")
+			return
+		}
 	default:
 		s.reject(w, http.StatusNotFound, "UNSUPPORTED_CAPABILITY")
 		return
@@ -124,6 +134,15 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.exchange(ctx, w, value)
+		return
+	}
+	if strings.HasPrefix(op, "POST /preview/") || op == previewMapping {
+		s.servePreview(ctx, w, op, token, request)
+		return
+	}
+	switch op {
+	case recordList, recordRead, mappingPropose, mappingReview:
+		s.serveRecords(ctx, w, op, token, request)
 		return
 	}
 	id, err := requestID()
@@ -243,8 +262,15 @@ func (s *Server) exchange(ctx context.Context, w http.ResponseWriter, request mo
 		return
 	}
 	response := emptyResponse()
+	capabilities := []string{"workspace_status", "graph_query", "source_read"}
+	if s.options.Preview != nil {
+		capabilities = append(capabilities, "preview_attach", "preview_status")
+	}
+	if s.options.Records != nil {
+		capabilities = append(capabilities, "records_list", "mapping_propose")
+	}
 	response.Data = model.BootstrapData{Operation: "bootstrap", Bearer: bearer,
-		ExpiresAt: end.Format(time.RFC3339Nano), Capabilities: []string{"workspace_status", "graph_query", "source_read"}}
+		ExpiresAt: end.Format(time.RFC3339Nano), Capabilities: capabilities}
 	body, err := encode(response)
 	if err != nil {
 		s.auth.revoke()

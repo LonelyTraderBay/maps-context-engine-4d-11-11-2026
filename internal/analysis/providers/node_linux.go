@@ -34,66 +34,97 @@ const (
 )
 
 func (p *NodeProvider) Analyze(parent context.Context, job ports.ProviderJob, sink ports.ProviderSink) (model.ProviderDone, error) {
-	if p == nil || parent == nil || job.Recheck == nil || job.Capture == nil || sink == nil {
+	if sink == nil {
 		return model.ProviderDone{}, ErrAuthority
+	}
+	var done model.ProviderDone
+	err := p.withNode(parent, job, func(ctx context.Context, root, compiler *paths.Root, node, worker *os.File, verified ports.ProviderJob) error {
+		return runFramedNode(ctx, root, compiler, node, worker, verified, "", func(ctx context.Context, reader *bufio.Reader) error {
+			var err error
+			done, err = readProviderStream(ctx, reader, verified, sink)
+			return err
+		})
+	})
+	if err != nil {
+		return model.ProviderDone{}, err
+	}
+	return done, nil
+}
+
+// AnalyzeFrontend reads one bounded addon response from an embedded worker.
+// The caller returns an error for an invalid response, including scope mismatch.
+func (p *NodeProvider) AnalyzeFrontend(parent context.Context, job ports.ProviderJob, accept func(context.Context, ports.ProviderJob, []byte) error) error {
+	if p == nil || len(p.config.EmbeddedWorker) == 0 || p.config.Compiler == (CompilerInstallation{}) || accept == nil {
+		return ErrAuthority
+	}
+	return p.withNode(parent, job, func(ctx context.Context, root, compiler *paths.Root, node, worker *os.File, verified ports.ProviderJob) error {
+		return runFramedNode(ctx, root, compiler, node, worker, verified, "frontend", func(ctx context.Context, reader *bufio.Reader) error {
+			body, err := readFrame(reader, int(verified.Start.MaxFrameBytes))
+			if err != nil {
+				return err
+			}
+			return accept(ctx, verified, body)
+		})
+	})
+}
+
+func (p *NodeProvider) withNode(parent context.Context, job ports.ProviderJob,
+	run func(context.Context, *paths.Root, *paths.Root, *os.File, *os.File, ports.ProviderJob) error) error {
+	if p == nil || parent == nil || job.Recheck == nil || job.Capture == nil {
+		return ErrAuthority
 	}
 	start := job.Start
 	body, err := json.Marshal(&start)
 	if err != nil || len(body) > 65536 {
-		return model.ProviderDone{}, ErrProtocol
+		return ErrProtocol
 	}
 	start, err = model.DecodeProviderStartJSON(body, int(start.MaxFrameBytes))
 	if err != nil {
-		return model.ProviderDone{}, ErrProtocol
+		return ErrProtocol
 	}
 	job.Start = start
 	ts, ok := start.Profile.(*model.TSProfile)
 	if !ok || start.ProviderID != p.config.ProviderID || start.ProviderDigest != p.config.ProviderDigest ||
 		ts.NodeDigest != p.config.NodeDigest || ts.CompilerDigest != p.config.CompilerDigest {
-		return model.ProviderDone{}, ErrAuthority
+		return ErrAuthority
 	}
 	for _, config := range ts.TsconfigPaths {
 		if _, err := job.Capture.CheckCapturedRange(config, model.ByteRange{}); err != nil {
-			return model.ProviderDone{}, ErrAuthority
+			return ErrAuthority
 		}
 	}
 	deadline, err := time.Parse(time.RFC3339Nano, start.DeadlineAt)
 	if err != nil {
-		return model.ProviderDone{}, ErrProtocol
+		return ErrProtocol
 	}
 	ctx, stop := context.WithDeadline(parent, minTime(deadline, time.Now().Add(time.Minute)))
 	defer stop()
 	root, err := p.verifyJob(ctx, job)
 	if err != nil {
-		return model.ProviderDone{}, err
+		return err
 	}
 	defer root.Close()
 	node, err := openPinned(p.config.NodePath, p.config.NodeDigest, maxNodeBytes, true)
 	if err != nil {
-		return model.ProviderDone{}, err
+		return err
 	}
 	defer node.Close()
-	program, err := openPinned(p.config.Entrypoint, p.config.ProviderDigest, maxProgramBytes, false)
+	worker, err := p.sealWorker()
 	if err != nil {
-		return model.ProviderDone{}, err
-	}
-	defer program.Close()
-	worker, err := sealProgram(program, p.config.ProviderDigest)
-	if err != nil {
-		return model.ProviderDone{}, err
+		return err
 	}
 	defer worker.Close()
 	compiler, err := p.verifyCompiler(ctx)
 	if err != nil {
-		return model.ProviderDone{}, err
+		return err
 	}
 	if compiler != nil {
 		defer compiler.Close()
 	}
 	if err := job.Recheck(ctx); err != nil {
-		return model.ProviderDone{}, ErrAuthority
+		return ErrAuthority
 	}
-	return runNode(ctx, root, compiler, node, worker, job, sink)
+	return run(ctx, root, compiler, node, worker, job)
 }
 
 func minTime(a, b time.Time) time.Time {
@@ -253,12 +284,25 @@ type stderrLimit struct {
 	cancel context.CancelCauseFunc
 }
 
-func sealProgram(program *os.File, digest string) (*os.File, error) {
-	if _, err := program.Seek(0, io.SeekStart); err != nil {
+func (p *NodeProvider) sealWorker() (*os.File, error) {
+	body := p.config.EmbeddedWorker
+	if len(body) == 0 {
+		program, err := openPinned(p.config.Entrypoint, p.config.ProviderDigest, maxProgramBytes, false)
+		if err != nil {
+			return nil, err
+		}
+		defer program.Close()
+		if _, err := program.Seek(0, io.SeekStart); err != nil {
+			return nil, ErrAuthority
+		}
+		body, err = io.ReadAll(io.LimitReader(program, maxProgramBytes+1))
+		if err != nil {
+			return nil, ErrAuthority
+		}
+	} else if p.config.Entrypoint != "" {
 		return nil, ErrAuthority
 	}
-	body, err := io.ReadAll(io.LimitReader(program, maxProgramBytes+1))
-	if err != nil || len(body) > maxProgramBytes || hexDigest(body) != digest {
+	if len(body) == 0 || len(body) > maxProgramBytes || hexDigest(body) != p.config.ProviderDigest {
 		return nil, ErrAuthority
 	}
 	fd, err := unix.MemfdCreate("mce4d-provider", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
@@ -286,23 +330,24 @@ func (s *stderrLimit) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func runNode(ctx context.Context, root, compiler *paths.Root, node, script *os.File, job ports.ProviderJob, sink ports.ProviderSink) (done model.ProviderDone, resultErr error) {
+func runFramedNode(ctx context.Context, root, compiler *paths.Root, node, script *os.File, job ports.ProviderJob,
+	mode string, consume func(context.Context, *bufio.Reader) error) (resultErr error) {
 	ctx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	dir, err := root.DirectoryHandle()
 	if err != nil {
-		return done, ErrAuthority
+		return ErrAuthority
 	}
 	defer dir.Close()
 	inR, inW, err := os.Pipe()
 	if err != nil {
-		return done, ErrProcess
+		return ErrProcess
 	}
 	defer inR.Close()
 	defer inW.Close()
 	outR, outW, err := os.Pipe()
 	if err != nil {
-		return done, ErrProcess
+		return ErrProcess
 	}
 	defer outR.Close()
 	defer outW.Close()
@@ -312,10 +357,13 @@ func runNode(ctx context.Context, root, compiler *paths.Root, node, script *os.F
 		"--max-old-space-size=256", "--allow-fs-read=" + programFD,
 		"--allow-fs-read=" + job.Start.SnapshotRoot}
 	env := []string{"LC_ALL=C", "TZ=UTC"}
+	if mode != "" {
+		env = append(env, "MCE4D_PROVIDER_MODE="+mode)
+	}
 	if compiler != nil {
 		path, err := compiler.CanonicalPath()
 		if err != nil {
-			return done, ErrAuthority
+			return ErrAuthority
 		}
 		args = append(args, "--allow-fs-read="+path)
 		env = append(env, "MCE4D_COMPILER_ROOT="+path)
@@ -331,7 +379,7 @@ func runNode(ctx context.Context, root, compiler *paths.Root, node, script *os.F
 	limit := int(job.Start.MaxFrameBytes)
 	cancelFrame, err := encodeFrame(&model.ProviderCancel{ProviderProtocol: 1, Type: "cancel", JobID: job.Start.JobID}, limit)
 	if err != nil {
-		return done, err
+		return err
 	}
 	cmd.Cancel = func() error {
 		if write.TryLock() {
@@ -344,7 +392,7 @@ func runNode(ctx context.Context, root, compiler *paths.Root, node, script *os.F
 		return cmd.Process.Kill()
 	}
 	if err := cmd.Start(); err != nil {
-		return done, ErrProcess
+		return ErrProcess
 	}
 	_ = inR.Close()
 	_ = outW.Close()
@@ -356,29 +404,41 @@ func runNode(ctx context.Context, root, compiler *paths.Root, node, script *os.F
 		_ = outR.Close()
 		waitErr := cmd.Wait()
 		if cause := context.Cause(ctx); cause != nil {
-			done, resultErr = model.ProviderDone{}, cause
+			resultErr = cause
 		} else if waitErr != nil && resultErr == nil {
-			done, resultErr = model.ProviderDone{}, ErrProcess
+			resultErr = ErrProcess
 		}
 		if resultErr == nil {
 			if err := verifyCapture(ctx, root, job); err != nil {
-				done, resultErr = model.ProviderDone{}, err
+				resultErr = err
 			} else if job.Recheck(ctx) != nil || compiler != nil && compiler.Verify() != nil {
-				done, resultErr = model.ProviderDone{}, ErrAuthority
+				resultErr = ErrAuthority
 			}
 		}
 	}()
 	wire, err := encodeFrame(&job.Start, limit)
 	if err != nil {
-		return done, err
+		return err
 	}
 	write.Lock()
 	_, err = inW.Write(wire)
 	write.Unlock()
 	if err != nil {
-		return done, ErrProcess
+		return ErrProcess
 	}
+	reader := bufio.NewReaderSize(outR, 8192)
+	if err := consume(ctx, reader); err != nil {
+		return err
+	}
+	_ = inW.Close()
+	// Reject a second terminal frame or stray stdout before reaping.
+	if _, err := reader.Peek(1); !errors.Is(err, io.EOF) {
+		return ErrProtocol
+	}
+	return nil
+}
 
+func readProviderStream(ctx context.Context, reader *bufio.Reader, job ports.ProviderJob, sink ports.ProviderSink) (done model.ProviderDone, resultErr error) {
 	facts := factScope{capture: job.Capture, packages: map[string]bool{}, symbols: map[string]bool{},
 		relations: map[string]bool{}, diagnostics: map[string]bool{}}
 	manifest := job.Capture.Manifest()
@@ -386,7 +446,7 @@ func runNode(ctx context.Context, root, compiler *paths.Root, node, script *os.F
 	if err != nil {
 		return done, ErrProtocol
 	}
-	reader := bufio.NewReaderSize(outR, 8192)
+	limit := int(job.Start.MaxFrameBytes)
 	remaining := maxStream
 	for {
 		data, err := readFrame(reader, limit)
@@ -419,11 +479,6 @@ func runNode(ctx context.Context, root, compiler *paths.Root, node, script *os.F
 		case *model.ProviderDone:
 			if err := checkDone(job, manifest.WorktreeID, value); err != nil {
 				return done, err
-			}
-			_ = inW.Close()
-			// Reject a second frame or stray stdout, then reap the worker.
-			if _, err := reader.Peek(1); !errors.Is(err, io.EOF) {
-				return done, ErrProtocol
 			}
 			return *value, nil
 		}

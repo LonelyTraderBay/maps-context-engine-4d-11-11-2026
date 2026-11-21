@@ -64,12 +64,9 @@ func (s *Store) ListBuildingForRecovery(ctx context.Context, recoveryID string, 
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return nil, err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return nil, ErrStoreChanged
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT CASE WHEN length(CAST(g.generation_id AS BLOB))<=36 THEN g.generation_id END, CASE WHEN length(CAST(g.owner_job_id AS BLOB))<=36 THEN g.owner_job_id END, g.profile_id,g.policy_digest,g.policy_epoch,g.provider_fingerprint,g.snapshot_digest,EXISTS(SELECT 1 FROM active_generations a WHERE a.generation_id=g.generation_id) FROM generations g WHERE g.state='BUILDING' AND (?='' OR g.generation_id>?) ORDER BY g.generation_id LIMIT ?`, after, after, limit)
 	if err != nil {
@@ -205,12 +202,9 @@ func (s *Store) ObserveRecoveryCandidate(ctx context.Context, recoveryID string,
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return "", err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return "", ErrStoreChanged
 	}
 	row := tx.QueryRowContext(ctx, `SELECT CASE WHEN length(CAST(g.generation_id AS BLOB))<=36 THEN g.generation_id END, CASE WHEN length(CAST(g.owner_job_id AS BLOB))<=36 THEN g.owner_job_id END, g.profile_id,g.policy_digest,g.policy_epoch,g.provider_fingerprint,g.snapshot_digest,EXISTS(SELECT 1 FROM active_generations a WHERE a.generation_id=g.generation_id) FROM generations g WHERE g.generation_id=?`, candidate.GenerationID)
 	current, active, err := scanRecoveryCandidate(row)
@@ -323,12 +317,9 @@ func (s *Store) FailAbandonedGeneration(ctx context.Context, recoveryID string, 
 			}
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return ErrStoreChanged
 	}
 	var digest any
 	if candidate.SnapshotDigest != "" {

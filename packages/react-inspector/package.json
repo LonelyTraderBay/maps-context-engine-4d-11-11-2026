@@ -1,0 +1,7 @@
+{
+  "name": "@mce4d/react-inspector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./boundary.mjs"
+}

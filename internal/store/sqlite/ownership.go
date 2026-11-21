@@ -35,6 +35,10 @@ type poolLifetime struct {
 }
 
 func OpenIndexOwner(ctx context.Context, lease *runtime.Lifecycle, readers, writer *sql.DB, worktreeID string) (*IndexOwner, error) {
+	return openIndexOwner(ctx, lease, readers, writer, worktreeID, false)
+}
+
+func openIndexOwner(ctx context.Context, lease *runtime.Lifecycle, readers, writer *sql.DB, worktreeID string, enableUI bool) (*IndexOwner, error) {
 	if ctx == nil || lease == nil || readers == nil || writer == nil {
 		return nil, index.ErrInvalidStore
 	}
@@ -42,7 +46,11 @@ func OpenIndexOwner(ctx context.Context, lease *runtime.Lifecycle, readers, writ
 	if err != nil {
 		return nil, err
 	}
-	store, err := index.Open(ctx, readers, writer, worktreeID, lease)
+	openStore := index.Open
+	if enableUI {
+		openStore = index.OpenUICompatible
+	}
+	store, err := openStore(ctx, readers, writer, worktreeID, lease)
 	if err != nil {
 		return nil, errors.Join(err, hold.Close())
 	}

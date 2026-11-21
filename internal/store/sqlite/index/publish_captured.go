@@ -171,12 +171,9 @@ func (s *Store) publish(ctx context.Context, request publishPlan) (resultErr err
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, validation, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, validation)
 	if err != nil {
 		return err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return ErrStoreChanged
 	}
 	// Validation is deliberately outside the short publish transaction. Detect
 	// commits from other connections before relying on that validation below.

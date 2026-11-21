@@ -18,7 +18,7 @@ func openNativeIndexOwner(ctx context.Context, s *nativeWALStore) (*IndexOwner, 
 		return nil, err
 	}
 	readers, writer := s.pool(true, 4), s.pool(false, 1)
-	owner, err := OpenIndexOwner(ctx, s.lease, readers, writer, s.scope)
+	owner, err := openIndexOwner(ctx, s.lease, readers, writer, s.scope, nativeUIMaps)
 	if err != nil {
 		return nil, errors.Join(err, readers.Close(), writer.Close())
 	}

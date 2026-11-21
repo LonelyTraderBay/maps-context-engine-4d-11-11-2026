@@ -261,12 +261,9 @@ func (s *Store) StageProviderBatch(ctx context.Context, request StageProviderReq
 			}
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return next, err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return next, ErrStoreChanged
 	}
 	if err := verifyBuildingGeneration(ctx, tx, capture, manifest); err != nil {
 		return next, err

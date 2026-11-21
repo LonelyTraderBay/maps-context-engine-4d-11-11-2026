@@ -34,7 +34,11 @@ func TestSchemaReferenceCacheCancellationVersionsAndCopies(t *testing.T) {
 	if value, err := cache.get(canceled, 2); !errors.Is(err, context.Canceled) || value != nil {
 		t.Fatalf("cached reference ignored cancellation: %v", err)
 	}
-	if value, err := cache.get(context.Background(), 3); !errors.Is(err, ErrUnrecognizedStore) || value != nil {
+	addon, err := cache.get(context.Background(), uiAddonSchema)
+	if err != nil || len(addon) <= len(second) {
+		t.Fatalf("addon schema was not built separately: %v", err)
+	}
+	if value, err := cache.get(context.Background(), uiAddonSchema+1); !errors.Is(err, ErrUnrecognizedStore) || value != nil {
 		t.Fatalf("unsupported version accepted: %v", err)
 	}
 }

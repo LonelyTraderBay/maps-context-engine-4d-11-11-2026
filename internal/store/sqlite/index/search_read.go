@@ -132,12 +132,9 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	identity, err := s.inspectPinned(ctx, tx)
 	if err != nil {
 		return output, err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return output, ErrStoreChanged
 	}
 	var generation, digest, state, policyDigest, provider string
 	var epoch, manifestLen int64

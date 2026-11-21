@@ -94,12 +94,9 @@ func (s *Store) readPublishedFile(ctx context.Context, request PublishedFileRequ
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return PublishedFile{}, err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return PublishedFile{}, ErrStoreChanged
 	}
 	var generation, digest, state, policyDigest, provider string
 	var epoch int64

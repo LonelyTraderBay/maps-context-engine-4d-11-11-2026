@@ -13,7 +13,6 @@ import (
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
-	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/records"
 	"golang.org/x/sys/unix"
 )
@@ -22,11 +21,7 @@ import (
 // or make a replacement visible. The offline controller must subsequently
 // verify/bootstrap its new authority and journal every replacement boundary.
 func (o *quiescentOwner) stageRestoreDatabase(ctx context.Context, source, destination *stateDomain, entry StoreBackupFile, newIncarnation string) (out walLogicalImage, resultErr error) {
-	version := 1
-	if entry.Kind == "index" {
-		version = 2
-	}
-	if o == nil || o.pool != nil || source == nil || destination == nil || !model.ValidUUID(newIncarnation) || !model.ValidUUID(entry.SourceIncarnation) || newIncarnation == entry.SourceIncarnation || entry.FileName != entry.Kind+".sqlite" || entry.ByteLength < 512 || entry.ByteLength > 2<<30 || entry.ByteLength%512 != 0 || !model.ValidDigest(entry.RawSHA256) || !model.ValidDigest(entry.LogicalSHA256) || entry.SchemaVersion != version || entry.MinReaderVersion != version || !backupSQLiteVersion(entry.SQLiteVersion) {
+	if o == nil || o.pool != nil || source == nil || destination == nil || !model.ValidUUID(newIncarnation) || !model.ValidUUID(entry.SourceIncarnation) || newIncarnation == entry.SourceIncarnation || entry.FileName != entry.Kind+".sqlite" || entry.ByteLength < 512 || entry.ByteLength > 2<<30 || entry.ByteLength%512 != 0 || !model.ValidDigest(entry.RawSHA256) || !model.ValidDigest(entry.LogicalSHA256) || !supportedBackupSchema(entry) || !backupSQLiteVersion(entry.SQLiteVersion) {
 		return out, ErrProfileInput
 	}
 	if entry.Kind == "records" {
@@ -187,7 +182,7 @@ func (o *quiescentOwner) rotateStagedIncarnation(ctx context.Context, destinatio
 		}
 		table = "catalog_identity"
 	case "index":
-		if _, err := index.Open(ctx, db, db, o.scope, o.lease); err != nil {
+		if _, err := openMaintenanceIndex(ctx, db, o.scope, o.lease); err != nil {
 			return err
 		}
 		table = "store_identity"

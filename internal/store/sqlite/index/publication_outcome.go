@@ -70,12 +70,9 @@ func (s *Store) PublicationOutcomeByJob(ctx context.Context, request Publication
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return PublicationOutcome{}, err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return PublicationOutcome{}, ErrStoreChanged
 	}
 	var state, job, profile, policyDigest, provider string
 	var policyEpoch int64

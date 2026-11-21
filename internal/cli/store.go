@@ -88,17 +88,25 @@ func validGCReport(report StoreGCReport, worktree, profile string, apply bool) b
 	}
 	seen := map[string]bool{}
 	allowed := map[string]bool{"relations": true, "module_members": true, "search_documents": true, "diagnostics": true, "capability_results": true, "symbols": true, "modules": true, "files": true, "packages": true, "generations": true, "content_blobs": true}
+	addon := map[string]bool{"ui_build_bindings": true, "entity_links": true, "state_transitions": true, "contract_fields": true, "domain_entities": true}
 	for _, generation := range report.Generations {
 		id := model.ScopeRequest{WorktreeID: &generation.GenerationID, ProfileID: &profile}
-		if mode, err := id.SelectionMode(1); err != nil || mode != "single" || seen[generation.GenerationID] || generation.Applied != (apply && !generation.AlreadyAbsent) || generation.Rows == nil || len(generation.Rows) > len(allowed) || generation.BlobBytes < 0 || generation.BlobBytes > 9007199254740991 {
+		if mode, err := id.SelectionMode(1); err != nil || mode != "single" || seen[generation.GenerationID] || generation.Applied != (apply && !generation.AlreadyAbsent) || generation.Rows == nil || generation.BlobBytes < 0 || generation.BlobBytes > 9007199254740991 {
 			return false
 		}
 		seen[generation.GenerationID] = true
-		if generation.AlreadyAbsent && (len(generation.Rows) != 0 || generation.BlobBytes != 0) || !generation.AlreadyAbsent && len(generation.Rows) != len(allowed) {
+		if generation.AlreadyAbsent {
+			if len(generation.Rows) != 0 || generation.BlobBytes != 0 {
+				return false
+			}
+			continue
+		}
+		withAddon := len(generation.Rows) == len(allowed)+len(addon)
+		if !withAddon && len(generation.Rows) != len(allowed) {
 			return false
 		}
 		for key, count := range generation.Rows {
-			if !allowed[key] || count < 0 || count > 9007199254740991 {
+			if (!allowed[key] && !(withAddon && addon[key])) || count < 0 || count > 9007199254740991 {
 				return false
 			}
 		}

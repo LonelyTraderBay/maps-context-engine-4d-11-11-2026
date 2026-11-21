@@ -156,6 +156,10 @@ func initialize(ctx context.Context, db *sql.DB, worktreeID string, lease ports.
 }
 
 func inspectStore(ctx context.Context, db schemaQueryer, expectedWorktree string) (int, Identity, error) {
+	return inspectStoreThrough(ctx, db, expectedWorktree, supportedSchema)
+}
+
+func inspectStoreThrough(ctx context.Context, db schemaQueryer, expectedWorktree string, highest int) (int, Identity, error) {
 	var objects int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'`).Scan(&objects); err != nil {
 		return 0, Identity{}, err
@@ -171,7 +175,7 @@ func inspectStore(ctx context.Context, db schemaQueryer, expectedWorktree string
 	if err := db.QueryRowContext(ctx, `SELECT schema_version,min_reader_version FROM schema_meta WHERE singleton=1`).Scan(&version, &minReader); err != nil {
 		return 0, Identity{}, errors.Join(ErrUnrecognizedStore, err)
 	}
-	if version > supportedSchema || minReader > supportedSchema {
+	if version > highest || minReader > highest {
 		return 0, Identity{}, ErrSchemaTooNew
 	}
 	if version < 1 || minReader != version {

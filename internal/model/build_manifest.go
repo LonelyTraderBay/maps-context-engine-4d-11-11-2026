@@ -157,6 +157,12 @@ func DecodeBuildManifestJSON(data []byte, maxBytes int) (BuildManifest, error) {
 	}
 	return m, nil
 }
+
+// NormalizeBuildManifest validates the closed identity and returns sorted copies.
+func NormalizeBuildManifest(manifest BuildManifest) (BuildManifest, error) {
+	return manifest.normalized(true)
+}
+
 func ComputeBuildMapDigest(manifest BuildManifest, maxBytes int) (string, error) {
 	if maxBytes <= 0 || len(manifest.Sources) > maxBytes || len(manifest.Anchors) > maxBytes-len(manifest.Sources) {
 		return "", fmt.Errorf("manifest exceeds budget")

@@ -24,13 +24,21 @@ type schemaQueryer interface {
 // The cached reference is derived only from migrations embedded in this
 // binary. The real store is still read and compared on every validation.
 // Errors and canceled builds are not cached; each caller receives a copy.
-type schemaReferenceCache struct{ values schemaref.Cache[schemaObject] }
+type schemaReferenceCache struct {
+	values schemaref.Cache[schemaObject]
+	addon  schemaref.Cache[schemaObject]
+}
 
 var referenceSchemas schemaReferenceCache
 
 func (c *schemaReferenceCache) get(ctx context.Context, version int) ([]schemaObject, error) {
-	if c == nil || ctx == nil || version < 1 || version > supportedSchema {
+	if c == nil || ctx == nil || version < 1 || version > uiAddonSchema {
 		return nil, ErrUnrecognizedStore
+	}
+	if version > supportedSchema {
+		return c.addon.Get(ctx, version-supportedSchema, func(ctx context.Context, relative int) ([]schemaObject, error) {
+			return buildReferenceSchema(ctx, relative+supportedSchema)
+		})
 	}
 	return c.values.Get(ctx, version, buildReferenceSchema)
 }
@@ -47,9 +55,11 @@ func buildReferenceSchema(ctx context.Context, version int) (objects []schemaObj
 	if _, err := reference.ExecContext(ctx, migration.V1()); err != nil {
 		return nil, err
 	}
-	if version == 2 {
-		if _, err := reference.ExecContext(ctx, migration.V2()); err != nil {
-			return nil, err
+	for idx, ddl := range []string{migration.V2(), migration.V3(), migration.V4()} {
+		if version >= idx+2 {
+			if _, err := reference.ExecContext(ctx, ddl); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return readSchema(ctx, reference)

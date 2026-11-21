@@ -4,6 +4,7 @@ import { utf8, verifyScopeDigest } from '../index.ts';
 import type { GraphEdge, GraphNode, ScopeVector, SourceRef } from '../index.ts';
 import { nodeTitle } from './GraphPane.tsx';
 import type { DetailView } from './selection.ts';
+import type { PreviewSelection } from '../features/preview/pairing.ts';
 
 type SourceState = { key: string; content: string } | { key: string; error: string };
 
@@ -26,10 +27,12 @@ type Props = {
   onRange: (index: number) => void;
   onDetail: (view: DetailView) => void;
   onSessionError: (error: unknown) => void;
+  preview?: PreviewSelection;
+  mappingSource?: SourceRef;
 };
 
-export function SourcePane({ client, scope, node, sourceIndex, detail, edges, onRange, onDetail, onSessionError }: Props) {
-  const ref = node?.source_refs[sourceIndex];
+export function SourcePane({ client, scope, node, sourceIndex, detail, edges, onRange, onDetail, onSessionError, preview, mappingSource }: Props) {
+  const ref = mappingSource ?? preview?.match.source_refs[0] ?? node?.source_refs[sourceIndex];
   const key = ref && scope ? scope.vector_digest + sourceKey(ref) : null;
   const [state, setState] = useState<SourceState | null>(null);
   const current = state?.key === key ? state : null;
@@ -76,6 +79,8 @@ export function SourcePane({ client, scope, node, sourceIndex, detail, edges, on
         <span className="kind-label">{node.kind}</span>
         <h3>{nodeTitle(node)}</h3>
       </div>
+      {preview && <p className="notice">Bằng chứng build · {preview.ancestorFallback ? 'Ranh giới tổ tiên' : 'Anchor khớp'}
+        {' · '}{preview.moreInstances ? 'Ít nhất ' : ''}{preview.instancesRead} instance đã thấy.</p>}
       {detail === 'source' && <>
         {node.source_refs.length > 1 && <div className="ref-list" aria-label="Vùng mã nguồn">
           {node.source_refs.map((range, index) => <button type="button" key={sourceKey(range) + index}

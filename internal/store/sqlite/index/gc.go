@@ -115,12 +115,15 @@ func (s *Store) CollectGeneration(ctx context.Context, request GCRequest, genera
 		if err := checkModuleAcyclic(ctx, tx, generation, 100000, scanner); err != nil {
 			return errors.Join(ErrGCIntegrity, err)
 		}
-		// This binary supports R1 index schema 2 only. Future domain/UI tables
-		// cannot be skipped silently: inspectStore rejects their schema first.
 		tables := []string{"relations", "module_members", "search_documents", "diagnostics", "capability_results", "symbols", "modules", "files", "packages", "generations"}
+		if s.schema == uiAddonSchema {
+			tables = []string{"ui_build_bindings", "entity_links", "state_transitions", "contract_fields",
+				"relations", "module_members", "search_documents", "diagnostics", "capability_results",
+				"symbols", "domain_entities", "modules", "files", "packages", "generations"}
+		}
 		for _, table := range tables {
 			var count int64
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM `+table+` WHERE generation_id=?`, generation).Scan(&count); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM `+table+gcGenerationFilter(table), generation).Scan(&count); err != nil {
 				return err
 			}
 			output.Rows[table] = count
@@ -145,7 +148,7 @@ func (s *Store) CollectGeneration(ctx context.Context, request GCRequest, genera
 					return err
 				}
 			} else {
-				result, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE generation_id=?`, generation)
+				result, err := tx.ExecContext(ctx, `DELETE FROM `+table+gcGenerationFilter(table), generation)
 				if err != nil {
 					return err
 				}
@@ -173,6 +176,13 @@ func (s *Store) CollectGeneration(ctx context.Context, request GCRequest, genera
 	}
 	output.Applied = apply && !output.AlreadyAbsent
 	return output, nil
+}
+
+func gcGenerationFilter(table string) string {
+	if table == "ui_build_bindings" {
+		return " WHERE source_generation_id=?"
+	}
+	return " WHERE generation_id=?"
 }
 
 func deleteGCModules(ctx context.Context, tx *sql.Tx, generation string, remaining int64, check func() error) error {
@@ -269,12 +279,9 @@ func (s *Store) gcTransaction(ctx context.Context, request GCRequest, apply bool
 			}
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return ErrStoreChanged
 	}
 	var invalid int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM active_generations a LEFT JOIN generations g ON g.generation_id=a.generation_id AND g.profile_id=a.profile_id WHERE g.generation_id IS NULL OR g.state NOT IN ('READY','READY_PARTIAL')`).Scan(&invalid); err != nil {

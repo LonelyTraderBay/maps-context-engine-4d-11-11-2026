@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"errors"
+	"path"
 	"slices"
 	"sync"
 	"time"
@@ -249,6 +250,7 @@ func explorerGraphFacts(ctx context.Context, graph *index.PublishedGraph, scope 
 	full := false
 	rootID := ""
 	var fileRoot *model.FileRef
+	var fileNode model.GraphNode
 	switch root := request.Root.(type) {
 	case *model.WorkspaceSelector:
 		full = true
@@ -262,10 +264,21 @@ func explorerGraphFacts(ctx context.Context, graph *index.PublishedGraph, scope 
 		case *model.SymbolRef:
 			rootID = ref.SymbolID
 		case *model.FileRef:
-			fileRoot = ref
 			file, ok := graph.Snapshot.File(ref.Path)
 			if !ok || ref.ContentHash == nil || *ref.ContentHash != file.ContentHash() {
 				return nil, nil, app.ErrValidationPrecondition
+			}
+			id, err := model.GraphRefDigest(ref, 8192)
+			if err != nil {
+				return nil, nil, err
+			}
+			source := model.SourceRef{WorktreeID: member.WorktreeID, ProfileID: member.ProfileID, GenerationID: member.GenerationID,
+				Path: ref.Path, ContentHash: file.ContentHash(), Range: model.ByteRange{EndByte: int64(file.Len())}}
+			fileRoot = ref
+			fileNode = model.GraphNode{NodeID: id, Ref: ref, Kind: "file", Label: path.Base(ref.Path),
+				Plane: "observed_static", SourceRefs: []model.SourceRef{source}, EvidenceRefs: []model.EvidenceRef{}}
+			if *request.Depth == 0 {
+				return []model.GraphNode{fileNode}, []model.GraphEdge{}, ctx.Err()
 			}
 		default:
 			return nil, nil, app.ErrCoreUnsupported
@@ -283,7 +296,7 @@ func explorerGraphFacts(ctx context.Context, graph *index.PublishedGraph, scope 
 				selected[item.SymbolID] = true
 			}
 		}
-		if len(seeds) == 0 {
+		if len(seeds) == 0 && fileRoot == nil {
 			return nil, nil, app.ErrCoreInput
 		}
 		if err := expandExplorerScope(ctx, graph.Relations, request.Kinds, *request.Depth, seeds, selected, maxNodes); err != nil {
@@ -319,7 +332,14 @@ func explorerGraphFacts(ctx context.Context, graph *index.PublishedGraph, scope 
 			Path: item.SitePath, ContentHash: file.ContentHash(), Range: item.Range}
 		refs = append(refs, contextpack.Reference{Relation: item, Source: ref})
 	}
-	return overview.ProjectFacts(ctx, graph.Snapshot, scope, nil, identity, nodes, refs, maxNodes, maxEdges)
+	if fileRoot != nil {
+		maxNodes--
+	}
+	projected, edges, err := overview.ProjectFacts(ctx, graph.Snapshot, scope, nil, identity, nodes, refs, maxNodes, maxEdges)
+	if err == nil && fileRoot != nil {
+		projected = append(projected, fileNode)
+	}
+	return projected, edges, err
 }
 
 func expandExplorerScope(ctx context.Context, relations []model.RelationFact, kinds []string, depth int64,

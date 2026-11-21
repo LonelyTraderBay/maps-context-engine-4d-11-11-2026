@@ -46,11 +46,7 @@ func DecodeStoreBackupManifest(raw []byte) (StoreBackupManifest, error) {
 		return StoreBackupManifest{}, ErrProfileInput
 	}
 	for i, store := range out.Stores {
-		version := 1
-		if store.Kind == "index" {
-			version = 2
-		}
-		if store.Kind != expected[i] || store.FileName != store.Kind+".sqlite" || store.WorktreeID != scope || !model.ValidUUID(store.SourceIncarnation) || store.SchemaVersion != version || store.MinReaderVersion != version || !model.ValidDigest(store.RawSHA256) || !model.ValidDigest(store.LogicalSHA256) || store.ByteLength < 512 || store.ByteLength > 2<<30 || store.ByteLength%512 != 0 || !backupSQLiteVersion(store.SQLiteVersion) {
+		if store.Kind != expected[i] || store.FileName != store.Kind+".sqlite" || store.WorktreeID != scope || !model.ValidUUID(store.SourceIncarnation) || !supportedBackupSchema(store) || !model.ValidDigest(store.RawSHA256) || !model.ValidDigest(store.LogicalSHA256) || store.ByteLength < 512 || store.ByteLength > 2<<30 || store.ByteLength%512 != 0 || !backupSQLiteVersion(store.SQLiteVersion) {
 			return StoreBackupManifest{}, ErrProfileInput
 		}
 		if store.Kind == "records" {
@@ -65,6 +61,16 @@ func DecodeStoreBackupManifest(raw []byte) (StoreBackupManifest, error) {
 		}
 	}
 	return out, nil
+}
+
+func supportedBackupSchema(store StoreBackupFile) bool {
+	if store.MinReaderVersion != store.SchemaVersion {
+		return false
+	}
+	if store.Kind == "index" {
+		return store.SchemaVersion == 2 || nativeUIMaps && store.SchemaVersion == 4
+	}
+	return store.SchemaVersion == 1
 }
 
 func backupSQLiteVersion(value string) bool {

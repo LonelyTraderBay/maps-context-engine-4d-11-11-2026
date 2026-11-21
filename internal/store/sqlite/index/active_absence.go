@@ -45,12 +45,9 @@ func (s *Store) ActiveGenerationAbsent(ctx context.Context, profileID string, au
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	identity, err := s.inspectPinned(ctx, tx)
 	if err != nil {
 		return false, err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return false, ErrStoreChanged
 	}
 	if err := authorize(ctx, identity, profileID); err != nil {
 		return false, err

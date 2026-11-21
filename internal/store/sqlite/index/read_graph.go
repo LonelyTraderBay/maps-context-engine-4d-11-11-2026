@@ -80,11 +80,11 @@ func (s *Store) graphTransaction(ctx context.Context, r PublishedGraphRequest, v
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	identity, err := s.inspectPinned(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if version != supportedSchema || identity != s.identity || identity.Incarnation != r.Member.IndexIncarnation {
+	if identity.Incarnation != r.Member.IndexIncarnation {
 		return ErrStoreChanged
 	}
 	var h graphHeader

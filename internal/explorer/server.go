@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,10 @@ type ReadResult struct {
 
 type Options struct {
 	Reader            Reader
+	Preview           *PreviewSessions
+	PreviewOrigins    func(context.Context, time.Time) ([]string, error)
+	Records           *app.RecordService
+	RecordOutputCap   int64
 	Assets            fs.FS
 	QueryTimeout      time.Duration
 	BearerTTL         time.Duration
@@ -100,6 +105,9 @@ func (s *Server) Origin() string { return s.origin }
 
 func (s *Server) Close() error {
 	s.auth.revoke()
+	if s.options.Preview != nil {
+		s.options.Preview.close()
+	}
 	err := s.listener.Close()
 	if errors.Is(err, net.ErrClosed) {
 		return nil
@@ -126,6 +134,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.stopping = true
 		s.mu.Unlock()
 		s.auth.revoke()
+		if s.options.Preview != nil {
+			s.options.Preview.close()
+		}
 		drain, done := context.WithTimeout(context.WithoutCancel(run), 2*time.Second)
 		defer done()
 		err := server.Shutdown(drain)
@@ -162,10 +173,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !apiRoutePath(r.URL.Path) {
+		if r.URL.Path == "/" && r.Method == http.MethodGet && s.options.PreviewOrigins != nil {
+			s.previewFrameHeader(r.Context(), w.Header())
+		}
 		s.serveAsset(w, r)
 		return
 	}
 	s.serveAPI(w, r)
+}
+
+func (s *Server) previewFrameHeader(ctx context.Context, response http.Header) {
+	ctx, cancel := context.WithTimeout(ctx, min(s.options.QueryTimeout, time.Second))
+	defer cancel()
+	origins, err := s.options.PreviewOrigins(ctx, s.now())
+	if err != nil || len(origins) > 32 {
+		return
+	}
+	checked := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		if origin != s.origin && model.CheckLocalPreviewLocation(origin, "/") == nil {
+			checked = append(checked, origin)
+		}
+	}
+	value := strings.Join(checked, " ")
+	if value != "" && len(value) <= 4096 {
+		response.Set("Content-Security-Policy", response.Get("Content-Security-Policy")+"; frame-src "+value)
+	}
 }
 
 func headers(h http.Header) {

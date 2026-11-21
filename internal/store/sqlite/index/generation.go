@@ -94,12 +94,9 @@ func (s *Store) BeginGeneration(ctx context.Context, request BeginGenerationRequ
 			}
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return ErrStoreChanged
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO generations(generation_id,profile_id,snapshot_digest,state,owner_job_id,policy_digest,policy_epoch,provider_fingerprint,created_at) VALUES(?,?,?,'BUILDING',?,?,?,?,?) ON CONFLICT(generation_id) DO NOTHING`, request.GenerationID, manifest.ProfileID, manifest.SnapshotDigest, request.JobID, manifest.PolicyDigest, request.PolicyEpoch, manifest.ProviderDigest, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {

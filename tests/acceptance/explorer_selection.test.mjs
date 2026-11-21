@@ -20,3 +20,18 @@ test('Explorer selection is scoped to the current graph digest', () => {
   assert.equal(changed.compactPane, 'right');
   assert.equal(select(changed, { type: 'history', delta: 1 }), changed);
 });
+
+test('Preview keeps different instances of one graph node in history and drops stale scope and duplicate selection', () => {
+  const scope = 'indexed-scope';
+  let state = select(initialSelection, { type: 'scope', digest: scope });
+  const preview = (selectionID, instance_id, scopeDigest = scope) => ({ type: 'preview', node: 'Page',
+    value: { selectionID, scopeDigest, instance: { instance_id } } });
+  const first = preview('pick-1', 'instance-37');
+  state = select(state, first);
+  assert.equal(select(state, first), state);
+  assert.equal(select(state, preview('pick-2', 'instance-38', 'old-scope')), state);
+  state = select(state, preview('pick-3', 'instance-38'));
+  assert.deepEqual(state.history.map(choice => choice.preview.instance.instance_id), ['instance-37', 'instance-38']);
+  state = select(state, { type: 'history', delta: -1 });
+  assert.equal(state.history[state.position].preview.selectionID, 'pick-1');
+});

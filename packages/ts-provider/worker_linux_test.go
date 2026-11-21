@@ -33,6 +33,10 @@ func hashBytes(value []byte) string {
 }
 
 func fixture(t *testing.T, mode string, files map[string]string) (providers.NodeConfig, ports.ProviderJob, *snapshot.Snapshot) {
+	return workerFixture(t, mode, files, nil)
+}
+
+func workerFixture(t *testing.T, mode string, files map[string]string, artifact []byte) (providers.NodeConfig, ports.ProviderJob, *snapshot.Snapshot) {
 	t.Helper()
 	base := os.Getenv("MCE4D_T044_COMPILER")
 	node := os.Getenv("MCE4D_T055_NODE")
@@ -46,6 +50,10 @@ func fixture(t *testing.T, mode string, files map[string]string) (providers.Node
 	worker, err := os.ReadFile(entrypoint)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if artifact != nil {
+		worker = artifact
+		entrypoint = ""
 	}
 	providerDigest := hashBytes(worker)
 	scratch := t.TempDir()

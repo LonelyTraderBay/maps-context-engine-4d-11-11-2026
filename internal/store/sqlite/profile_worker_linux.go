@@ -15,6 +15,7 @@ import (
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
 )
 
 // RunProtectedWorker dispatches only fixed installation/capture roles. It
@@ -216,6 +217,17 @@ func bootstrapWorktreeWorker(ctx context.Context, rootPath, worktree string) (ou
 		if kind == "index" {
 			identity, initErr := owner.InitializeIndex(ctx, writer, job)
 			incarnation, err = identity.Incarnation, initErr
+			if err == nil && nativeUIMaps {
+				_, err = index.InitializeUIAddon(ctx, db, worktree, lease, index.UIWriteAuthority{
+					Writer: writer, JobID: job,
+					Authorize: func(ctx context.Context, got index.Identity) error {
+						if got != identity {
+							return ErrStateChanged
+						}
+						return check(ctx)
+					},
+				})
+			}
 			out.IndexIncarnation = incarnation
 		} else {
 			identity, initErr := owner.InitializeRecords(ctx, writer, job)

@@ -22,7 +22,12 @@ const (
 
 func adapterSchema(t *testing.T) *jsonschema.Resolved {
 	t.Helper()
-	raw, err := os.ReadFile("../../contracts/domain-adapter.v1.json")
+	return sealedSchema(t, "domain-adapter.v1.json", "MCE4D_DOMAIN_ADAPTER_V1")
+}
+
+func sealedSchema(t *testing.T, name, marker string) *jsonschema.Resolved {
+	t.Helper()
+	raw, err := os.ReadFile("../../contracts/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,9 +36,11 @@ func adapterSchema(t *testing.T) *jsonschema.Resolved {
 		t.Fatal(err)
 	}
 	text := string(bytes.ReplaceAll(spec, []byte("\r\n"), []byte("\n")))
-	block := strings.Split(text, "<!-- BEGIN MCE4D_DOMAIN_ADAPTER_V1 -->\n```json\n")
-	if len(block) != 2 || strings.TrimSpace(strings.SplitN(block[1], "\n```\n<!-- END MCE4D_DOMAIN_ADAPTER_V1 -->", 2)[0]) != strings.TrimSpace(string(raw)) {
-		t.Fatal("domain adapter schema differs from S43")
+	block := strings.Split(text, "<!-- BEGIN "+marker+" -->\n```json\n")
+	end := "\n```\n<!-- END " + marker + " -->"
+	if len(block) != 2 || !strings.Contains(block[1], end) ||
+		strings.TrimSpace(strings.SplitN(block[1], end, 2)[0]) != strings.TrimSpace(string(raw)) {
+		t.Fatalf("%s differs from S43", name)
 	}
 	var schema, core jsonschema.Schema
 	if err := json.Unmarshal(raw, &schema); err != nil {

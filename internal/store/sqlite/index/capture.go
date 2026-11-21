@@ -106,12 +106,9 @@ func (s *Store) StoreCapturedBlobs(ctx context.Context, request CaptureWrite) (r
 			}
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return ErrStoreChanged
 	}
 	if err := verifyBuildingGeneration(ctx, tx, request, manifest); err != nil {
 		return err

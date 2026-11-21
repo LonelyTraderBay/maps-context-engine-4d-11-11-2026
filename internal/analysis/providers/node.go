@@ -21,6 +21,7 @@ type NodeConfig struct {
 	NodeDigest, ProviderDigest, CompilerDigest string
 	ProviderID                                 string
 	Compiler                                   CompilerInstallation
+	EmbeddedWorker                             []byte
 }
 
 // CompilerInstallation is the approved local TypeScript distribution and its
@@ -33,7 +34,10 @@ type CompilerInstallation struct {
 // Configuration is installation-owned. Callers cannot add flags or environment.
 type NodeProvider struct{ config NodeConfig }
 
-func NewNodeProvider(config NodeConfig) *NodeProvider { return &NodeProvider{config: config} }
+func NewNodeProvider(config NodeConfig) *NodeProvider {
+	config.EmbeddedWorker = append([]byte(nil), config.EmbeddedWorker...)
+	return &NodeProvider{config: config}
+}
 
 var _ ports.LanguageProvider = (*NodeProvider)(nil)
 

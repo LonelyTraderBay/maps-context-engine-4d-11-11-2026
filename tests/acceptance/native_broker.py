@@ -5,7 +5,7 @@ import os,pathlib,subprocess,hashlib,fcntl,struct,stat,json,socket,time,re,shuti
 run=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_RUN']).resolve(strict=True);root=run/'rootfs';built=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_BUILD']).resolve(strict=True)
 approved=json.loads(pathlib.Path(os.environ['MCE4D_ACCEPTANCE_APPROVALS']).read_text())
 assert set(approved['binaries'])=={'mce4d','state-profile','go-toolchain'}
-suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0')
+suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0','records','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records')
 assert os.getpid()==1, 'run broker in a fresh private PID/mount/network namespace'
 import importlib.util,sys
 sys.dont_write_bytecode=True
@@ -75,9 +75,14 @@ elif suite=='typed-profiles':
  typed_graph.prepare_profiles(root/'target')
 else:
  for name,body in sources.items():(root/'target'/name).write_text(body)
+if suite in ('ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):
+ sys.path.insert(0,str(module_path.parent))
+ import native_ui_map
+ ui_source=native_ui_map.SOURCE_MANY if suite=='ui_reverse' else native_ui_map.SOURCE
+ (root/'target/entry.tsx').write_text(ui_source)
 for p in [root/'target']+list((root/'target').rglob('*')):
  p.chmod(0o755 if p.is_dir() else 0o644);os.chown(p,1001,1001)
-if suite in ('security','gc','backup','restore','explorer-gu0'):(root/'target/execute-me.sh').chmod(0o755)
+if suite in ('security','gc','backup','restore','explorer-gu0','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):(root/'target/execute-me.sh').chmod(0o755)
 (root/'host-config/config.toml').write_bytes(b'synthetic existing host config\n')
 def tree(p):return {str(f.relative_to(p)):hashlib.sha256(f.read_bytes()).hexdigest() for f in p.rglob('*') if f.is_file()}
 before=tree(root/'target');before_config=tree(root/'host-config');active=[]
@@ -113,8 +118,12 @@ try:
   if authored['cohort']=='C029Extended':config['query_timeout_ms']=20000
  if suite=='bench-retention':
   config={'pack_ttl_seconds':native_matrix.TEST_PACK_TTL,'rename_result_ttl_seconds':native_matrix.TEST_RENAME_TTL}
+ if suite=='ui_hmr':
+  config={'writer_lock_wait_ms':200}
  p=command('/state-profile',['create','--root','/profiles/runtime','--engine-uid','1000','--engine-gid','1000','--client-uid','1001',*targets,'--worker-executable','/mce4d'],0);assert p.returncode==0
- p=command('/mce4d',['config','set','--input-json','-'],payload={'action':'set','config':{'schema_version':1,'core':config},'expected_digest':None});assert p.returncode==0
+ config_patch={'schema_version':1,'core':config}
+ if suite=='ui_hmr':config_patch['explorer']={'map_watch_poll_ms':50,'map_watch_debounce_ms':250}
+ p=command('/mce4d',['config','set','--input-json','-'],payload={'action':'set','config':config_patch,'expected_digest':None});assert p.returncode==0
  config_digest=json.loads(p.stdout)['data']['config_digest']
  p=command('/mce4d',['repo','add','--root','/target']);assert p.returncode==0;worktree=re.search(r'Registered worktree ([0-9a-f-]{36})',p.stdout).group(1)
  policy={'schema_version':1,'allowed_roots':['/target'],'denied_globs':[],'trusted_rule_paths':['AGENTS.md'],'dependency_roots':[],'allowed_executables':[{'path':'/git','sha256':hashlib.sha256((root/'git').read_bytes()).hexdigest()},{'path':'/toolchain/bin/go','sha256':hashlib.sha256((root/'toolchain/bin/go').read_bytes()).hexdigest()},{'path':'/bin/gopls','sha256':hashlib.sha256((root/'bin/gopls').read_bytes()).hexdigest()}],'allow_target_execution':False,'allow_runtime_download':False,'max_file_bytes':65536,'max_source_bytes':2097152,'max_output_bytes':65536,'secret_rules_version':'builtin-v1'}
@@ -125,6 +134,8 @@ try:
  profile={'schema_version':1,'language':'go','goos':'linux','goarch':'amd64','build_tags':[],'cgo_enabled':False,'tests_enabled':False,'module_roots':['.'],'toolchain_digest':toolchain_digest,'provider_digest':approved['binaries']['mce4d'],'module_mode':'readonly','analysis_mode':'typed_when_available','dependency_roots':[]}
  p=command('/mce4d',['profile','set','--worktree-id',worktree,'--input-json','-'],payload={'worktree_id':worktree,'profile_name':'typed','expected_revision':0,'profile':profile});assert p.returncode==0;profile_id=json.loads(p.stdout)['data']['profile_id']
  p=command('/state-profile',['worktree-create','--root','/profiles/runtime','--worktree-id',worktree],0);assert p.returncode==0
+ if suite in ('ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):
+  maps=native_ui_map.import_before_index(root,command,worktree,profile_id,module_path.parents[2],ui_source,hmr=suite=='ui_hmr')
  if suite in ('explorer-shell','explorer-gu0'):
   subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
   sys.path.insert(0,str(module_path.parent))
@@ -191,6 +202,18 @@ try:
  elif suite=='typed-profiles':
   typed_graph.check_profiles(root,command,worktree,profile_id,profile)
   assert tree(root/'target')==before
+ elif suite=='ui_map':
+  native_ui_map.exercise(root,command,worktree,profile_id,maps)
+  assert tree(root/'target')==before and tree(root/'host-config')==before_config
+  assert not (root/'result/repo-executed').exists()
+ elif suite in ('ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records'):
+  subprocess.run(['/usr/sbin/ip','link','set','lo','up'],check=True,timeout=5)
+  import native_ui_preview
+  native_ui_preview.exercise(root,command,setup,worktree,profile_id,maps[0],active,interact=suite=='ui_interact',
+                             pick=suite in ('ui_pick','ui_reverse','ui_hmr'),reverse=suite=='ui_reverse',
+                             hmr_maps=maps[2:] if suite=='ui_hmr' else (),records_mode=suite=='ui_records')
+  assert tree(root/'target')==before and tree(root/'host-config')==before_config
+  assert not (root/'result/repo-executed').exists()
  else:
   scenario_path=module_path.parent/('native_'+suite+'.py')
   scenario_spec=importlib.util.spec_from_file_location('mce_local_'+suite,scenario_path)

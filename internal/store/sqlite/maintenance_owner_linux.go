@@ -286,7 +286,7 @@ func (o *quiescentOwner) sourceMetadata(ctx context.Context, store *nativeWALSto
 			return out, err
 		}
 	case "index.sqlite":
-		s, err := index.Open(ctx, db, db, o.scope, o.lease)
+		s, err := openMaintenanceIndex(ctx, db, o.scope, o.lease)
 		if err != nil {
 			return out, err
 		}
@@ -295,7 +295,7 @@ func (o *quiescentOwner) sourceMetadata(ctx context.Context, store *nativeWALSto
 			return out, err
 		}
 		out.Kind, out.WorktreeID, out.Incarnation = "index", identity.WorktreeID, identity.Incarnation
-		expectedVersion = 2
+		expectedVersion = s.SchemaVersion()
 		expectedIncarnation = o.manifest.IndexIncarnation
 	case "records.sqlite":
 		if _, err := records.Open(ctx, db, o.scope, o.lease); err != nil {
@@ -319,6 +319,13 @@ func (o *quiescentOwner) sourceMetadata(ctx context.Context, store *nativeWALSto
 		return backupSourceMetadata{}, err
 	}
 	return out, nil
+}
+
+func openMaintenanceIndex(ctx context.Context, db *sql.DB, scope string, lease ports.LifecycleLease) (*index.Store, error) {
+	if nativeUIMaps {
+		return index.OpenUICompatible(ctx, db, db, scope, lease)
+	}
+	return index.Open(ctx, db, db, scope, lease)
 }
 
 func (o *quiescentOwner) owns(store *nativeWALStore) bool {

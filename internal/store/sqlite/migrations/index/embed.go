@@ -13,6 +13,10 @@ var migrationV2 string
 //go:embed 003.sql
 var migrationV3 string
 
+//go:embed 004.sql
+var migrationV4 string
+
 func V1() string { return migrationV1 }
 func V2() string { return migrationV2 }
 func V3() string { return migrationV3 }
+func V4() string { return migrationV4 }

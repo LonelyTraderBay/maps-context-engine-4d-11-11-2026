@@ -1,0 +1,7 @@
+{
+  "name": "@mce4d/preview-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./registry.mjs", "./pairing": "./pairing.mjs" }
+}

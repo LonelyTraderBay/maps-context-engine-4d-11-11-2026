@@ -1,0 +1,11 @@
+{
+  "name": "@mce4d/vite-inspector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.mjs",
+  "dependencies": {
+    "source-map-js": "1.2.4",
+    "typescript": "5.9.3"
+  }
+}

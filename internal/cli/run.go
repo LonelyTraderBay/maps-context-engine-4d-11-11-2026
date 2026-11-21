@@ -26,6 +26,10 @@ type Dependencies struct {
 	OpenCore            OpenCore
 	OpenRetainedCore    OpenCore
 	OpenExplorer        OpenExplorer
+	ImportUIMap         ImportUIMap
+	WatchUIMap          WatchUIMap
+	PreviewPermission   RunPreviewPermission
+	OpenRecords         OpenRecords
 	ExplorerAssets      fs.FS
 	OpenAdmin           OpenAdmin
 	ProbeConfig         func(context.Context, string) error
@@ -104,6 +108,18 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		if deps.StoreRestore != nil {
 			text += "  mce4d store restore --manifest <approved-local-file> --confirm --wait-ms <1..30000>\n  mce4d store recover --target catalog|worktree [--worktree-id <id>] --apply --confirm --wait-ms <1..30000>\nRestore and recovery apply require the installed profile administrator.\n"
 		}
+		if deps.OpenRecords != nil {
+			text += "  mce4d --worktree-id <id> --profile-id <id> records list|read --input-json <file-or-dash>\n"
+		}
+		if deps.ImportUIMap != nil {
+			text += "  mce4d explorer-map import --worktree-id <id> --manifest <approved-local-file>\n"
+		}
+		if deps.WatchUIMap != nil {
+			text += "  mce4d explorer-map watch --worktree-id <id> --profile-id <id> --directory <approved-owned-map-dir>\n"
+		}
+		if deps.PreviewPermission != nil {
+			text += "  mce4d preview-permission get|list|put|revoke --input-json <file-or-dash>\n"
+		}
 		if n, err := io.WriteString(stdout, text); err != nil || n != len(text) {
 			return diagnostic("output unavailable", 5)
 		}
@@ -116,8 +132,35 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		}
 		configPath, args = args[1], args[2:]
 	}
+	if len(args) > 0 && args[0] == "explorer-map" {
+		if len(args) > 1 && args[1] == "watch" {
+			return runUIMapWatch(ctx, args, configPath, stdout, stderr, deps.WatchUIMap)
+		}
+		return runUIMapImport(ctx, args, configPath, stdout, stderr, deps.ImportUIMap)
+	}
+	if len(args) > 0 && args[0] == "preview-permission" {
+		if len(args) != 4 || args[2] != "--input-json" {
+			return diagnostic("invalid preview permission command", 2)
+		}
+		raw, err := readInput(ctx, args[3], stdin, 32768)
+		if err != nil {
+			if ctx.Err() != nil {
+				return diagnostic("operation cancelled", 4)
+			}
+			return diagnostic("input is unavailable or exceeds its limit", 2)
+		}
+		result, err := executePreviewPermission(ctx, args[1], configPath, deps.CPUs, raw, deps.PreviewPermission)
+		if err != nil {
+			return diagnostic("permission response unavailable", 5)
+		}
+		output := append(result.JSON, '\n')
+		if n, err := stdout.Write(output); err != nil || n != len(output) {
+			return diagnostic("output unavailable", 5)
+		}
+		return result.ExitCode
+	}
 	if len(args) > 0 && args[0] == "--worktree-id" {
-		if len(args) < 5 || args[2] != "--profile-id" || args[4] != "query" {
+		if len(args) < 5 || args[2] != "--profile-id" || args[4] != "query" && args[4] != "records" {
 			return diagnostic("query binding requires worktree and profile IDs", 2)
 		}
 		worktree, profile := args[1], args[3]
@@ -137,6 +180,7 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 			}
 		}
 		deps.OpenCore, deps.OpenRetainedCore = bind(deps.OpenCore), bind(deps.OpenRetainedCore)
+		deps.OpenRecords = bindRecords(deps.OpenRecords, worktree, profile)
 		args = args[4:]
 	}
 	if len(args) == 2 && args[0] == "version" && args[1] == "--json" {
@@ -147,6 +191,27 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 	}
 	if len(args) > 0 && args[0] == "explorer" {
 		return runExplorer(ctx, args[1:], configPath, stdout, stderr, deps)
+	}
+	if len(args) > 0 && args[0] == "records" {
+		if len(args) != 4 || args[2] != "--input-json" || args[1] != "list" && args[1] != "read" {
+			return diagnostic("invalid records command", 2)
+		}
+		raw, err := readInput(ctx, args[3], stdin, 32768)
+		if err != nil {
+			if ctx.Err() != nil {
+				return diagnostic("operation cancelled", 4)
+			}
+			return diagnostic("input is unavailable or exceeds its limit", 2)
+		}
+		result, err := executeRecords(ctx, args[1], raw, configPath, deps.CPUs, deps.OpenRecords)
+		if err != nil {
+			return diagnostic("records response unavailable", 5)
+		}
+		output := append(result.JSON, '\n')
+		if n, err := stdout.Write(output); err != nil || n != len(output) {
+			return diagnostic("output unavailable", 5)
+		}
+		return result.ExitCode
 	}
 	if len(args) > 0 && args[0] == "store" {
 		if len(args) > 1 && (args[1] == "restore" || args[1] == "recover" && containsFlag(args[2:], "--apply")) {

@@ -4,7 +4,7 @@ import type { ExplorerClient } from '../api/client.ts';
 
 export const defaultNodes = 200;
 export const defaultEdges = 500;
-const hardNodes = 500;
+export const hardNodes = 500;
 const hardEdges = 1500;
 
 export type GraphSlice = {

@@ -12,3 +12,7 @@ import (
 func (*NodeProvider) Analyze(context.Context, ports.ProviderJob, ports.ProviderSink) (model.ProviderDone, error) {
 	return model.ProviderDone{}, ErrUnsupported
 }
+
+func (*NodeProvider) AnalyzeFrontend(context.Context, ports.ProviderJob, func(context.Context, ports.ProviderJob, []byte) error) error {
+	return ErrUnsupported
+}

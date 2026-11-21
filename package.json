@@ -6,5 +6,5 @@
     "node": "24.22.3",
     "npm": "11.19.1"
   },
-  "workspaces": ["web/explorer"]
+  "workspaces": ["web/explorer", "packages/vite-inspector", "packages/preview-sdk", "packages/react-inspector"]
 }

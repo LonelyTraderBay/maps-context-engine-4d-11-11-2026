@@ -27,3 +27,14 @@ Worker dùng JSONC, `extends` cục bộ, `include/exclude`, project references 
 Runner của T043 dựng compiler từ npm cache theo lockfile hiện có, đối chiếu nội dung với pin và chạy ở WSL2 với network namespace riêng. Node giới hạn đọc vào chương trình thử và compiler, chặn ghi và child process. Dữ liệu thử có script `prepare` và tên plugin. Admission từ chối cấu hình plugin trực tiếp hoặc qua `extends`. Kiểm tra hash cây synthetic trước/sau có kết quả ghi trong E873.
 
 Giữ nguyên `LICENSE.txt` và `ThirdPartyNoticeText.txt` của package. Thông báo đi kèm liệt kê DefinitelyTyped, dữ liệu Unicode và tài liệu/trích dẫn thông số Web API. Hồ sơ nghiệm thu ghi phân loại cho dùng nội bộ và điều kiện kiểm lại nếu tạo artifact phân phối.
+
+## Frontend tĩnh (T056)
+
+`tsprovider.NewFrontend` chọn artifact ghép đã embed và trả profile bind đúng digest. Dùng cùng profile và snapshot cho `Analyze` và `Scan`. `Analyze` trả fact chung S43. `Scan` trả route/client cùng SourceRef sau khi adapter xác minh phản hồi, capture và quyền job. Cấu hình backend phải chỉ rõ service, environment, namespace và version được duyệt. Ghép method và path từ call đã kiểm vào identifier trước khi dùng `MatchFrontendHandler`.
+
+| Capability | Phạm vi đã kiểm |
+| --- | --- |
+| React/TSX route-to-component | Route JSX trực tiếp dưới Routes, import tên từ `react-router-dom`, đường dẫn cố định, component function hoặc arrow trong capture. |
+| HTTP client | `fetch` bind vào lib chuẩn đã pin, path cùng origin và method literal hoặc GET mặc định. |
+| Client-to-handler | Cùng path ở hai service chỉ chọn theo binding đầy đủ cùng SourceRef đúng scope. |
+| Cú pháp khác | Computed path, nested route và fetch bị shadow giữ gap. SSR, RSC, framework router khác, Vite runtime inspection và deployment chưa xác minh ở T056. |

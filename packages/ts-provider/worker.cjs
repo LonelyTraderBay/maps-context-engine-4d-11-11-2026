@@ -348,22 +348,24 @@ function append(facts, kind, entry) {
   facts[kind].push(entry);
 }
 
+function sendFrame(bytes, limit) {
+  if (bytes.length > limit) throw new Error('PROVIDER_OUTPUT_FRAME');
+  for (const data of [Buffer.from('Content-Length: ' + bytes.length + '\r\n\r\n'), bytes]) {
+    for (let offset = 0; offset < data.length;) {
+      const size = fs.writeSync(1, data, offset, data.length - offset);
+      if (size < 1) throw new Error('PROVIDER_OUTPUT_EOF');
+      offset += size;
+    }
+  }
+}
+
 function response(request, snapshotDigest, facts, gaps, version) {
   let sequence = 1;
   function frame(value) {
     return Buffer.from(JSON.stringify({ provider_protocol: 1, job_id: request.job_id, sequence, ...value }));
   }
   function send(bytes) {
-    if (bytes.length > request.max_frame_bytes) throw new Error('PROVIDER_OUTPUT_FRAME');
-    function writeAll(data) {
-      for (let offset = 0; offset < data.length;) {
-        const size = fs.writeSync(1, data, offset, data.length - offset);
-        if (size < 1) throw new Error('PROVIDER_OUTPUT_EOF');
-        offset += size;
-      }
-    }
-    writeAll(Buffer.from('Content-Length: ' + bytes.length + '\r\n\r\n'));
-    writeAll(bytes);
+    sendFrame(bytes, request.max_frame_bytes);
     sequence++;
   }
   const empty = { packages: [], symbols: [], relations: [], diagnostics: [] };
@@ -404,6 +406,9 @@ function main() {
   const host = compilerHost(ts, compilerRoot, capture.files);
   const facts = { count: 0, packages: [], symbols: [], relations: [], diagnostics: [] };
   const gaps = new Set();
+  const frontend = process.env.MCE4D_PROVIDER_MODE === 'frontend';
+  const routes = [];
+  const clients = [];
   if (capture.manifest.files.some(file => file.status !== 'captured')) gaps.add('TS_CAPTURE_INCOMPLETE');
   for (const config of request.profile.tsconfig_paths.slice().sort(order)) {
     const program = (() => {
@@ -414,14 +419,34 @@ function main() {
         return null;
       }
     })();
-    if (program) analyzeProject(ts, config, program, capture, request, facts, gaps);
+    if (!program) continue;
+    if (!frontend) analyzeProject(ts, config, program, capture, request, facts, gaps);
+    else if (request.profile.analysis_mode === 'syntax') gaps.add('TS_SYNTAX_ONLY');
+    else {
+      const result = analyzeFrontend(ts, program, capture.files.keys(), offsets);
+      if (routes.length + result.routes.length > 4096 || clients.length + result.clients.length > 4096)
+        throw new Error('FRONTEND_FACT_LIMIT');
+      for (const item of result.routes) routes.push({ config, ...item });
+      for (const item of result.clients) clients.push({ config, ...item });
+      for (const gap of result.gaps) gaps.add(gap);
+    }
+  }
+  if (frontend) {
+    const output = { frontend_protocol: 1, job_id: request.job_id,
+      input_digest: capture.manifest.snapshot_digest, routes, clients, gaps: [...gaps].sort(order) };
+    sendFrame(Buffer.from(JSON.stringify(output)), request.max_frame_bytes);
+    return;
   }
   response(request, capture.manifest.snapshot_digest, facts, gaps, ts.version);
 }
 
-try { main(); }
-catch {
-  // Only a bounded category reaches stderr. Captured text never does.
-  process.stderr.write('TS_PROVIDER_FAILED\n');
-  process.exitCode = 2;
+if (require.main === module) {
+  try { main(); }
+  catch {
+    // Only a bounded category reaches stderr. Captured text never does.
+    process.stderr.write('TS_PROVIDER_FAILED\n');
+    process.exitCode = 2;
+  }
 }
+
+module.exports = { compilerHost, offsets };

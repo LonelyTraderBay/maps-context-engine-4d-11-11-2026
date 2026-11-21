@@ -60,12 +60,9 @@ func (s *Store) ReadGeneration(ctx context.Context, profileID, generationID stri
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	identity, err := s.inspectPinned(ctx, tx)
 	if err != nil {
 		return GenerationObservation{}, err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return GenerationObservation{}, ErrStoreChanged
 	}
 	fields := `CASE WHEN length(CAST(g.generation_id AS BLOB))=36 THEN g.generation_id END,CASE WHEN length(CAST(g.snapshot_digest AS BLOB))=64 THEN g.snapshot_digest END,CASE WHEN length(CAST(g.state AS BLOB))<=32 THEN g.state END,CASE WHEN length(CAST(g.policy_digest AS BLOB))=64 THEN g.policy_digest END,g.policy_epoch,CASE WHEN length(CAST(g.provider_fingerprint AS BLOB))=64 THEN g.provider_fingerprint END,length(CAST(g.manifest_json AS BLOB))`
 	query := `SELECT ` + fields + ` FROM generations g JOIN active_generations a ON a.profile_id=g.profile_id AND a.generation_id=g.generation_id WHERE g.profile_id=? AND g.state IN ('READY','READY_PARTIAL')`

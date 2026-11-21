@@ -142,12 +142,9 @@ func (s *Store) StageFiles(ctx context.Context, request StageFilesRequest) (resu
 			}
 		}
 	}()
-	version, identity, err := inspectStore(ctx, tx, s.identity.WorktreeID)
+	_, err = s.inspectPinned(ctx, tx)
 	if err != nil {
 		return err
-	}
-	if version != supportedSchema || identity != s.identity {
-		return ErrStoreChanged
 	}
 	if err := verifyBuildingGeneration(ctx, tx, capture, manifest); err != nil {
 		return err

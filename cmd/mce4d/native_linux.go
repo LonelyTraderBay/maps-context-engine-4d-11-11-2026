@@ -12,6 +12,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/cli"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/compose"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/explorer"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/records"
@@ -58,6 +59,58 @@ func configureNativeDependencies(deps *cli.Dependencies) {
 			err = app.ErrCoreStoreRecovery
 		}
 		return options, release, err
+	}
+	if sqlite.NativeUIMapsEnabled() {
+		deps.PreviewPermission = func(ctx context.Context, selected string, request model.PreviewPermissionAdminRequest) (model.PreviewPermissionAdminData, *string, error) {
+			data, next, err := compose.RunNativePreviewPermission(ctx, root, selected, request, deps.CPUs)
+			if errors.Is(err, sqlite.ErrProfileDenied) {
+				err = cli.ErrBindingDenied
+			}
+			if errors.Is(err, sqlite.ErrStoreRecoveryRequired) {
+				err = app.ErrCoreStoreRecovery
+			}
+			return data, next, err
+		}
+		deps.ImportUIMap = func(ctx context.Context, selected, worktree, artifact string) (cli.UIMapImportReport, error) {
+			report, err := compose.RunNativeUIMapImport(ctx, root, selected, worktree, artifact, deps.CPUs)
+			switch {
+			case errors.Is(err, sqlite.ErrStoreRecoveryRequired):
+				err = app.ErrCoreStoreRecovery
+			case errors.Is(err, sqlite.ErrNativeOutcomeUnknown), errors.Is(err, index.ErrCommitUnknown), errors.Is(err, index.ErrAfterCommit):
+				err = errors.Join(cli.ErrIndexRecovery, err)
+			case errors.Is(err, sqlite.ErrProfileDenied), errors.Is(err, app.ErrCoreAuthentication), errors.Is(err, compose.ErrAuthority):
+				err = cli.ErrBindingDenied
+			case errors.Is(err, index.ErrMigrationRequired):
+				err = app.ErrCoreUnsupported
+			}
+			return cli.UIMapImportReport{BuildMapID: report.BuildMapID, BindingID: report.BindingID, Status: report.Status}, err
+		}
+		deps.WatchUIMap = func(ctx context.Context, selected, worktree, profile, directory string, emit func(cli.UIMapWatchReport) error) error {
+			err := compose.RunNativeUIMapWatch(ctx, root, selected, worktree, profile, directory, deps.CPUs, func(event compose.UIMapWatchEvent) error {
+				return emit(cli.UIMapWatchReport(event))
+			})
+			switch {
+			case errors.Is(err, sqlite.ErrStoreRecoveryRequired):
+				return app.ErrCoreStoreRecovery
+			case errors.Is(err, sqlite.ErrNativeOutcomeUnknown), errors.Is(err, index.ErrCommitUnknown), errors.Is(err, index.ErrAfterCommit):
+				return errors.Join(cli.ErrIndexRecovery, err)
+			case errors.Is(err, sqlite.ErrProfileDenied), errors.Is(err, app.ErrCoreAuthentication), errors.Is(err, compose.ErrAuthority):
+				return cli.ErrBindingDenied
+			case errors.Is(err, index.ErrMigrationRequired):
+				return app.ErrCoreUnsupported
+			default:
+				return err
+			}
+		}
+	}
+	deps.OpenRecords = func(ctx context.Context, selected, worktree, profile string) (*app.RecordService, func() error, error) {
+		service, release, err := compose.OpenNativeRecords(ctx, root, selected, worktree, profile, deps.CPUs)
+		if errors.Is(err, sqlite.ErrStoreRecoveryRequired) {
+			err = app.ErrCoreStoreRecovery
+		} else if errors.Is(err, sqlite.ErrProfileDenied) {
+			err = cli.ErrBindingDenied
+		}
+		return service, release, err
 	}
 	deps.AddRepo = func(ctx context.Context, selected, path string) (cli.RegisteredRepo, error) {
 		registered, err := compose.RegisterNativeRepo(ctx, root, selected, path, deps.CPUs)

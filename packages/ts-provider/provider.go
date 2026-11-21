@@ -17,6 +17,9 @@ var workerArtifact []byte
 //go:embed toolchain-pin.json
 var toolchainPin []byte
 
+//go:embed frontend.cjs
+var frontendArtifact []byte
+
 // Installation names files in the approved provider installation. These paths
 // belong to the state owner and cannot be selected by a target project.
 type Installation struct {
@@ -27,6 +30,30 @@ type Installation struct {
 // New binds the exact worker and compiler installation to an explicit S43
 // profile. The returned profile can be hashed into the capture before Analyze.
 func New(installation Installation, configs []string, mode string) (*providers.NodeProvider, *model.TSProfile, error) {
+	return newProvider(installation, configs, mode, nil)
+}
+
+// NewFrontend selects the pinned worker with the frontend adapter included.
+// Its profile distinguishes the combined program from the base TS worker.
+func NewFrontend(installation Installation, configs []string, mode string) (*FrontendProvider, *model.TSProfile, error) {
+	if installation.Worker != "" {
+		return nil, nil, providers.ErrAuthority
+	}
+	node, profile, err := newProvider(installation, configs, mode, frontendProgram())
+	if err != nil {
+		return nil, nil, err
+	}
+	return &FrontendProvider{NodeProvider: node}, profile, nil
+}
+
+func frontendProgram() []byte {
+	program := make([]byte, 0, len(workerArtifact)+len(frontendArtifact)+1)
+	program = append(program, workerArtifact...)
+	program = append(program, '\n')
+	return append(program, frontendArtifact...)
+}
+
+func newProvider(installation Installation, configs []string, mode string, embedded []byte) (*providers.NodeProvider, *model.TSProfile, error) {
 	var pins struct {
 		Compiler struct {
 			ArchiveDigest  string `json:"archive_sha256"`
@@ -39,7 +66,11 @@ func New(installation Installation, configs []string, mode string) (*providers.N
 	if err := json.Unmarshal(toolchainPin, &pins); err != nil {
 		return nil, nil, err
 	}
-	digest := sha256.Sum256(workerArtifact)
+	artifact := workerArtifact
+	if embedded != nil {
+		artifact = embedded
+	}
+	digest := sha256.Sum256(artifact)
 	profile := &model.TSProfile{
 		SchemaVersion: 1, Language: "typescript_javascript", TsconfigPaths: append([]string{}, configs...),
 		NodeDigest: pins.Node.ExecutableDigest, CompilerDigest: pins.Compiler.ArchiveDigest,
@@ -55,6 +86,7 @@ func New(installation Installation, configs []string, mode string) (*providers.N
 		Compiler: providers.CompilerInstallation{Root: installation.CompilerRoot,
 			ArchivePath: installation.CompilerArchive, ManifestPath: installation.CompilerManifest,
 			ManifestDigest: pins.Compiler.ManifestDigest},
+		EmbeddedWorker: embedded,
 	})
 	return node, profile, nil
 }
