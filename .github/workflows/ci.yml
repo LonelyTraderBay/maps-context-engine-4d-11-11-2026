@@ -65,17 +65,18 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             Add-Content -LiteralPath $env:GITHUB_PATH -Value $fixtureTools
           }
+      - name: Prepare Windows fixture directory
+        if: runner.os == 'Windows'
+        run: |
+          # Go fixtures require a canonical NTFS path. The runner's TEMP can be an 8.3 alias.
+          $fixtureTemp = Join-Path $env:RUNNER_TEMP 'mce4d-go-temp'
+          New-Item -Path $fixtureTemp -ItemType Directory | Out-Null
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value @("TMP=$fixtureTemp", "TEMP=$fixtureTemp")
       - name: Test Go
         env:
           GOPROXY: 'off'
         run: |
           $env:MCE4D_HOME = Join-Path $env:RUNNER_TEMP 'mce4d-home'
-          if ($IsWindows) {
-            # Go fixtures require a canonical NTFS path. The runner's TEMP can be an 8.3 alias.
-            $fixtureTemp = Join-Path $env:RUNNER_TEMP 'mce4d-go-temp'
-            New-Item -Path $fixtureTemp -ItemType Directory | Out-Null
-            $env:TMP = $env:TEMP = $fixtureTemp
-          }
           go test -count=1 ./...
       - name: Check Go vet
         env:
@@ -94,11 +95,12 @@ jobs:
           GOPROXY: 'off'
         run: go run ./tools/spec_check
       - name: Race test concurrent evidence, search and records
-        if: runner.os == 'Linux'
         env:
           CGO_ENABLED: '1'
           GOPROXY: 'off'
-        run: go test -race -count=1 ./internal/evidence/... ./internal/search/semantic ./internal/history/report ./internal/store/sqlite/records
+        run: |
+          $env:MCE4D_HOME = Join-Path $env:RUNNER_TEMP 'mce4d-race-home'
+          go test -race -count=1 ./internal/evidence/... ./internal/search/semantic ./internal/history/report ./internal/store/sqlite/records
 
   explorer:
     name: Explorer (${{ matrix.os }})
