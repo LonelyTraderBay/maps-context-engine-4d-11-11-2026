@@ -46,11 +46,37 @@ jobs:
         run: go mod download
       - name: Verify modules
         run: go mod verify
+      - name: Prepare Linux isolated mount fixture
+        if: runner.os == 'Linux'
+        run: |
+          if ((Test-Path /proc/sys/kernel/apparmor_restrict_unprivileged_userns) -and
+              (Get-Content /proc/sys/kernel/apparmor_restrict_unprivileged_userns) -eq '1') {
+            $fixtureTools = Join-Path $env:RUNNER_TEMP 'mce4d-fixture-tools'
+            New-Item -Path $fixtureTools -ItemType Directory | Out-Null
+            $unshare = Join-Path $fixtureTools 'unshare'
+            Copy-Item -LiteralPath /usr/bin/unshare -Destination $unshare
+            @"
+          profile mce4d-ci-unshare "$unshare" flags=(unconfined) {
+            userns,
+          }
+          "@ | sudo apparmor_parser -r
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $unshare --user --map-root-user --mount /usr/bin/true
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Add-Content -LiteralPath $env:GITHUB_PATH -Value $fixtureTools
+          }
       - name: Test Go
         env:
           GOPROXY: 'off'
-          MCE4D_HOME: ${{ runner.temp }}/mce4d-home
-        run: go test -count=1 ./...
+        run: |
+          $env:MCE4D_HOME = Join-Path $env:RUNNER_TEMP 'mce4d-home'
+          if ($IsWindows) {
+            # Go fixtures require a canonical NTFS path. The runner's TEMP can be an 8.3 alias.
+            $fixtureTemp = Join-Path $env:RUNNER_TEMP 'mce4d-go-temp'
+            New-Item -Path $fixtureTemp -ItemType Directory | Out-Null
+            $env:TMP = $env:TEMP = $fixtureTemp
+          }
+          go test -count=1 ./...
       - name: Check Go vet
         env:
           GOPROXY: 'off'
