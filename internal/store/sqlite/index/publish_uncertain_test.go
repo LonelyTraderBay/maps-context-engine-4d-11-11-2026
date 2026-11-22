@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
-	"net/url"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -84,7 +82,7 @@ func TestPublishResolvesUnknownCommitOutcomeByJob(t *testing.T) {
 				t.Fatal(err)
 			}
 			var mode atomic.Int32
-			faultDB := sql.OpenDB(faultConnector{dsn: (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String(), mode: &mode})
+			faultDB := sql.OpenDB(faultConnector{dsn: fixtureSQLiteURI(path), mode: &mode})
 			faultDB.SetMaxOpenConns(1)
 			defer faultDB.Close()
 			publisher, err := Open(ctx, db, faultDB, fixtureWorktree, store.lease)

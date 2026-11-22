@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net/url"
 	"path/filepath"
 	"regexp"
 	"sync"
@@ -171,7 +170,7 @@ func TestInitializeConcurrentCallersShareIdentity(t *testing.T) {
 
 func TestInitializeConcurrentConnectionsNeverLeavePartialCatalog(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "catalog.sqlite")
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(file)}).String() + "?_pragma=busy_timeout%281000%29"
+	dsn := fixtureSQLiteURI(file) + "?_pragma=busy_timeout%281000%29"
 	const workers = 4
 	dbs := make([]*sql.DB, workers)
 	for i := range dbs {

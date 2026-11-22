@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -188,7 +186,7 @@ func TestReadPublishedFileKeepsOneSQLiteSnapshotDuringPublish(t *testing.T) {
 	if err := db.QueryRow(`SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&dbPath); err != nil {
 		t.Fatal(err)
 	}
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(dbPath)}).String()
+	dsn := fixtureSQLiteURI(dbPath)
 	readers, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)

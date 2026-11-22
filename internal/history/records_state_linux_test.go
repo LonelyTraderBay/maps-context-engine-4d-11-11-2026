@@ -92,6 +92,7 @@ func TestStateModelApprovedHeadUsesCapturedBytesAndCAS(t *testing.T) {
 		GenerationID: fixtureGeneration, Path: "order.machine.json", ContentHash: digest(raw),
 		Range: model.ByteRange{EndByte: int64(len(raw))}}
 	dir := t.TempDir()
+	check(os.Chmod(dir, 0700))
 	root, err := paths.OpenRoot(dir)
 	check(err)
 	defer root.Close()

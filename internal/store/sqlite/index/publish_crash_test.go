@@ -8,10 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -43,7 +41,7 @@ func TestPublishCrashHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	dsn := fixtureSQLiteURI(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)

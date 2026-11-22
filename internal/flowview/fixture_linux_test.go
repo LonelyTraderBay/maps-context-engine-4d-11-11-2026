@@ -96,6 +96,9 @@ func TestT095GuardedGoStaticFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"input", "cache", "modcache", "gopath", "home", "tmp"} {
 		if err := os.Mkdir(filepath.Join(dir, name), 0700); err != nil {
 			t.Fatal(err)

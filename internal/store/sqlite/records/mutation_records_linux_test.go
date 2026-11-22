@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,6 +26,9 @@ func TestMappingCASReplayAndRollback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	statePath := t.TempDir()
+	if err := os.Chmod(statePath, 0700); err != nil {
+		t.Fatal(err)
+	}
 	root, err := paths.OpenRoot(statePath)
 	if err != nil {
 		t.Fatal(err)

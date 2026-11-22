@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net/url"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -16,7 +15,7 @@ import (
 
 func TestPolicyCASAcrossIndependentConnections(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "catalog.sqlite")
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(file)}).String() + "?_pragma=busy_timeout%281000%29&_pragma=journal_mode%28WAL%29&_pragma=synchronous%28FULL%29"
+	dsn := fixtureSQLiteURI(file) + "?_pragma=busy_timeout%281000%29&_pragma=journal_mode%28WAL%29&_pragma=synchronous%28FULL%29"
 	stores := make([]*Store, 2)
 	dbs := make([]*sql.DB, 2)
 	for i := range dbs {

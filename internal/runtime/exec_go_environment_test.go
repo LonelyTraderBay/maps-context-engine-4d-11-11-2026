@@ -15,8 +15,9 @@ func TestOfflineGoEnvironmentIgnoresPoisonedParent(t *testing.T) {
 	t.Setenv("LD_PRELOAD", "/malicious/library")
 	t.Setenv("GOPROXY", "https://malicious.invalid")
 	t.Setenv("GOMAXPROCS", "999")
-	root := filepath.Join(string(filepath.Separator), "fixture-scratch")
-	goRoot := filepath.Join(string(filepath.Separator), "approved-toolchain")
+	base := t.TempDir()
+	root := filepath.Join(base, "fixture-scratch")
+	goRoot := filepath.Join(base, "approved-toolchain")
 	input := GoEnvironmentInput{GoRoot: goRoot, ScratchRoot: root, WorkspaceRoot: filepath.Join(root, "input"), GOOS: "linux", GOARCH: "amd64", BuildTags: []string{"z", "a"}}
 	env, flags, err := OfflineGoEnvironment(input)
 	if err != nil {
@@ -47,14 +48,15 @@ func TestOfflineGoEnvironmentIgnoresPoisonedParent(t *testing.T) {
 }
 
 func TestOfflineGoEnvironmentRejectsEscapesAndFlagInjection(t *testing.T) {
-	root := filepath.Join(string(filepath.Separator), "fixture-scratch")
-	good := GoEnvironmentInput{GoRoot: filepath.Join(string(filepath.Separator), "approved-toolchain"), ScratchRoot: root, WorkspaceRoot: filepath.Join(root, "input"), GOOS: "linux", GOARCH: "amd64", BuildTags: []string{}}
+	base := t.TempDir()
+	root := filepath.Join(base, "fixture-scratch")
+	good := GoEnvironmentInput{GoRoot: filepath.Join(base, "approved-toolchain"), ScratchRoot: root, WorkspaceRoot: filepath.Join(root, "input"), GOOS: "linux", GOARCH: "amd64", BuildTags: []string{}}
 	for _, tc := range []struct {
 		name   string
 		modify func(*GoEnvironmentInput)
 	}{
 		{"relative-root", func(in *GoEnvironmentInput) { in.GoRoot = "relative" }},
-		{"outside-workspace", func(in *GoEnvironmentInput) { in.WorkspaceRoot = filepath.Join(string(filepath.Separator), "outside") }},
+		{"outside-workspace", func(in *GoEnvironmentInput) { in.WorkspaceRoot = filepath.Join(base, "outside") }},
 		{"root-is-workspace", func(in *GoEnvironmentInput) { in.WorkspaceRoot = in.ScratchRoot }},
 		{"toolchain-overlap", func(in *GoEnvironmentInput) { in.GoRoot = filepath.Join(in.ScratchRoot, "go") }},
 		{"cache-overlap", func(in *GoEnvironmentInput) { in.WorkspaceRoot = filepath.Join(in.ScratchRoot, "cache", "input") }},

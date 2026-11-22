@@ -57,10 +57,18 @@ type catalogFixtureGuard struct{}
 
 func (catalogFixtureGuard) Close() error { return nil }
 
+func fixtureSQLiteURI(path string) string {
+	slashPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" {
+		slashPath = "/" + slashPath
+	}
+	return (&url.URL{Scheme: "file", Path: slashPath}).String()
+}
+
 func leasedCatalogDB(t *testing.T) *sql.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "catalog.sqlite")
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	dsn := fixtureSQLiteURI(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)

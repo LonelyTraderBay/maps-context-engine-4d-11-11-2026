@@ -42,10 +42,18 @@ func (l *leaseProbe) Check(ctx context.Context, worktreeID string, mode ports.Le
 	return nil
 }
 
+func fixtureSQLiteURI(path string) string {
+	slashPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" {
+		slashPath = "/" + slashPath
+	}
+	return (&url.URL{Scheme: "file", Path: slashPath}).String()
+}
+
 func fixtureDB(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "index.sqlite")
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	dsn := fixtureSQLiteURI(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +172,7 @@ func TestInitializeRejectsUnknownAndNewerStoresWithoutMutation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+			dsn := fixtureSQLiteURI(path)
 			db, err = sql.Open("sqlite", dsn)
 			if err != nil {
 				t.Fatal(err)
@@ -258,7 +266,7 @@ func TestOpenEnforcesCallerOwnedPoolCaps(t *testing.T) {
 	if _, err := Initialize(ctx, writer, fixtureWorktree, fixtureLease(ports.ExclusiveLease)); err != nil {
 		t.Fatal(err)
 	}
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	dsn := fixtureSQLiteURI(path)
 	readers, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)

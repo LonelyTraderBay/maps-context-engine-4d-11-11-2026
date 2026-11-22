@@ -8,7 +8,8 @@
     "lint": "node --check tools/generate-contracts.mjs && node --check vite.config.mjs && node --check ../../tests/contract/ui.browser.mjs && node --check ../../tests/contract/ui.contracts.test.mjs",
     "test": "npm run generate && node --test ../../tests/contract/ui.contracts.test.mjs",
     "build": "npm run generate && vite build",
-    "test:e2e": "npm run generate && node ../../tests/contract/ui.browser.mjs"
+    "test:e2e": "npm run generate && node ../../tests/contract/ui.browser.mjs",
+    "test:production-strip": "node --test --test-name-pattern=production-strip ../../packages/vite-inspector/producer.test.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "3.1.3",

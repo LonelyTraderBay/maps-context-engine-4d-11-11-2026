@@ -41,7 +41,7 @@ func TestMainReadOnlyDefaultConfig(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMainReadOnlyDefaultConfig$")
-		cmd.Env = append(os.Environ(), "HOME="+home, "XDG_STATE_HOME="+xdg, "MCE4D_MAIN_CONFIG_TEST_CHILD=1", "MCE4D_MAIN_CONFIG_TEST_ACTION="+action)
+		cmd.Env = append(os.Environ(), "HOME="+home, "XDG_STATE_HOME="+xdg, "MCE4D_HOME=", "MCE4D_MAIN_CONFIG_TEST_CHILD=1", "MCE4D_MAIN_CONFIG_TEST_ACTION="+action)
 		cmd.Stdin = strings.NewReader(input)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr

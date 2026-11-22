@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -338,7 +336,7 @@ func TestSearchSnapshotIsolationAcrossPublication(t *testing.T) {
 	if err := store.writer.QueryRow(`SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&dbPath); err != nil {
 		t.Fatal(err)
 	}
-	readers, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: filepath.ToSlash(dbPath)}).String())
+	readers, err := sql.Open("sqlite", fixtureSQLiteURI(dbPath))
 	if err != nil {
 		t.Fatal(err)
 	}

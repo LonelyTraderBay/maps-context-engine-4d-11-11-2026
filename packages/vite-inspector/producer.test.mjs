@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -42,7 +43,7 @@ test('source anchors retain UTF-8 sites, ownership and source maps', async () =>
   assert.equal(consumer.originalPositionFor({ line: 4, column: generated }).column, source.split('\r\n')[3].indexOf('onClick'));
 });
 
-test('Vite development regenerates loaded-module manifest and production stays unchanged', async () => {
+test('Vite development regenerates the loaded-module manifest', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mce4d-vite-'));
   const output = await mkdtemp(join(tmpdir(), 'mce4d-maps-'));
   const entry = join(root, 'entry.tsx');
@@ -78,6 +79,16 @@ test('Vite development regenerates loaded-module manifest and production stays u
       await writeFile(join(process.env.MCE4D_T085_MANIFEST_OUT, 'fixture-build.json'), JSON.stringify(revised), { flag: 'wx' });
     }
   } finally { await server.close(); }
+});
+
+test('production-strip keeps client and SSR bundles and fixture source unchanged', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'mce4d-vite-'));
+  const output = await mkdtemp(join(tmpdir(), 'mce4d-maps-'));
+  t.after(() => Promise.all([root, output].map(dir => rm(dir, { recursive: true }))));
+  const entry = join(root, 'entry.tsx');
+  await writeFile(entry, source, { mode: 0o600, flag: 'wx' });
+  const digest = async () => createHash('sha256').update(await readFile(entry)).digest('hex');
+  const original = await digest();
   const options = { root, configFile: false, mode: 'production', logLevel: 'silent',
     build: { write: false, lib: { entry, formats: ['es'], fileName: 'fixture' } } };
   const pinned = viteInspector(producerConfig(root));
@@ -92,5 +103,7 @@ test('Vite development regenerates loaded-module manifest and production stays u
   const ssrBaseline = await build(ssrOptions);
   const ssrWithPlugin = await build({ ...ssrOptions, plugins: [viteInspector(producerConfig(root))] });
   assert.equal(js(ssrWithPlugin), js(ssrBaseline));
-  assert.equal(await readFile(entry, 'utf8'), '// source edit\r\n' + source);
+  assert.equal(await digest(), original);
+  assert.deepEqual(await readdir(root), ['entry.tsx']);
+  assert.deepEqual(await readdir(output), []);
 });

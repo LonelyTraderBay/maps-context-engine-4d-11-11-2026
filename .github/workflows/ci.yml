@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  GOENV: 'off'
+  GOFLAGS: -mod=readonly
+  GOTELEMETRY: 'off'
+  GOTOOLCHAIN: local
+  GOWORK: 'off'
+
+jobs:
+  go:
+    name: Go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check Go formatting
+        run: |
+          $unformatted = gofmt -l cmd internal packages tests tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($unformatted) { throw "gofmt needed: $($unformatted -join ', ')" }
+      - name: Download modules
+        run: go mod download
+      - name: Verify modules
+        run: go mod verify
+      - name: Test Go
+        env:
+          GOPROXY: 'off'
+          MCE4D_HOME: ${{ runner.temp }}/mce4d-home
+        run: go test -count=1 ./...
+      - name: Check Go vet
+        env:
+          GOPROXY: 'off'
+        run: go vet ./...
+      - name: Build and run CLI
+        env:
+          GOPROXY: 'off'
+        run: |
+          $bin = Join-Path $env:RUNNER_TEMP ($IsWindows ? 'mce4d.exe' : 'mce4d')
+          go build -o $bin ./cmd/mce4d
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $bin version --json
+      - name: Check specification and contract registry
+        env:
+          GOPROXY: 'off'
+        run: go run ./tools/spec_check
+      - name: Race test concurrent evidence, search and records
+        if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: '1'
+          GOPROXY: 'off'
+        run: go test -race -count=1 ./internal/evidence/... ./internal/search/semantic ./internal/history/report ./internal/store/sqlite/records
+
+  explorer:
+    name: Explorer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            chromium-sha256: 045558b2f167db04624e36d952496705418a85d87ff9b5fb55a8c40cc59201ae
+          - os: windows-2025
+            chromium-sha256: 9b5b0b9d91b08bc432f53ddf9946aaec7ab100b3f887819656c2ee63cde1757e
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - name: Install locked npm dependencies
+        run: npm ci --ignore-scripts --engine-strict --no-audit --no-fund
+      - name: Lint Explorer
+        run: npm run lint -w '@mce4d/explorer'
+      - name: Typecheck Explorer
+        run: npm run typecheck -w '@mce4d/explorer'
+      - name: Test Explorer contracts
+        run: npm run test -w '@mce4d/explorer'
+      - name: Build Explorer
+        run: npm run build -w '@mce4d/explorer'
+      - name: Check production strip
+        run: npm run test:production-strip -w '@mce4d/explorer'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build and run CLI with embedded Explorer
+        run: |
+          $assets = 'cmd/mce4d/explorer_dist'
+          New-Item -Path $assets -ItemType Directory -Force | Out-Null
+          Copy-Item -Path 'web/explorer/dist/*' -Destination $assets -Recurse
+          $bin = Join-Path $env:RUNNER_TEMP ($IsWindows ? 'mce4d-explorer.exe' : 'mce4d-explorer')
+          go build '-tags=mce4d_ui_maps,mce4d_explorer_assets' -o $bin ./cmd/mce4d
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $bin version --json
+      - name: Install locked Chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/mce4d-browser
+        run: node node_modules/playwright/cli.js install --no-shell chromium
+      - name: Run sandboxed Explorer browser fixture
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/mce4d-browser
+          MCE4D_CHROME_SHA256: ${{ matrix.chromium-sha256 }}
+        run: |
+          $browser = node --input-type=module -e "import { chromium } from 'playwright'; console.log(chromium.executablePath());"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:MCE4D_CHROME_PATH = $browser
+          if ((Get-FileHash -LiteralPath $browser).Hash -ne $env:MCE4D_CHROME_SHA256) {
+            throw 'Chromium executable differs from the pinned SHA-256'
+          }
+          if ($IsLinux -and (Test-Path /proc/sys/kernel/apparmor_restrict_unprivileged_userns) -and
+              (Get-Content /proc/sys/kernel/apparmor_restrict_unprivileged_userns) -eq '1') {
+            # Grant user namespaces only to this Chromium executable on the hosted runner.
+            @"
+          profile mce4d-ci-chromium "$browser" flags=(unconfined) {
+            userns,
+          }
+          "@ | sudo apparmor_parser -r
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          npm run test:e2e -w '@mce4d/explorer'

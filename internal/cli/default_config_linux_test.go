@@ -31,6 +31,7 @@ func runDefaultConfig(t *testing.T, action, input string, prefix ...string) Resu
 }
 
 func TestDefaultConfigShowAndSetDoNotCreateState(t *testing.T) {
+	t.Setenv("MCE4D_HOME", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", "")
@@ -52,6 +53,7 @@ func TestDefaultConfigShowAndSetDoNotCreateState(t *testing.T) {
 }
 
 func TestDefaultConfigUsesXDGAndPreservesTargetFiles(t *testing.T) {
+	t.Setenv("MCE4D_HOME", "")
 	home, target := t.TempDir(), t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", target)
@@ -91,6 +93,7 @@ func TestDefaultConfigUsesXDGAndPreservesTargetFiles(t *testing.T) {
 }
 
 func TestDefaultConfigRejectsUnsafeOrUnapprovedPaths(t *testing.T) {
+	t.Setenv("MCE4D_HOME", "")
 	for _, kind := range []string{"symlink_root", "symlink_file", "hardlink_file", "directory_permissions", "file_permissions", "pending", "invalid_json"} {
 		t.Run(kind, func(t *testing.T) {
 			base := t.TempDir()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -31,9 +32,10 @@ func TestQueryExplicitBindingReachesTrustedOwner(t *testing.T) {
 func TestRepoAddUsesOnlyAuthorizedCallback(t *testing.T) {
 	worktree := "11111111-1111-4111-8111-111111111111"
 	profile := strings.Repeat("a", 64)
+	approved := filepath.Join(t.TempDir(), "approved")
 	var out, diagnostic bytes.Buffer
-	code := Run(context.Background(), []string{"repo", "add", "--root", "/approved"}, io.NopCloser(strings.NewReader("")), &out, &diagnostic, Dependencies{CPUs: 4, AddRepo: func(_ context.Context, config, root string) (RegisteredRepo, error) {
-		if config != "" || root != "/approved" {
+	code := Run(context.Background(), []string{"repo", "add", "--root", approved}, io.NopCloser(strings.NewReader("")), &out, &diagnostic, Dependencies{CPUs: 4, AddRepo: func(_ context.Context, config, root string) (RegisteredRepo, error) {
+		if config != "" || root != approved {
 			t.Fatal("root changed")
 		}
 		return RegisteredRepo{WorktreeID: worktree, ProfileID: profile}, nil

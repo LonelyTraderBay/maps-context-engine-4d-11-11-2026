@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -191,7 +189,7 @@ func TestPublishRejectsConcurrentDatabaseChangeAfterValidation(t *testing.T) {
 	if err := db.QueryRow(`PRAGMA database_list`).Scan(&sequence, &name, &path); err != nil {
 		t.Fatal(err)
 	}
-	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	dsn := fixtureSQLiteURI(path)
 	other, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)
