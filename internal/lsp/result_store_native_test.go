@@ -54,12 +54,14 @@ func makeResultStore(t *testing.T, dir string, quota int64) (*ResultStore, *runt
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = root.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	lease, err := runtime.AcquireLifecycle(ctx, root, fixtureWorktree, ports.SharedLease, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = lease.Close() })
 	scanner, err := policy.NewScanner(int(resultHardBytes))
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +70,6 @@ func makeResultStore(t *testing.T, dir string, quota int64) (*ResultStore, *runt
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = lease.Close(); _ = root.Close() })
 	return store, lease
 }
 
