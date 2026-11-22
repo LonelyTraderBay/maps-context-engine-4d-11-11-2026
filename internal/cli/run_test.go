@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -121,13 +122,14 @@ func TestDoctorConfigurationProbeReportsSanitizedStatus(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
+			configPath := filepath.Join(t.TempDir(), "approved-fixture.json")
 			deps := Dependencies{CPUs: 4, ProbeConfig: func(ctx context.Context, path string) error {
-				if _, ok := ctx.Deadline(); !ok || path != "/approved/fixture.json" {
+				if _, ok := ctx.Deadline(); !ok || path != configPath {
 					t.Fatal("doctor lost the selected configuration or deadline")
 				}
 				return tc.err
 			}}
-			args := []string{"--runtime-config", "/approved/fixture.json", "doctor", "--json"}
+			args := []string{"--runtime-config", configPath, "doctor", "--json"}
 			code := Run(context.Background(), args, io.NopCloser(strings.NewReader("")), &out, &errOut, deps)
 			var body struct {
 				Checks map[string]string `json:"checks"`
@@ -135,7 +137,7 @@ func TestDoctorConfigurationProbeReportsSanitizedStatus(t *testing.T) {
 			if code != 0 || errOut.Len() != 0 || json.Unmarshal(out.Bytes(), &body) != nil || body.Checks["configuration"] != tc.expected || body.Checks["filesystem"] != "not_checked" {
 				t.Fatalf("doctor config probe: %d, %s", code, out.String())
 			}
-			if strings.Contains(out.String(), "private") || strings.Contains(out.String(), "/approved/") {
+			if strings.Contains(out.String(), "private") || strings.Contains(out.String(), filepath.Base(configPath)) {
 				t.Fatal("doctor leaked private probe details")
 			}
 		})

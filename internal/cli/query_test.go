@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -152,9 +153,10 @@ func TestMCPCommandUsesExactOwnerBindingAndProtocolStdout(t *testing.T) {
 	backend := &queryBackend{}
 	service := queryService(t, backend)
 	worktree, profile := "01234567-89ab-cdef-0123-456789abcdef", strings.Repeat("a", 64)
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
 	var opened, released atomic.Bool
 	deps := Dependencies{CPUs: 4, OpenCore: func(_ context.Context, config, actualWorktree, actualProfile string) (*app.CoreService, func() error, error) {
-		if config != "/fixture/runtime.json" || actualWorktree != worktree || actualProfile != profile {
+		if config != configPath || actualWorktree != worktree || actualProfile != profile {
 			return nil, nil, ErrBindingDenied
 		}
 		opened.Store(true)
@@ -164,11 +166,19 @@ func TestMCPCommandUsesExactOwnerBindingAndProtocolStdout(t *testing.T) {
 	defer cancel()
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
-	defer sw.Close()
+	defer cw.Close()
+	defer cr.Close()
+	stop := context.AfterFunc(ctx, func() {
+		_ = cw.CloseWithError(ctx.Err())
+		_ = sw.CloseWithError(ctx.Err())
+	})
+	defer stop()
 	var errOut bytes.Buffer
 	done := make(chan int, 1)
 	go func() {
-		done <- Run(ctx, []string{"--runtime-config", "/fixture/runtime.json", "mcp", "--worktree-id", worktree, "--profile-id", profile}, sr, sw, &errOut, deps)
+		defer sr.Close()
+		defer sw.Close()
+		done <- Run(ctx, []string{"--runtime-config", configPath, "mcp", "--worktree-id", worktree, "--profile-id", profile}, sr, sw, &errOut, deps)
 	}()
 	client := sdk.NewClient(&sdk.Implementation{Name: "fixture", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &sdk.IOTransport{Reader: cr, Writer: cw, MaxLineLength: 1024 * 1024}, nil)
