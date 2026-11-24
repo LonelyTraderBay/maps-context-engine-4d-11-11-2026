@@ -43,6 +43,23 @@ func restoreProtectedStore(ctx context.Context, root, manifest string, confirmed
 		return out, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, input.root.Close()) }()
+	return replaceProtectedStore(ctx, root, target, worktree, scope, input, wait, boundary)
+}
+
+// RebuildProtectedIndex installs a new, empty derived store under the same
+// scoped offline gate as restore. Normal indexing can then recapture source.
+func RebuildProtectedIndex(ctx context.Context, root, worktree string, confirmed bool, wait time.Duration) (ProtectedRestoreSummary, error) {
+	return rebuildProtectedIndex(ctx, root, worktree, confirmed, wait, nil)
+}
+
+func rebuildProtectedIndex(ctx context.Context, root, worktree string, confirmed bool, wait time.Duration, boundary func(string)) (ProtectedRestoreSummary, error) {
+	if !confirmed || wait <= 0 || wait > RestoreMaxWait || !model.ValidUUID(worktree) {
+		return ProtectedRestoreSummary{}, ErrProfileInput
+	}
+	return replaceProtectedStore(ctx, root, "worktree", worktree, worktree, nil, wait, boundary)
+}
+
+func replaceProtectedStore(ctx context.Context, root, target, worktree, scope string, input *protectedRestoreInput, wait time.Duration, boundary func(string)) (out ProtectedRestoreSummary, resultErr error) {
 	control, err := openRestoreController(ctx, root, scope)
 	if err != nil {
 		return out, err
@@ -53,7 +70,7 @@ func restoreProtectedStore(ctx context.Context, root, manifest string, confirmed
 			out = ProtectedRestoreSummary{}
 		}
 	}()
-	if control.profile != nil && control.profile.ProfileID != input.profile.ProfileID {
+	if input != nil && control.profile.ProfileID != input.profile.ProfileID {
 		return out, ErrStateChanged
 	}
 	old, present, err := readMaintenanceJournal(ctx, control.journal, control.profile.ProfileID, scope)
@@ -66,12 +83,20 @@ func restoreProtectedStore(ctx context.Context, root, manifest string, confirmed
 	}
 	layout := layoutRestore(control.root, *control.profile, scope, operation)
 	var plan restoreWorkerPlan
+	var preservedRecords *MaintenanceIndexRebuild
 	executable, err := restoreWorkerExecutable(ctx, *control.profile)
 	if err != nil {
 		return out, err
 	}
 	prepare := func() error {
 		var err error
+		if input == nil {
+			proof, err := layout.provePreservedRecords(ctx, worktree)
+			if err != nil {
+				return err
+			}
+			preservedRecords = &proof
+		}
 		plan, err = layout.createRestoreStage(ctx, input, scope, operation)
 		return err
 	}
@@ -82,8 +107,16 @@ func restoreProtectedStore(ctx context.Context, root, manifest string, confirmed
 			Phase: "PREPARED", PermissionReviewConfirmed: true, OldStores: reply.Old, NewStores: reply.New,
 			Files: []MaintenanceFileProof{}, CompletedSteps: []string{},
 		}
-		if len(reply.New) != len(plan.NewIDs) || len(reply.Old) != len(plan.NewIDs) {
+		expected := len(plan.NewIDs)
+		if plan.RebuildIndex {
+			expected = 1
+		}
+		if len(reply.New) != expected || len(reply.Old) != expected {
 			return ErrProfileIncomplete
+		}
+		if plan.RebuildIndex {
+			journal.BackupDirectory, journal.BackupManifestSHA256 = "index-rebuild", reply.Old[0].LogicalSHA256
+			journal.IndexRebuild = preservedRecords
 		}
 		for i, id := range plan.NewIDs {
 			if reply.New[i].Incarnation != id {
@@ -93,7 +126,7 @@ func restoreProtectedStore(ctx context.Context, root, manifest string, confirmed
 		if err := layout.stageManifest(ctx, journal); err != nil {
 			return err
 		}
-		for _, step := range layout.exchanges(target) {
+		for _, step := range layout.exchanges(journal) {
 			a, err := layout.fingerprint(ctx, step.live, step.kind)
 			if err != nil {
 				return err
@@ -112,6 +145,9 @@ func restoreProtectedStore(ctx context.Context, root, manifest string, confirmed
 				}
 			}
 			journal.Files = append(journal.Files, MaintenanceFileProof{step.step, a, b})
+		}
+		if err := layout.checkPreservedRecords(ctx, &journal); err != nil {
+			return err
 		}
 		if err := alive(); err != nil {
 			return err
@@ -362,7 +398,15 @@ func withRestoreWorker(ctx context.Context, executable, root string, m protected
 
 func (l restoreLayout) createRestoreStage(ctx context.Context, input *protectedRestoreInput, scope, operation string) (plan restoreWorkerPlan, resultErr error) {
 	m := l.profile
-	plan = restoreWorkerPlan{Operation: operation, Profile: m.ProfileID, Scope: scope, Backup: filepath.Base(input.directory), ManifestHash: input.manifestSHA256}
+	plan = restoreWorkerPlan{Operation: operation, Profile: m.ProfileID, Scope: scope, RebuildIndex: input == nil}
+	kinds := []string{"index"}
+	if input != nil {
+		plan.Backup, plan.ManifestHash = filepath.Base(input.directory), input.manifestSHA256
+		kinds = make([]string, 0, len(input.manifest.Stores))
+		for _, entry := range input.manifest.Stores {
+			kinds = append(kinds, entry.Kind)
+		}
+	}
 	if err := profileDirectory(l.root, l.controlStage, 0, 0, 0755); err != nil {
 		return plan, err
 	}
@@ -377,16 +421,18 @@ func (l restoreLayout) createRestoreStage(ctx context.Context, input *protectedR
 		return plan, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, c.Close()) }()
-	for _, entry := range input.manifest.Stores {
-		id, err := profileUUID()
-		if err != nil {
+	for _, kind := range kinds {
+		if !plan.RebuildIndex {
+			id, err := profileUUID()
+			if err != nil {
+				return plan, err
+			}
+			plan.NewIDs = append(plan.NewIDs, id)
+		}
+		if err := profileDirectory(l.root, l.stateStage+"/journal-"+kind, m.EngineUID, m.EngineGID, 0700); err != nil {
 			return plan, err
 		}
-		plan.NewIDs = append(plan.NewIDs, id)
-		if err := profileDirectory(l.root, l.stateStage+"/journal-"+entry.Kind, m.EngineUID, m.EngineGID, 0700); err != nil {
-			return plan, err
-		}
-		name := "head-" + entry.Kind
+		name := "head-" + kind
 		if err := profileDirectory(c, name, 0, 0, 0755); err != nil {
 			return plan, err
 		}
@@ -428,10 +474,21 @@ func (l restoreLayout) stageManifest(ctx context.Context, j MaintenanceJournal) 
 		if err := errors.Join(readErr, w.Close()); err != nil {
 			return err
 		}
-		if m.IndexIncarnation != j.OldStores[0].Incarnation || m.RecordsIncarnation != j.OldStores[1].Incarnation {
+		recordsIncarnation := m.RecordsIncarnation
+		if j.IndexRebuild != nil {
+			if recordsIncarnation != j.IndexRebuild.RecordsIncarnation {
+				return ErrStateChanged
+			}
+		} else {
+			if recordsIncarnation != j.OldStores[1].Incarnation {
+				return ErrStateChanged
+			}
+			recordsIncarnation = j.NewStores[1].Incarnation
+		}
+		if m.IndexIncarnation != j.OldStores[0].Incarnation {
 			return ErrStateChanged
 		}
-		m.IndexIncarnation, m.RecordsIncarnation = j.NewStores[0].Incarnation, j.NewStores[1].Incarnation
+		m.IndexIncarnation, m.RecordsIncarnation = j.NewStores[0].Incarnation, recordsIncarnation
 		next = m
 	}
 	raw, err := json.Marshal(next)
@@ -442,9 +499,15 @@ func (l restoreLayout) stageManifest(ctx context.Context, j MaintenanceJournal) 
 }
 
 func (l restoreLayout) finishRestore(ctx context.Context, control *paths.Root, j *MaintenanceJournal, boundary func(string)) error {
-	steps := l.exchanges(j.Target)
+	if j.IndexRollback != nil {
+		return ErrStoreRecoveryRequired
+	}
+	steps := l.exchanges(*j)
 	if len(steps) != len(j.Files) {
 		return ErrStateChanged
+	}
+	if err := l.checkPreservedRecords(ctx, j); err != nil {
+		return err
 	}
 	completed := len(j.CompletedSteps)
 	// Check the entire pair set before another exchange. An interrupted rename
@@ -512,6 +575,9 @@ func (l restoreLayout) finishRestore(ctx context.Context, control *paths.Root, j
 		if err != nil || !swapped {
 			return errors.Join(ErrStateChanged, err)
 		}
+	}
+	if err := l.checkPreservedRecords(ctx, j); err != nil {
+		return err
 	}
 	j.Phase, j.Outcome = "VERIFIED", "restored"
 	return writeMaintenanceJournal(ctx, control, *j, true)

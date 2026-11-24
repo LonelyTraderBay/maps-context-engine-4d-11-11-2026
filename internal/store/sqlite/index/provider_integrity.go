@@ -32,7 +32,7 @@ func validateStoredProviderFacts(ctx context.Context, db publicationQueryer, wor
 	}
 	remaining := maxFacts
 	validatePage := func(batch model.ProviderBatch) error {
-		if !providerBatchWithinBudget(batch, 16*1024*1024) {
+		if !ProviderBatchWithinBudget(batch, 16*1024*1024) {
 			return ErrCaptureLimit
 		}
 		raw, err := json.Marshal(batch)
@@ -54,14 +54,27 @@ func validateStoredProviderFacts(ctx context.Context, db publicationQueryer, wor
 		}
 		return nil
 	}
-	for _, kind := range []string{"packages", "symbols", "relations", "diagnostics"} {
-		cursor := ""
+	for _, kind := range []string{"packages", "external_symbols", "symbols", "relations", "diagnostics"} {
+		cursor, lastPath := "", ""
+		query, scanKind := providerPageQuery(kind), kind
+		switch kind {
+		case "external_symbols":
+			query = providerSymbolFactSelect + ` WHERE generation_id=? AND path IS NULL AND symbol_id>? ORDER BY symbol_id LIMIT 128`
+			scanKind = "symbols"
+		case "symbols":
+			// Keep facts for the same source together. Each bounded page
+			// still checks each participating path before and after validation.
+			query = providerSymbolFactSelect + ` WHERE generation_id=? AND (path,symbol_id)>(?,?) ORDER BY path,symbol_id LIMIT 128`
+		}
 		for {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			query := providerPageQuery(kind)
-			rows, err := db.QueryContext(ctx, query, capture.GenerationID, cursor)
+			args := []any{capture.GenerationID, cursor}
+			if kind == "symbols" {
+				args = []any{capture.GenerationID, lastPath, cursor}
+			}
+			rows, err := db.QueryContext(ctx, query, args...)
 			if err != nil {
 				return err
 			}
@@ -76,7 +89,7 @@ func validateStoredProviderFacts(ctx context.Context, db publicationQueryer, wor
 					scanErr = ErrCaptureLimit
 					break
 				}
-				last, scanErr = scanProviderFact(rows, kind, &batch)
+				last, scanErr = scanProviderFact(rows, scanKind, &batch)
 				if scanErr != nil {
 					break
 				}
@@ -97,6 +110,9 @@ func validateStoredProviderFacts(ctx context.Context, db publicationQueryer, wor
 				return err
 			}
 			cursor = last
+			if kind == "symbols" {
+				lastPath = *batch.Symbols[count-1].Path
+			}
 			if count < 128 {
 				break
 			}
@@ -105,12 +121,14 @@ func validateStoredProviderFacts(ctx context.Context, db publicationQueryer, wor
 	return ctx.Err()
 }
 
+const providerSymbolFactSelect = `SELECT symbol_id,path,package_key,kind,name,qualified_name,scope_key,start_byte,end_byte,signature,exported FROM symbols`
+
 func providerPageQuery(kind string) string {
 	switch kind {
 	case "packages":
 		return `SELECT package_key,import_path,module_key,variant,input_digest,semantic_status FROM packages WHERE generation_id=? AND package_key>? ORDER BY package_key LIMIT 128`
 	case "symbols":
-		return `SELECT symbol_id,path,package_key,kind,name,qualified_name,scope_key,start_byte,end_byte,signature,exported FROM symbols WHERE generation_id=? AND symbol_id>? ORDER BY symbol_id LIMIT 128`
+		return providerSymbolFactSelect + ` WHERE generation_id=? AND symbol_id>? ORDER BY symbol_id LIMIT 128`
 	case "relations":
 		return `SELECT relation_id,source_symbol_id,target_symbol_id,kind,evidence_kind,site_path,start_byte,end_byte,reason,unresolved_label FROM relations WHERE generation_id=? AND relation_id>? ORDER BY relation_id LIMIT 128`
 	default:

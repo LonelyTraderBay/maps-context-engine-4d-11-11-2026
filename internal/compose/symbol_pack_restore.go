@@ -77,22 +77,19 @@ func (b *CoreBackend) symbolRestoreFactory(principal app.CorePrincipal, captured
 			}
 			return b.Authority.path(ctx, principal, observation.Binding.Policy, name)
 		}
+		graphRequest := index.PublishedGraphRequest{Member: member, VectorDigest: pinned.VectorDigest, AuthorizeGeneration: authorizeGeneration, AuthorizePath: authorizePath, Scanner: scanner, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFileBytes: int(maxFile), MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000}
+		b.setPackGraphAuthority(&graphRequest, principal, observation.Binding.Policy)
 		graph := captured
 		if graph == nil {
-			graph, err = b.Reader.Index.ReadPublishedGraph(ctx, index.PublishedGraphRequest{Member: member, VectorDigest: pinned.VectorDigest, AuthorizeGeneration: authorizeGeneration, AuthorizePath: authorizePath, Scanner: scanner, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFileBytes: int(maxFile), MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000})
+			graph, err = b.Reader.Index.ReadPublishedGraph(ctx, graphRequest)
 			if err != nil {
 				return empty, coreStoreError(err)
 			}
 		} else {
 			// Save may restore its new archive using the catalog read earlier
 			// in this same call. Recheck its digest, lease and all captured paths.
-			if err := graph.VerifyCatalog(ctx, member); err != nil {
+			if err := graph.VerifyCatalogPaths(ctx, member); err != nil {
 				return empty, coreStoreError(err)
-			}
-			for _, entry := range graph.Snapshot.Manifest().Files {
-				if err := authorizePath(ctx, member.WorktreeID, entry.Path, member.PolicyDigest, member.PolicyEpoch); err != nil {
-					return empty, err
-				}
 			}
 		}
 		scopeAuth := func(ctx context.Context, scope model.ScopeVector, requested model.ScopeMember) error {
@@ -107,6 +104,12 @@ func (b *CoreBackend) symbolRestoreFactory(principal app.CorePrincipal, captured
 				return ErrScopeChanged
 			}
 			return authorizePath(ctx, requested.WorktreeID, name, requested.PolicyDigest, requested.PolicyEpoch)
+		}
+		packPathAuth := func(ctx context.Context, requested model.ScopeMember, name string) error {
+			if !reflect.DeepEqual(requested, member) {
+				return ErrScopeChanged
+			}
+			return graphRequest.AuthorizePath(ctx, requested.WorktreeID, name, requested.PolicyDigest, requested.PolicyEpoch)
 		}
 		validation := app.ValidateCapturedInput{Scope: outputScope, MaxInputBytes: 65536, MaxManifestBytes: b.Reader.MaxManifestBytes,
 			CurrentScope: func(ctx context.Context) (model.ScopeVector, error) {
@@ -163,7 +166,7 @@ func (b *CoreBackend) symbolRestoreFactory(principal app.CorePrincipal, captured
 			captureGraph(graph)
 		}
 		return app.FreshnessPackRestoreInput{
-			Pack: contextpack.PackRestoreInput{Snapshot: graph.Snapshot, Scanner: scanner, AuthorizeScope: scopeAuth, AuthorizePath: pathAuth, VerifyFacts: graph.VerifyFacts,
+			Pack: contextpack.PackRestoreInput{Snapshot: graph.Snapshot, Scanner: scanner, AuthorizeScope: scopeAuth, AuthorizePath: packPathAuth, VerifyFacts: graph.VerifyFacts,
 				VerifyNoApprovedRecords: func(ctx context.Context, scope model.ScopeVector) (bool, error) {
 					if model.ComparePinnedScope(scope, pinned, 32768) != nil {
 						return false, ErrScopeChanged

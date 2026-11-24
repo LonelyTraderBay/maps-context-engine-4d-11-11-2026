@@ -77,7 +77,7 @@ func (s *Store) ReadPublishedFileSymbols(ctx context.Context, request PublishedF
 			}
 			// Bound JSON expansion before materializing the wire representation.
 			one := model.ProviderBatch{Symbols: []model.SymbolFact{symbol}}
-			if !providerBatchWithinBudget(one, request.MaxFactsBytes-total) {
+			if !ProviderBatchWithinBudget(one, request.MaxFactsBytes-total) {
 				resultErr = ErrCaptureLimit
 				break
 			}

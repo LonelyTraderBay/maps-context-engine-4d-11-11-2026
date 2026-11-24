@@ -189,3 +189,56 @@ func TestRevalidateLocalDetectsChangeBetweenHashPasses(t *testing.T) {
 		t.Fatalf("change between hash passes accepted: %v", err)
 	}
 }
+
+func TestObserveCapturedLocalChecksSourceAuthorityAfterRead(t *testing.T) {
+	request, _ := revalidateFixture(t)
+	checks := 0
+	request.AuthorizeSourceRoot = func(context.Context) error {
+		checks++
+		if checks == 2 {
+			return inventory.ErrWalkAuthorityChanged
+		}
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := ObserveCapturedLocal(ctx, request); !errors.Is(err, inventory.ErrWalkAuthorityChanged) || checks != 2 {
+		t.Fatalf("source proof must check both sides of the read: checks=%d err=%v", checks, err)
+	}
+	if err := RevalidateLocal(ctx, request); err != nil || checks != 2 {
+		t.Fatalf("publication must use its own authority: checks=%d err=%v", checks, err)
+	}
+}
+
+func TestObserveCapturedLocalUsesPinnedInventoryDigest(t *testing.T) {
+	request, path := revalidateFixture(t)
+	raw, ok := request.Snapshot.File("main.go")
+	if !ok {
+		t.Fatal("fixture capture missing")
+	}
+	manifest := request.Snapshot.Manifest()
+	manifest.DependencyInputDigests = []string{request.Expected.InputDigest}
+	manifest.SnapshotDigest = ""
+	frozen, err := snapshot.Freeze(manifest, []snapshot.File{raw}, request.MaxManifestBytes, request.MaxSourceBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Snapshot = frozen
+	request.Expected = inventory.FileMap{}
+	request.MatchManifestInventory = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := ObserveCapturedLocal(ctx, request); err != nil {
+		t.Fatalf("matching pinned inventory refused: %v", err)
+	}
+	if err := RevalidateLocal(ctx, request); !errors.Is(err, ErrSnapshotUnverifiable) {
+		t.Fatalf("publication accepted derived inventory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".git", "info", "exclude"), []byte("# changed input\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ObserveCapturedLocal(ctx, request); !errors.Is(err, ErrSnapshotChanged) {
+		t.Fatalf("changed inventory input accepted: %v", err)
+	}
+}

@@ -33,6 +33,14 @@ type MaintenanceJournal struct {
 	Files                     []MaintenanceFileProof    `json:"files"`
 	CompletedSteps            []string                  `json:"completed_steps"`
 	IndexRollback             *MaintenanceIndexRollback `json:"index_rollback,omitempty"`
+	IndexRebuild              *MaintenanceIndexRebuild  `json:"index_rebuild,omitempty"`
+}
+
+// Index rebuild replaces only the derived store. The records proof binds its
+// original identity and complete protected file set throughout roll-forward.
+type MaintenanceIndexRebuild struct {
+	RecordsIncarnation string `json:"records_incarnation"`
+	RecordsSHA256      string `json:"records_sha256"`
 }
 
 type MaintenanceIndexRollback struct {
@@ -81,7 +89,7 @@ func maintenanceSteps(target string) []string {
 }
 
 func maintenanceJournalSteps(j MaintenanceJournal) []string {
-	if j.IndexRollback != nil {
+	if j.IndexRollback != nil || j.IndexRebuild != nil {
 		return []string{"index_main", "index_journal", "index_head", "worktree_manifest"}
 	}
 	return maintenanceSteps(j.Target)
@@ -126,6 +134,13 @@ func decodeMaintenanceJournal(raw []byte, profile, scope string) (out Maintenanc
 		}
 		kinds = []string{"index"}
 	}
+	if rebuild := out.IndexRebuild; rebuild != nil {
+		if out.Target != "worktree" || out.BackupDirectory != "index-rebuild" || out.IndexRollback != nil ||
+			out.Phase == "NEEDS_RECOVERY" || !model.ValidUUID(rebuild.RecordsIncarnation) || !model.ValidDigest(rebuild.RecordsSHA256) {
+			return MaintenanceJournal{}, ErrStoreRecoveryRequired
+		}
+		kinds = []string{"index"}
+	}
 	if len(out.OldStores) != len(kinds) || len(out.NewStores) != len(kinds) || out.Files == nil || out.CompletedSteps == nil {
 		return MaintenanceJournal{}, ErrStoreRecoveryRequired
 	}
@@ -145,6 +160,11 @@ func decodeMaintenanceJournal(raw []byte, profile, scope string) (out Maintenanc
 	}
 	if rollback := out.IndexRollback; rollback != nil && (rollback.Records.Incarnation == out.OldStores[0].Incarnation ||
 		rollback.Records.Incarnation == out.NewStores[0].Incarnation || out.BackupManifestSHA256 != out.OldStores[0].LogicalSHA256) {
+		return MaintenanceJournal{}, ErrStoreRecoveryRequired
+	}
+	if rebuild := out.IndexRebuild; rebuild != nil && (out.Outcome == "aborted" ||
+		rebuild.RecordsIncarnation == out.OldStores[0].Incarnation || rebuild.RecordsIncarnation == out.NewStores[0].Incarnation ||
+		out.BackupManifestSHA256 != out.OldStores[0].LogicalSHA256) {
 		return MaintenanceJournal{}, ErrStoreRecoveryRequired
 	}
 	switch out.Phase {
@@ -195,7 +215,7 @@ func decodeMaintenanceJournal(raw []byte, profile, scope string) (out Maintenanc
 // Only the journal executor can publish these transitions; this validator is
 // not proof that the corresponding filesystem operation has happened.
 func validMaintenanceAdvance(old, next MaintenanceJournal) bool {
-	if old.FormatVersion != next.FormatVersion || old.OperationID != next.OperationID || old.ProfileInstallationID != next.ProfileInstallationID || old.Target != next.Target || old.WorktreeID != next.WorktreeID || old.BackupDirectory != next.BackupDirectory || old.BackupManifestSHA256 != next.BackupManifestSHA256 || old.PermissionReviewConfirmed != next.PermissionReviewConfirmed || !reflect.DeepEqual(old.OldStores, next.OldStores) || !reflect.DeepEqual(old.IndexRollback, next.IndexRollback) || len(old.NewStores) != len(next.NewStores) {
+	if old.FormatVersion != next.FormatVersion || old.OperationID != next.OperationID || old.ProfileInstallationID != next.ProfileInstallationID || old.Target != next.Target || old.WorktreeID != next.WorktreeID || old.BackupDirectory != next.BackupDirectory || old.BackupManifestSHA256 != next.BackupManifestSHA256 || old.PermissionReviewConfirmed != next.PermissionReviewConfirmed || !reflect.DeepEqual(old.OldStores, next.OldStores) || !reflect.DeepEqual(old.IndexRollback, next.IndexRollback) || !reflect.DeepEqual(old.IndexRebuild, next.IndexRebuild) || len(old.NewStores) != len(next.NewStores) {
 		return false
 	}
 	for i, store := range old.NewStores {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 )
@@ -14,14 +15,15 @@ import (
 // pool connection and handle is closed. It must not change the pool caps.
 // Public transport must wait until the real OS lease is wired.
 type Store struct {
-	readers   *sql.DB
-	image     bool
-	writer    *sql.DB
-	lease     ports.LifecycleLease
-	identity  Identity
-	schema    int
-	streamsMu sync.Mutex
-	streams   map[string]*providerStageState
+	readers       *sql.DB
+	image         bool
+	writer        *sql.DB
+	lease         ports.LifecycleLease
+	identity      Identity
+	schema        int
+	streamsMu     sync.Mutex
+	streams       map[string]*providerStageState
+	manifestProof atomic.Pointer[generationManifestProof]
 }
 
 // Open validates an existing V2 store; it does not initialize or migrate it.

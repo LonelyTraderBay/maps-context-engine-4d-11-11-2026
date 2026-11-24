@@ -95,12 +95,19 @@ func DecodeCaptureManifestJSON(data []byte, maxBytes int) (CaptureManifest, erro
 // ComputeCaptureDigest hashes the capture input only; parse/type results have
 // no place in this preimage. The caller still verifies actual captured bytes.
 func ComputeCaptureDigest(manifest CaptureManifest, maxBytes int) (string, error) {
+	digest, _, err := ComputeCaptureDigestAndSize(manifest, maxBytes)
+	return digest, err
+}
+
+// ComputeCaptureDigestAndSize also returns the minimum byte budget needed by
+// the validated JSON and canonical preimages.
+func ComputeCaptureDigestAndSize(manifest CaptureManifest, maxBytes int) (string, int, error) {
 	if maxBytes <= 0 || len(manifest.Files) > maxBytes || len(manifest.DependencyInputDigests) > maxBytes-len(manifest.Files) {
-		return "", fmt.Errorf("capture input exceeds budget")
+		return "", 0, fmt.Errorf("capture input exceeds budget")
 	}
 	m, err := manifest.normalized(false)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	// Bound the unavoidable aggregate JSON allocation before marshaling it. Each
 	// item is independently bounded by the validated path and scalar limits.
@@ -108,16 +115,16 @@ func ComputeCaptureDigest(manifest CaptureManifest, maxBytes int) (string, error
 	for _, f := range m.Files {
 		part, err := json.Marshal(f)
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		if len(part) > remaining {
-			return "", fmt.Errorf("capture input exceeds budget")
+			return "", 0, fmt.Errorf("capture input exceeds budget")
 		}
 		remaining -= len(part)
 	}
 	for _, d := range m.DependencyInputDigests {
 		if len(d)+2 > remaining {
-			return "", fmt.Errorf("capture input exceeds budget")
+			return "", 0, fmt.Errorf("capture input exceeds budget")
 		}
 		remaining -= len(d) + 2
 	}
@@ -132,14 +139,17 @@ func ComputeCaptureDigest(manifest CaptureManifest, maxBytes int) (string, error
 	}{m.SchemaVersion, m.WorktreeID, m.ProfileID, m.PolicyDigest, m.ProviderDigest, m.Files, m.DependencyInputDigests}
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	canonical, err := DecodeIdentityJSON(raw, maxBytes)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	_, digest, err := EncodeCanonical("capture-v1", canonical, maxBytes)
-	return digest, err
+	preimage, digest, err := EncodeCanonical("capture-v1", canonical, maxBytes)
+	if err != nil {
+		return "", 0, err
+	}
+	return digest, max(len(raw), len(preimage)), nil
 }
 func VerifyCaptureDigest(m CaptureManifest, maxBytes int) error {
 	if !lowerHex(m.SnapshotDigest, 64) {

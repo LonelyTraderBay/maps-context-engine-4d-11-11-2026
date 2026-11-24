@@ -42,6 +42,61 @@ func openQuiescentOwner(ctx context.Context, root, scope string, wait time.Durat
 	return openQuiescentOperation(ctx, root, scope, wait, authorize, "", false)
 }
 
+// PurgeProtectedDerivedIndex clears the owned index and keeps the exclusive
+// worktree lease through finalize, which records the removal in the catalog.
+func PurgeProtectedDerivedIndex(ctx context.Context, installation, worktree string, cacheBytes int64, authorize, finalize func(context.Context) error) (resultErr error) {
+	if _, err := profileUUIDBytes(worktree); err != nil || cacheBytes < 1 || cacheBytes > 9007199254740991 || finalize == nil {
+		return ErrProfileInput
+	}
+	o, err := openQuiescentOwner(ctx, installation, worktree, 5*time.Second, authorize)
+	if err != nil {
+		return err
+	}
+	committed := false
+	finish := func(err error) {
+		if err != nil && committed {
+			err = errors.Join(index.ErrAfterCommit, err)
+		}
+		resultErr = errors.Join(resultErr, err)
+	}
+	defer func() { finish(o.Close()) }()
+	if len(o.stores) != 2 || o.stores[0].name != "index.sqlite" {
+		return ErrStateUnsafe
+	}
+	gate, err := o.domain.Child(ctx, ".maintenance")
+	if err != nil {
+		return err
+	}
+	defer func() { finish(gate.root.Close()) }()
+	native := o.stores[0]
+	native.quota = &cacheBudget{authorize: o.check, root: o.domain.root, worktree: worktree, gate: gate, limit: cacheBytes}
+	owner, err := openNativeIndexOwner(ctx, native)
+	if err != nil {
+		return err
+	}
+	defer func() { finish(owner.Close()) }()
+	store, err := owner.Store()
+	if err != nil {
+		return err
+	}
+	if err := store.PurgeDerivedIndex(ctx, o.operation, o.writer, func(ctx context.Context, scope string) error {
+		if scope != worktree {
+			return ErrStateUnsafe
+		}
+		return o.check(ctx)
+	}); err != nil {
+		return err
+	}
+	committed = true
+	if err := o.check(ctx); err != nil {
+		return errors.Join(index.ErrAfterCommit, err)
+	}
+	if err := finalize(ctx); err != nil {
+		return errors.Join(index.ErrAfterCommit, err)
+	}
+	return nil
+}
+
 // Recovery after a partial exchange needs the leases but cannot open SQL or
 // authenticate a mix of old and new authority files.
 func openQuiescentOperation(ctx context.Context, root, scope string, wait time.Duration, authorize func(context.Context) error, recovery string, leaseOnly bool) (_ *quiescentOwner, resultErr error) {

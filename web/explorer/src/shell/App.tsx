@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { createExplorerClient, ExplorerRequestError } from '../api/client.ts';
 import { sourceKey } from '../api/source.ts';
@@ -6,7 +6,7 @@ import type { GraphNode, ScopeVector, StatusData } from '../index.ts';
 import { verifyScopeDigest } from '../index.ts';
 import { GraphPane } from './GraphPane.tsx';
 import { emptyGraph, hardNodes, loadGraph } from './map.ts';
-import { selectionReducer, initialSelection } from './selection.ts';
+import { selectionReducer, initialSelection, retainGraphChoice } from './selection.ts';
 import type { SelectionAction } from './selection.ts';
 import { explain, SourcePane } from './SourcePane.tsx';
 import { Splitter } from './Splitter.tsx';
@@ -17,6 +17,8 @@ import { selectionLocator } from './context_locator.ts';
 import type { PreviewSelection } from '../features/preview/pairing.ts';
 import { FlowPanel } from '../features/flow/FlowPanel.tsx';
 import type { FlowSelection } from '../features/flow/data.ts';
+
+const workspacePollMs = 2000;
 
 function Binding({ status, scope }: { status: StatusData | null; scope: ScopeVector | null }) {
   const member = scope?.members[0] ?? status?.registered_scopes[0];
@@ -45,6 +47,8 @@ export function App() {
   const [preparedSource, setPreparedSource] = useState<{ selectionID: string; content: string } | null>(null);
   const [preparedFlow, setPreparedFlow] = useState<{ key: string; content: string } | null>(null);
   const work = useRef<AbortController | null>(null);
+  const graphReady = useRef(false);
+  const pollError = useRef<string | null>(null);
   const flowButton = useRef<HTMLButtonElement | null>(null);
   const selectionOrder = useRef(0);
 
@@ -64,6 +68,9 @@ export function App() {
 
   const endSession = useCallback((message: string) => {
     work.current?.abort();
+    work.current = null;
+    graphReady.current = false;
+    pollError.current = null;
     selectionOrder.current++;
     client.disconnect();
     setConnected(false);
@@ -87,13 +94,22 @@ export function App() {
     }
   }, [endSession]);
 
-  function begin(): AbortController {
+  function begin(showProgress = true): AbortController {
     work.current?.abort();
     const job = new AbortController();
     work.current = job;
-    setBusy(true);
-    setError(null);
+    if (showProgress) {
+      pollError.current = null;
+      setBusy(true);
+      setError(null);
+    }
     return job;
+  }
+
+  function finish(job: AbortController) {
+    if (work.current !== job) return;
+    work.current = null;
+    setBusy(false);
   }
 
   function fromPreview(value: PreviewSelection, content: string | null) {
@@ -154,26 +170,37 @@ export function App() {
     dispatch({ type: 'mapping-range', node: value.node.node_id, source: value.source });
   }
 
-  async function readWorkspace(job: AbortController) {
+  function discardScopeSelections() {
     selectionOrder.current++;
     setPreparedSource(null);
     setPreparedFlow(null);
     setFlow(null);
     setPreviewBookmark(null);
+  }
+
+  async function observeWorkspace(job: AbortController) {
     const response = await client.workspace(job.signal);
     const next = response.scope ?? null;
     if (!response.data) throw new Error('Thông tin workspace chưa khả dụng.');
     if (next) await verifyScopeDigest(next, 32768);
     job.signal.throwIfAborted();
-    setWorkspace(response.data);
+    return { status: response.data, next };
+  }
+
+  async function readWorkspace(job: AbortController) {
+    discardScopeSelections();
+    const { status, next } = await observeWorkspace(job);
+    graphReady.current = false;
+    setWorkspace(status);
     setScope(next);
     dispatch({ type: 'scope', digest: next?.vector_digest ?? null });
     setGraph(emptyGraph);
-    if (next && response.data.index_state === 'published') {
+    if (next && status.index_state === 'published') {
       const page = await loadGraph(client, next, job.signal, emptyGraph, setGraph);
       job.signal.throwIfAborted();
       setGraph(page);
     }
+    graphReady.current = true;
   }
 
   function failed(job: AbortController, reason: unknown) {
@@ -201,7 +228,7 @@ export function App() {
           'Mã không hợp lệ hoặc đã dùng. Kiểm tra mã trong terminal.');
       } else if (!job.signal.aborted) setError(explain(reason));
     } finally {
-      if (!job.signal.aborted) setBusy(false);
+      finish(job);
     }
   }
 
@@ -212,7 +239,7 @@ export function App() {
     } catch (reason) {
       failed(job, reason);
     } finally {
-      if (!job.signal.aborted) setBusy(false);
+      finish(job);
     }
   }
 
@@ -226,12 +253,62 @@ export function App() {
     } catch (reason) {
       failed(job, reason);
     } finally {
-      if (!job.signal.aborted) setBusy(false);
+      finish(job);
     }
   }
 
   const chosen = selection.history[selection.position];
   const node = graph.nodes.find(item => item.node_id === chosen?.node) ?? null;
+
+  const pollWorkspace = useEffectEvent(async () => {
+    if (work.current || document.hidden) return;
+    const job = begin(false);
+    const order = selectionOrder.current;
+    try {
+      const { status, next } = await observeWorkspace(job);
+      if (graphReady.current && next?.vector_digest === scope?.vector_digest && status.index_state === workspace?.index_state) {
+        const resolved = pollError.current;
+        if (resolved !== null) setError(current => current === resolved ? null : current);
+        pollError.current = null;
+        return;
+      }
+      const page = next && status.index_state === 'published' ? await loadGraph(client, next, job.signal) : emptyGraph;
+      job.signal.throwIfAborted();
+      const retain = order === selectionOrder.current ? retainGraphChoice(scope, next, chosen, node, page.nodes) : undefined;
+      discardScopeSelections();
+      setPreview(false);
+      setWorkspace(status);
+      setScope(next);
+      setGraph(page);
+      setError(null);
+      pollError.current = null;
+      dispatch({ type: 'scope', digest: next?.vector_digest ?? null, ...(retain ? { retain } : {}) });
+      graphReady.current = true;
+    } catch (reason) {
+      if (job.signal.aborted) return;
+      if (reason instanceof ExplorerRequestError && reason.status === 403) {
+        endSession(explain(reason));
+      } else {
+        pollError.current = explain(reason);
+        failed(job, reason);
+      }
+    } finally {
+      finish(job);
+    }
+  });
+
+  useEffect(() => {
+    if (!connected) return;
+    let stopped = false;
+    let timer: number;
+    const check = async () => {
+      await pollWorkspace();
+      if (!stopped) timer = window.setTimeout(check, workspacePollMs);
+    };
+    timer = window.setTimeout(check, workspacePollMs);
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, [connected]);
+
   const selectedSource = chosen?.mappingSource ?? chosen?.preview?.match.source_refs[0] ?? node?.source_refs[chosen?.source ?? 0];
   const exactFlow = scope && flow?.scope === scope.vector_digest ? flow : null;
   const flowSource = selectedSource && scope && preparedFlow?.key === scope.vector_digest + sourceKey(selectedSource)

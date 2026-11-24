@@ -30,6 +30,9 @@ func (b *CoreBackend) buildOverview(ctx context.Context, principal app.CorePrinc
 	if err != nil {
 		return nil, coreStoreError(err)
 	}
+	if observed.Binding.Profile == nil {
+		return nil, app.ErrCoreUnsupported
+	}
 	member := observed.Vector.Members[0]
 	if err := graph.VerifyCatalog(ctx, member); err != nil {
 		return nil, coreStoreError(err)

@@ -1,6 +1,12 @@
+param([string] $PinJSON)
+
 Set-StrictMode -Version Latest
 
-$script:Pin = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'toolchain-pin.json') -Raw | ConvertFrom-Json -AsHashtable
+$script:Pin = if ($PinJSON) {
+    ConvertFrom-Json -InputObject $PinJSON -AsHashtable
+} else {
+    Get-Content -LiteralPath (Join-Path $PSScriptRoot 'toolchain-pin.json') -Raw | ConvertFrom-Json -AsHashtable
+}
 $script:Utf8 = [Text.UTF8Encoding]::new($false, $true)
 
 function Test-ParserInstallation {

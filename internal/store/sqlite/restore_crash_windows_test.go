@@ -58,7 +58,7 @@ func TestWindowsInterruptedIndexWorker(t *testing.T) {
 	defer cancel()
 	_, err := withWindowsStoreWriter(ctx, root, "worktree", worktree, "index-fixture", ports.SharedLease, 4*time.Second,
 		func(o windowsStoreMaintenance) (struct{}, error) {
-			return runWindowsIndexWAL(ctx, o, func(context.Context) error { return o.check() },
+			return runWindowsIndexWAL(ctx, o, func(context.Context) error { return o.check() }, windowsCatalogSeedMaxSize,
 				func(*index.Store, *runtime.Writer, string) (_ struct{}, resultErr error) {
 					stores, release, err := o.openStores()
 					if err != nil {
@@ -97,7 +97,7 @@ func TestWindowsInterruptedIndexWorker(t *testing.T) {
 						}
 					}
 					return struct{}{}, windows.TerminateProcess(windows.CurrentProcess(), 79)
-				})
+				}, nil)
 		})
 	t.Fatalf("index did not stop with its SQLite state pending: %v", err)
 }

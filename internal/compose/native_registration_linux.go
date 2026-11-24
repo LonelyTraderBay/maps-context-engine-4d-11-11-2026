@@ -18,8 +18,8 @@ import (
 	sqliteowner "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 )
 
-// RegisterNativeRepo registers only an explicitly installation-approved local
-// Git root. The default profile uses the embedded syntax analyzer; no Go/Git
+// RegisterNativeRepo registers a Git worktree and metadata within explicitly
+// approved installation targets. The default profile uses the embedded syntax analyzer; no Go/Git
 // command, target code, hook, dependency download or indexing is performed.
 func RegisterNativeRepo(ctx context.Context, installation, selected, rootPath string, cpus int) (result catalog.Registration, resultErr error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -50,7 +50,7 @@ func RegisterNativeRepo(ctx context.Context, installation, selected, rootPath st
 		return result, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, root.Close()) }()
-	common, err := runtimeadapter.OpenLocalGitMetadata(root)
+	common, linked, err := runtimeadapter.OpenApprovedGitMetadata(root, state.OpenTargetGitMetadata)
 	if err != nil {
 		return result, err
 	}
@@ -83,5 +83,5 @@ func RegisterNativeRepo(ctx context.Context, installation, selected, rootPath st
 	if err != nil {
 		return result, err
 	}
-	return bound.Register(ctx, root, common, "", "default", p, prof)
+	return bound.Register(ctx, root, common, linked, "default", p, prof)
 }

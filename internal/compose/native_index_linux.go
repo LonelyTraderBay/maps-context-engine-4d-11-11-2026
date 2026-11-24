@@ -29,9 +29,14 @@ func RunNativeIndex(ctx context.Context, installation, selected, worktree, profi
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, n.Close()) }()
-	if n.binding.Profile.AnalysisMode != "syntax" && n.binding.Profile.AnalysisMode != "typed_when_available" || n.binding.Profile.ProviderDigest != n.state.ExecutableDigest() {
+	if n.binding.Profile != nil && n.binding.Profile.ProviderDigest != n.state.ExecutableDigest() {
 		cancel()
 		return app.ErrCoreUnsupported
+	}
+	provider, err := n.languageProvider(startup)
+	if err != nil {
+		cancel()
+		return err
 	}
 	job, err := nativeOperationID()
 	if err != nil {
@@ -64,7 +69,13 @@ func RunNativeIndex(ctx context.Context, installation, selected, worktree, profi
 	}
 	for {
 		bounded, cancel := context.WithTimeout(ctx, deadline)
-		result, err := n.indexOnce(bounded, writer, job, full)
+		result, err := n.indexOnce(bounded, writer, job, full, provider)
+		deferred := watch && nativeWatchSourceChanged(err)
+		if deferred {
+			// An editor changed the source during this poll. indexOnce has
+			// already settled any staged generation and released its stream.
+			err = n.recheckBinding(bounded)
+		}
 		if err != nil {
 			// A nested authority check can refuse access when its context expires.
 			err = errors.Join(err, bounded.Err())
@@ -73,7 +84,7 @@ func RunNativeIndex(ctx context.Context, installation, selected, worktree, profi
 		if err != nil {
 			return err
 		}
-		if progress != nil {
+		if !deferred && progress != nil {
 			if err := progress(result); err != nil {
 				return err
 			}
@@ -92,6 +103,24 @@ func RunNativeIndex(ctx context.Context, installation, selected, worktree, profi
 	}
 }
 
+// Defer only when every cause describes source drift. A joined cleanup or
+// unknown-commit error must still stop the watcher for inspection.
+func nativeWatchSourceChanged(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		for _, cause := range causes {
+			if !nativeWatchSourceChanged(cause) {
+				return false
+			}
+		}
+		return len(causes) != 0
+	}
+	if cause := errors.Unwrap(err); cause != nil {
+		return nativeWatchSourceChanged(cause)
+	}
+	return err == indexer.ErrSnapshotChanged || err == inventory.ErrWalkChanged || err == inventory.ErrCaptureChanged
+}
+
 type nativeCapture struct {
 	snapshot *snapshot.Snapshot
 	files    inventory.FileMap
@@ -105,7 +134,7 @@ func (i *nativeInventory) capture(ctx context.Context) (nativeCapture, error) {
 	}
 	maximum := minInt64(i.scope.binding.Policy.MaxFileBytes, i.scope.effective.Core.MaxFileBytes, 2<<20)
 	totalLimit := minInt64(i.scope.binding.Policy.MaxSourceBytes, i.scope.effective.Core.MaxSourceBytesPerSnapshot, 512<<20)
-	manifest := model.CaptureManifest{SchemaVersion: 1, WorktreeID: i.scope.binding.WorktreeID, ProfileID: i.scope.binding.ProfileID, PolicyDigest: i.scope.binding.PolicyDigest, ProviderDigest: i.scope.binding.Profile.ProviderDigest, Files: []model.ManifestFile{}, DependencyInputDigests: []string{}}
+	manifest := model.CaptureManifest{SchemaVersion: 1, WorktreeID: i.scope.binding.WorktreeID, ProfileID: i.scope.binding.ProfileID, PolicyDigest: i.scope.binding.PolicyDigest, ProviderDigest: i.scope.binding.ProviderDigest(), Files: []model.ManifestFile{}, DependencyInputDigests: []string{}}
 	captured := []snapshot.File{}
 	blocked := map[string]string{}
 	var total int64
@@ -193,8 +222,8 @@ func (i *nativeInventory) observeCaptured(ctx context.Context, capture nativeCap
 		}
 		return nil
 	}
-	request := indexer.RevalidateRequest{Inventory: i.request, Expected: capture.files, Snapshot: frozen, MaxManifestBytes: 64 << 20, MaxFileBytes: int(minInt64(i.scope.binding.Policy.MaxFileBytes, i.scope.effective.Core.MaxFileBytes, 2<<20)), MaxSourceBytes: minInt64(i.scope.binding.Policy.MaxSourceBytes, i.scope.effective.Core.MaxSourceBytesPerSnapshot, 512<<20), VerifyAuthority: verify, VerifyDependencies: func(ctx context.Context, digests []string) error {
-		if len(digests) != 1 || digests[0] != capture.files.InputDigest {
+	request := indexer.RevalidateRequest{Inventory: i.request, Expected: capture.files, Snapshot: frozen, MaxManifestBytes: 64 << 20, MaxFileBytes: int(minInt64(i.scope.binding.Policy.MaxFileBytes, i.scope.effective.Core.MaxFileBytes, 2<<20)), MaxSourceBytes: minInt64(i.scope.binding.Policy.MaxSourceBytes, i.scope.effective.Core.MaxSourceBytesPerSnapshot, 512<<20), AuthorizeSourceRoot: i.authorizeSourceRoot, MatchManifestInventory: i.matchManifestInventory, VerifyAuthority: verify, VerifyDependencies: func(ctx context.Context, digests []string) error {
+		if !i.matchManifestInventory && (len(digests) != 1 || digests[0] != capture.files.InputDigest) {
 			return indexer.ErrSnapshotChanged
 		}
 		return i.scope.recheckBinding(ctx)
@@ -211,7 +240,7 @@ func (i *nativeInventory) observeCaptured(ctx context.Context, capture nativeCap
 	return indexer.RevalidateLocal(ctx, request)
 }
 
-func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job string, full bool) (_ NativeIndexProgress, resultErr error) {
+func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job string, full bool, provider *nativeLanguageProvider) (_ NativeIndexProgress, resultErr error) {
 	i, err := openNativeInventory(ctx, n, true)
 	if err != nil {
 		return NativeIndexProgress{}, err
@@ -244,17 +273,38 @@ func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job
 	// A writer may inspect the old head's metadata after policy administration
 	// so it can replace a stale generation. No old source/fact is reused under
 	// the new policy, and the public query authorizer remains strict.
-	previous, err := store.ReadGeneration(ctx, n.binding.ProfileID, "", func(ctx context.Context, w, p, _ string, _ int64) error {
+	authorizePrevious := func(ctx context.Context, w, p, _ string, _ int64) error {
 		if w != n.binding.WorktreeID || p != n.binding.ProfileID {
 			return ErrScopeChanged
 		}
 		return n.recheckBinding(ctx)
-	}, 64<<20)
+	}
+	var previous index.GenerationObservation
+	var previousCoverage model.Coverage
+	matches := func(observed index.GenerationObservation) bool {
+		return observed.SnapshotDigest == manifest.SnapshotDigest && observed.PolicyDigest == n.binding.PolicyDigest &&
+			observed.PolicyEpoch == n.binding.PolicyEpoch && observed.ProviderDigest == manifest.ProviderDigest
+	}
+	if !full && provider == nil && n.binding.Profile != nil && n.binding.Profile.AnalysisMode == "typed_when_available" {
+		previous, previousCoverage, err = store.ReadGenerationWithCoverage(ctx, n.binding.ProfileID, "", authorizePrevious, 64<<20, 16<<20, i.request.Scanner, matches)
+	} else {
+		previous, err = store.ReadGeneration(ctx, n.binding.ProfileID, "", authorizePrevious, 64<<20)
+	}
 	if err != nil && !errors.Is(err, index.ErrSnapshotUnavailable) {
 		return NativeIndexProgress{}, err
 	}
-	if err == nil && !full && previous.SnapshotDigest == manifest.SnapshotDigest && previous.PolicyDigest == n.binding.PolicyDigest && previous.PolicyEpoch == n.binding.PolicyEpoch && previous.ProviderDigest == n.binding.Profile.ProviderDigest {
-		return NativeIndexProgress{GenerationID: previous.GenerationID, SnapshotDigest: manifest.SnapshotDigest, Files: len(manifest.Files), Unchanged: true}, nil
+	if err == nil && !full && matches(previous) {
+		progress := NativeIndexProgress{GenerationID: previous.GenerationID, SnapshotDigest: manifest.SnapshotDigest, Files: len(manifest.Files), Unchanged: true}
+		if provider != nil {
+			progress.ProviderID, progress.ProviderStatus = provider.id, previous.State
+		}
+		for _, capability := range previousCoverage.Capabilities {
+			if capability.Name == "go_semantics" && capability.ProviderID == "embedded-go-captured" {
+				progress.Typed = true
+				break
+			}
+		}
+		return progress, nil
 	}
 	generation, err := nativeOperationID()
 	if err != nil {
@@ -285,7 +335,23 @@ func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job
 		return NativeIndexProgress{}, err
 	}
 	started = true
-	syntax, err := stageNativeGoSyntax(ctx, store, write, stream, n.binding)
+	if provider != nil {
+		done, err := n.stageLanguageProvider(ctx, store, write, stream, provider)
+		if err != nil {
+			return NativeIndexProgress{}, err
+		}
+		if err := i.publishProvider(ctx, store, write, stream, authorize, captured, done, nativeProviderFrame, func(ctx context.Context, _ *snapshot.Snapshot, observed model.ProviderDone) error {
+			if observed.JobID != job || observed.VerifyInputDigest(manifest.SnapshotDigest) != nil || observed.Status != done.Status || observed.Sequence != done.Sequence {
+				return index.ErrCaptureMismatch
+			}
+			return n.recheckBinding(ctx)
+		}); err != nil {
+			return NativeIndexProgress{}, err
+		}
+		published = true
+		return NativeIndexProgress{GenerationID: generation, SnapshotDigest: manifest.SnapshotDigest, Files: len(manifest.Files), ProviderID: provider.id, ProviderStatus: done.Status}, nil
+	}
+	syntax, err := stageNativeGoSyntax(ctx, store, write, stream, n.binding, false)
 	if err != nil {
 		return NativeIndexProgress{}, err
 	}
@@ -319,10 +385,7 @@ func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job
 	if unavailableModules > 0 {
 		done.Gaps = append(done.Gaps, model.Gap{Code: "MODULE_MANIFEST_UNAVAILABLE", Reason: "Captured Go files without a valid configured nearest module were not assigned an import identity.", Count: &unavailableModules, SourceRefs: []model.SourceRef{}})
 	}
-	if err := store.SealProviderStage(ctx, index.SealProviderRequest{Capture: write, Stream: stream, Done: done, MaxFrameBytes: 16 << 20, AuthorizeGeneration: authorize}); err != nil {
-		return NativeIndexProgress{}, err
-	}
-	err = store.PublishProvider(ctx, index.PublishProviderRequest{Capture: write, Stream: stream, AuthorizeGeneration: authorize, Revalidate: func(ctx context.Context, snap *snapshot.Snapshot) error { return i.revalidate(ctx, captured, snap) }, VerifyProvider: func(ctx context.Context, snap *snapshot.Snapshot, observed model.ProviderDone) error {
+	err = i.publishProvider(ctx, store, write, stream, authorize, captured, done, 16<<20, func(ctx context.Context, snap *snapshot.Snapshot, observed model.ProviderDone) error {
 		if observed.InputDigest != manifest.SnapshotDigest || observed.JobID != job || observed.Sequence != sequence || snap.Manifest().SnapshotDigest != manifest.SnapshotDigest {
 			return index.ErrCaptureMismatch
 		}
@@ -338,10 +401,19 @@ func (n *nativeScope) indexOnce(ctx context.Context, writer *runtime.Writer, job
 			}
 		}
 		return n.recheckBinding(ctx)
-	}, MaxFacts: 1000000, MaxFrameBytes: 16 << 20})
+	})
 	if err != nil {
 		return NativeIndexProgress{}, err
 	}
 	published = true
 	return NativeIndexProgress{GenerationID: generation, SnapshotDigest: manifest.SnapshotDigest, Files: len(manifest.Files), Typed: typed != nil}, nil
+}
+
+func (i *nativeInventory) publishProvider(ctx context.Context, store *index.Store, write index.CaptureWrite, stream index.ProviderStageStream, authorize index.GenerationAuthorizer, capture nativeCapture, done model.ProviderDone, limit int, verify func(context.Context, *snapshot.Snapshot, model.ProviderDone) error) error {
+	if err := store.SealProviderStage(ctx, index.SealProviderRequest{Capture: write, Stream: stream, Done: done, MaxFrameBytes: limit, AuthorizeGeneration: authorize}); err != nil {
+		return err
+	}
+	return store.PublishProvider(ctx, index.PublishProviderRequest{Capture: write, Stream: stream, AuthorizeGeneration: authorize,
+		Revalidate:     func(ctx context.Context, snap *snapshot.Snapshot) error { return i.revalidate(ctx, capture, snap) },
+		VerifyProvider: verify, MaxFacts: 1000000, MaxFrameBytes: limit})
 }

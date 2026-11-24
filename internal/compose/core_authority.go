@@ -24,6 +24,13 @@ type BoundCoreAuthority struct {
 	Reader                *ScopeReader
 	AuthenticatePrincipal func(context.Context) (app.CorePrincipal, error)
 	AuthorizePath         PathAccess
+	// CheckMetadataPath checks policy on byte-free capture metadata. The
+	// enclosing graph read separately authorizes the full generation.
+	CheckMetadataPath func(name string, deniedGlobs []string) error
+	// AuthorizeBoundPath checks a live file within an already authorized
+	// scope. Callers must recheck the principal and scope at their read
+	// or delivery boundaries.
+	AuthorizeBoundPath PathAccess
 }
 
 var _ app.CoreAuthority = (*BoundCoreAuthority)(nil)
@@ -187,7 +194,7 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 		if _, err := model.MatchPinnedSource(*response.Scope, ref, nil, 32768); err != nil {
 			return ErrAuthority
 		}
-		return a.path(ctx, p, observation.Binding.Policy, ref.Path)
+		return a.boundPath(ctx, p, observation.Binding.Policy, ref.Path)
 	}
 	checkRefs := func(refs []model.SourceRef) error {
 		for _, ref := range refs {
@@ -221,7 +228,7 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 			return ErrAuthority
 		}
 		if file, ok := ref.(*model.FileRef); ok {
-			return a.path(ctx, p, observation.Binding.Policy, file.Path)
+			return a.boundPath(ctx, p, observation.Binding.Policy, file.Path)
 		}
 		return nil
 	}
@@ -416,6 +423,18 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 }
 
 func (a *BoundCoreAuthority) path(ctx context.Context, p app.CorePrincipal, config model.PolicyConfig, name string) error {
+	return checkSourcePath(ctx, p, config, name, a.AuthorizePath)
+}
+
+func (a *BoundCoreAuthority) boundPath(ctx context.Context, p app.CorePrincipal, config model.PolicyConfig, name string) error {
+	check := a.AuthorizeBoundPath
+	if check == nil {
+		check = a.AuthorizePath
+	}
+	return checkSourcePath(ctx, p, config, name, check)
+}
+
+func checkSourcePath(ctx context.Context, p app.CorePrincipal, config model.PolicyConfig, name string, check PathAccess) error {
 	if err := policy.CheckPath(name); err != nil {
 		return err
 	}
@@ -424,7 +443,7 @@ func (a *BoundCoreAuthority) path(ctx context.Context, p app.CorePrincipal, conf
 	config.TrustedRulePaths = append([]string(nil), config.TrustedRulePaths...)
 	config.DependencyRoots = append([]string(nil), config.DependencyRoots...)
 	config.AllowedExecutables = append([]model.AllowedExecutable(nil), config.AllowedExecutables...)
-	if err := a.AuthorizePath(ctx, p, config, name); err != nil {
+	if err := check(ctx, p, config, name); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

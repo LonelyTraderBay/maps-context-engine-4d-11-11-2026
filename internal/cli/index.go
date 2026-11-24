@@ -15,6 +15,7 @@ type IndexProgress struct {
 	GenerationID, SnapshotDigest string
 	Files                        int
 	Unchanged, Typed             bool
+	ProviderID, ProviderStatus   string
 }
 type RunIndex func(context.Context, string, string, string, bool, bool, func(IndexProgress) error) error
 
@@ -46,6 +47,9 @@ func runIndex(ctx context.Context, args []string, config string, stderr io.Write
 		coverage := "syntax partial"
 		if value.Typed {
 			coverage = "typed partial"
+		}
+		if value.ProviderID != "" {
+			coverage = value.ProviderID + " " + value.ProviderStatus
 		}
 		_, err := fmt.Fprintf(stderr, "mce4d: %s %d files; generation %s; %s\n", action, value.Files, value.GenerationID, coverage)
 		return err

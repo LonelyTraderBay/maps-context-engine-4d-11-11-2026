@@ -5,14 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/policy"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 )
 
 type WindowsInventoryRequest struct {
 	Root, Metadata *paths.Root
+	LinkedGit      string
 	Scanner        *policy.Scanner
 	MaxEntries     int
 	AuthorizeRoot  func(context.Context) error
@@ -24,16 +27,35 @@ type WindowsInventoryRequest struct {
 // InventoryWindowsLocal observes the pinned local Git metadata and the NTFS
 // candidate tree twice. Global rules come from the protected profile's
 // managed rule input. Ambient Git configuration is outside this profile.
-func InventoryWindowsLocal(ctx context.Context, r WindowsInventoryRequest) (FileMap, error) {
+func InventoryWindowsLocal(ctx context.Context, r WindowsInventoryRequest) (result FileMap, resultErr error) {
 	if ctx == nil || r.Root == nil || r.Metadata == nil || r.Scanner == nil || r.AuthorizeRoot == nil ||
 		r.AuthorizePath == nil || r.Exclude == nil || r.ReadGlobal == nil || r.MaxEntries < 1 || r.MaxEntries > 100000 {
 		return FileMap{}, ErrWalkBudget
 	}
-	first, err := observeWindowsInventory(ctx, r)
+	readIndex := func(ctx context.Context, limit int) ([]byte, error) {
+		return readObservedCapture(ctx, r.Metadata, "index", limit)
+	}
+	if r.LinkedGit != "" {
+		if err := r.AuthorizeRoot(ctx); err != nil {
+			return FileMap{}, err
+		}
+		binding, err := runtime.BindLinkedGitMetadata(r.Root, r.Metadata, r.LinkedGit)
+		if err != nil {
+			return FileMap{}, err
+		}
+		defer func() {
+			if err := binding.Close(); err != nil {
+				result = FileMap{}
+				resultErr = errors.Join(resultErr, err)
+			}
+		}()
+		readIndex = binding.ReadIndexContext
+	}
+	first, err := observeWindowsInventory(ctx, r, readIndex)
 	if err != nil {
 		return FileMap{}, err
 	}
-	second, err := observeWindowsInventory(ctx, r)
+	second, err := observeWindowsInventory(ctx, r, readIndex)
 	if err != nil {
 		return FileMap{}, err
 	}
@@ -43,11 +65,11 @@ func InventoryWindowsLocal(ctx context.Context, r WindowsInventoryRequest) (File
 	return second, nil
 }
 
-func observeWindowsInventory(ctx context.Context, r WindowsInventoryRequest) (FileMap, error) {
+func observeWindowsInventory(ctx context.Context, r WindowsInventoryRequest, readIndex func(context.Context, int) ([]byte, error)) (FileMap, error) {
 	if err := r.AuthorizeRoot(ctx); err != nil {
 		return FileMap{}, err
 	}
-	index, indexDigest, ignoreCase, err := ReadWindowsTrackedIndex(ctx, r.Metadata, r.MaxEntries)
+	index, indexDigest, ignoreCase, err := readWindowsTrackedIndex(ctx, r.Metadata, readIndex, r.MaxEntries)
 	if err != nil {
 		return FileMap{}, err
 	}

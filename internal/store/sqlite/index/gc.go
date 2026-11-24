@@ -21,6 +21,57 @@ type GCRequest struct {
 	KeepGenerations int
 	Writer          ports.IndexWriterLease
 	Authorize       GCAuthorizer
+	purge           bool
+}
+
+// PurgeDerivedIndex clears this authenticated worktree index under an
+// exclusive lifecycle lease. Catalog, records and source are outside this
+// transaction. A live or abandoned BUILDING generation needs recovery first.
+func (s *Store) PurgeDerivedIndex(ctx context.Context, job string, writer ports.IndexWriterLease, authorize func(context.Context, string) error) error {
+	if authorize == nil {
+		return ErrInvalidStore
+	}
+	request := GCRequest{JobID: job, Writer: writer, purge: true, Authorize: func(ctx context.Context, worktree, _ string) error {
+		return authorize(ctx, worktree)
+	}}
+	return s.gcTransaction(ctx, request, true, func(tx *sql.Tx, check func() error) error {
+		rows, err := tx.QueryContext(ctx, `SELECT generation_id,state FROM generations ORDER BY generation_id LIMIT 129`)
+		if err != nil {
+			return err
+		}
+		var generations []string
+		for rows.Next() {
+			var generation, state string
+			if err := rows.Scan(&generation, &state); err != nil {
+				return errors.Join(err, rows.Close())
+			}
+			if !validUUID(generation) || state == "BUILDING" || len(generations) == 128 {
+				return errors.Join(ErrGenerationConflict, rows.Close())
+			}
+			generations = append(generations, generation)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM active_generations`); err != nil {
+			return err
+		}
+		for _, generation := range generations {
+			result := GCResult{GenerationID: generation, Rows: make(map[string]int64)}
+			if err := s.collectGCGeneration(ctx, tx, generation, true, &result, check); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM content_blobs`); err != nil {
+			return err
+		}
+		if s.schema == uiAddonSchema {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM ui_build_maps`); err != nil {
+				return err
+			}
+		}
+		return checkGCForeignKeys(ctx, tx)
+	})
 }
 
 type GCPlan struct {
@@ -108,74 +159,78 @@ func (s *Store) CollectGeneration(ctx context.Context, request GCRequest, genera
 		if err != nil || candidate != generation {
 			return errors.Join(ErrGCIntegrity, err)
 		}
-		scanner, err := policy.NewScanner(2048)
-		if err != nil {
-			return err
-		}
-		if err := checkModuleAcyclic(ctx, tx, generation, 100000, scanner); err != nil {
-			return errors.Join(ErrGCIntegrity, err)
-		}
-		tables := []string{"relations", "module_members", "search_documents", "diagnostics", "capability_results", "symbols", "modules", "files", "packages", "generations"}
-		if s.schema == uiAddonSchema {
-			tables = []string{"ui_build_bindings", "entity_links", "state_transitions", "contract_fields",
-				"relations", "module_members", "search_documents", "diagnostics", "capability_results",
-				"symbols", "domain_entities", "modules", "files", "packages", "generations"}
-		}
-		for _, table := range tables {
-			var count int64
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM `+table+gcGenerationFilter(table), generation).Scan(&count); err != nil {
-				return err
-			}
-			output.Rows[table] = count
-		}
-		var blobs int64
-		if err := tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(byte_length),0) FROM content_blobs b WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.content_hash=b.content_hash AND f.generation_id<>?)`, generation).Scan(&blobs, &output.BlobBytes); err != nil {
-			return err
-		}
-		output.Rows["content_blobs"] = blobs
-		if !apply {
-			return check()
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE generations SET state='RETIRED' WHERE generation_id=? AND state IN ('READY','READY_PARTIAL')`, generation); err != nil {
-			return err
-		}
-		if err := check(); err != nil {
-			return err
-		}
-		for _, table := range tables {
-			if table == "modules" {
-				if err := deleteGCModules(ctx, tx, generation, output.Rows[table], check); err != nil {
-					return err
-				}
-			} else {
-				result, err := tx.ExecContext(ctx, `DELETE FROM `+table+gcGenerationFilter(table), generation)
-				if err != nil {
-					return err
-				}
-				n, err := result.RowsAffected()
-				if err != nil || n != output.Rows[table] {
-					return errors.Join(ErrGCIntegrity, err)
-				}
-			}
-			if err := check(); err != nil {
-				return err
-			}
-		}
-		result, err := tx.ExecContext(ctx, `DELETE FROM content_blobs WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.content_hash=content_blobs.content_hash)`)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil || n != output.Rows["content_blobs"] {
-			return errors.Join(ErrGCIntegrity, err)
-		}
-		return errors.Join(checkGCForeignKeys(ctx, tx), check())
+		return s.collectGCGeneration(ctx, tx, generation, apply, &output, check)
 	})
 	if err != nil {
 		return GCResult{GenerationID: generation}, err
 	}
 	output.Applied = apply && !output.AlreadyAbsent
 	return output, nil
+}
+
+func (s *Store) collectGCGeneration(ctx context.Context, tx *sql.Tx, generation string, apply bool, output *GCResult, check func() error) error {
+	scanner, err := policy.NewScanner(2048)
+	if err != nil {
+		return err
+	}
+	if err := checkModuleAcyclic(ctx, tx, generation, 100000, scanner); err != nil {
+		return errors.Join(ErrGCIntegrity, err)
+	}
+	tables := []string{"relations", "module_members", "search_documents", "diagnostics", "capability_results", "symbols", "modules", "files", "packages", "generations"}
+	if s.schema == uiAddonSchema {
+		tables = []string{"ui_build_bindings", "entity_links", "state_transitions", "contract_fields",
+			"relations", "module_members", "search_documents", "diagnostics", "capability_results",
+			"symbols", "domain_entities", "modules", "files", "packages", "generations"}
+	}
+	for _, table := range tables {
+		var count int64
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM `+table+gcGenerationFilter(table), generation).Scan(&count); err != nil {
+			return err
+		}
+		output.Rows[table] = count
+	}
+	var blobs int64
+	if err := tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(byte_length),0) FROM content_blobs b WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.content_hash=b.content_hash AND f.generation_id<>?)`, generation).Scan(&blobs, &output.BlobBytes); err != nil {
+		return err
+	}
+	output.Rows["content_blobs"] = blobs
+	if !apply {
+		return check()
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generations SET state='RETIRED' WHERE generation_id=? AND state IN ('READY','READY_PARTIAL')`, generation); err != nil {
+		return err
+	}
+	if err := check(); err != nil {
+		return err
+	}
+	for _, table := range tables {
+		if table == "modules" {
+			if err := deleteGCModules(ctx, tx, generation, output.Rows[table], check); err != nil {
+				return err
+			}
+		} else {
+			result, err := tx.ExecContext(ctx, `DELETE FROM `+table+gcGenerationFilter(table), generation)
+			if err != nil {
+				return err
+			}
+			n, err := result.RowsAffected()
+			if err != nil || n != output.Rows[table] {
+				return errors.Join(ErrGCIntegrity, err)
+			}
+		}
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM content_blobs WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.content_hash=content_blobs.content_hash)`)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil || n != output.Rows["content_blobs"] {
+		return errors.Join(ErrGCIntegrity, err)
+	}
+	return errors.Join(checkGCForeignKeys(ctx, tx), check())
 }
 
 func gcGenerationFilter(table string) string {
@@ -216,7 +271,13 @@ func checkGCForeignKeys(ctx context.Context, tx *sql.Tx) (resultErr error) {
 }
 
 func (s *Store) gcTransaction(ctx context.Context, request GCRequest, apply bool, action func(*sql.Tx, func() error) error) (resultErr error) {
-	if s == nil || ctx == nil || s.lease == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) || !validHash(request.ProfileID) || !validUUID(request.JobID) || request.KeepGenerations < 1 || request.KeepGenerations > 1000 || request.Writer == nil || request.Authorize == nil {
+	if s == nil || ctx == nil || s.lease == nil || !withinPoolLimit(s.readers, 4) || !withinPoolLimit(s.writer, 1) || !validUUID(request.JobID) || request.Writer == nil || request.Authorize == nil {
+		return ErrInvalidStore
+	}
+	mode := ports.SharedLease
+	if request.purge {
+		mode = ports.ExclusiveLease
+	} else if !validHash(request.ProfileID) || request.KeepGenerations < 1 || request.KeepGenerations > 1000 {
 		return ErrInvalidStore
 	}
 	if _, ok := ctx.Deadline(); !ok {
@@ -226,7 +287,7 @@ func (s *Store) gcTransaction(ctx context.Context, request GCRequest, apply bool
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.lease.Check(ctx, s.identity.WorktreeID, ports.SharedLease); err != nil {
+		if err := s.lease.Check(ctx, s.identity.WorktreeID, mode); err != nil {
 			return err
 		}
 		if err := request.Writer.CheckWriter(ctx, s.identity.WorktreeID, request.JobID); err != nil {

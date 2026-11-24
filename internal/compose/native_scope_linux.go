@@ -11,6 +11,7 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 	sqliteowner "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 )
 
@@ -68,11 +69,7 @@ func openNativeScope(ctx context.Context, installation, selected, worktree, prof
 	if err != nil {
 		return nil, err
 	}
-	n.common, err = paths.OpenRoot(n.binding.CommonDirectory)
-	if err != nil {
-		return nil, err
-	}
-	n.linked, err = nativeLinkedRelative(n.target, n.binding.CommonDirectory)
+	n.common, n.linked, err = runtime.OpenApprovedGitMetadata(n.target, n.state.OpenTargetGitMetadata)
 	if err != nil || n.binding.VerifyRoots(n.target, n.common, n.linked) != nil {
 		return nil, app.ErrCoreAuthentication
 	}

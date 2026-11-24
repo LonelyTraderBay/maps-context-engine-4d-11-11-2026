@@ -15,6 +15,10 @@ import (
 // declaration set. It validates facts and authority, never reselects a plan.
 // Its caller must supply an independently authenticated original request.
 func (b *CoreBackend) PlanRestoreFactory(principal app.CorePrincipal) (app.PlanRestoreFactory, error) {
+	return b.planRestoreFactory(principal, nil)
+}
+
+func (b *CoreBackend) planRestoreFactory(principal app.CorePrincipal, captured *index.PublishedGraph) (app.PlanRestoreFactory, error) {
 	if !b.valid() || b.planSource == nil || principal.ID == "" {
 		return nil, app.ErrCoreUnsupported
 	}
@@ -44,7 +48,7 @@ func (b *CoreBackend) PlanRestoreFactory(principal app.CorePrincipal) (app.PlanR
 			return empty, ErrScopeChanged
 		}
 		var graph *index.PublishedGraph
-		symbolFactory, err := b.symbolRestoreFactory(principal, nil, func(value *index.PublishedGraph) { graph = value })
+		symbolFactory, err := b.symbolRestoreFactory(principal, captured, func(value *index.PublishedGraph) { graph = value })
 		if err != nil {
 			return empty, err
 		}

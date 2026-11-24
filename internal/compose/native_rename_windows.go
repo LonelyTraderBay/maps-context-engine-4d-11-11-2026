@@ -56,7 +56,7 @@ func attachWindowsRename(ctx context.Context, state *sqlite.WindowsScopedPools, 
 	p := binding.Profile
 	goTool, goOK := nativeRenameExecutable(binding.Policy, "go.exe")
 	provider, lspOK := nativeRenameExecutable(binding.Policy, "gopls.exe")
-	if p.AnalysisMode != "typed_when_available" || !goOK || !lspOK {
+	if p == nil || p.AnalysisMode != "typed_when_available" || !goOK || !lspOK {
 		return b, state.Close, nil
 	}
 	bin := filepath.Dir(goTool.Path)
@@ -204,7 +204,7 @@ func (o *windowsRenameOwner) Open(ctx context.Context, actor app.CorePrincipal, 
 		}
 		return nil
 	}
-	indexCapture, err := newWindowsIndexCapture(sqlite.WindowsIndexScope{Binding: o.binding, Target: o.state.Target, CommonGit: o.state.CommonGit,
+	indexCapture, err := newWindowsIndexCapture(sqlite.WindowsIndexScope{Binding: o.binding, Target: o.state.Target, CommonGit: o.state.CommonGit, LinkedGit: o.state.LinkedGit,
 		Check: o.state.Check, ReadIgnore: o.state.ReadIgnore}, o.limits)
 	if err != nil {
 		return out, nil, err
@@ -250,7 +250,7 @@ func (o *windowsRenameOwner) Open(ctx context.Context, actor app.CorePrincipal, 
 		}
 	}()
 	verifyScratch := golanganalysis.WindowsLoaderScratchVerifier(scratch.Root, scratch.Reader, scratch.Check)
-	selected, err := o.selectWindowsDocuments(ctx, m, captured, inv, dirs, scratch, verifyScratch, checkWorkspace)
+	selected, err := o.selectWindowsDocuments(ctx, captured, inv, dirs, scratch, verifyScratch, checkWorkspace)
 	if err != nil {
 		return out, nil, err
 	}
@@ -286,93 +286,110 @@ func (o *windowsRenameOwner) Open(ctx context.Context, actor app.CorePrincipal, 
 		}}, close, nil
 }
 
-func (o *windowsRenameOwner) selectWindowsDocuments(ctx context.Context, member model.ScopeMember, captured *snapshot.Snapshot,
+func (o *windowsRenameOwner) selectWindowsDocuments(ctx context.Context, captured *snapshot.Snapshot,
 	inv inventory.FileMap, dirs map[string]bool, scratch *sqlite.WindowsRenameScratch,
 	verify func(context.Context, string, string, *snapshot.Snapshot) (bool, error), checkWorkspace func(context.Context) error,
 ) (_ map[string]bool, resultErr error) {
-	p := o.binding.Profile
-	bin, err := paths.OpenRoot(filepath.Join(o.goRoot, "bin"))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { resultErr = errors.Join(resultErr, bin.Close()) }()
-	tool, err := runtime.OpenGoExecutable(ctx, runtime.GoExecutableInput{BinRoot: bin, ExpectedSHA256: o.goTool.SHA256,
-		MaxBytes: 128 << 20, Authorize: func(ctx context.Context) error { return o.proof.CheckPath(ctx, "bin/go.exe") }})
-	if err != nil {
-		return nil, err
-	}
-	defer func() { resultErr = errors.Join(resultErr, tool.Close()) }()
-	stdRoot, err := paths.OpenRoot(filepath.Join(o.goRoot, "src"))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { resultErr = errors.Join(resultErr, stdRoot.Close()) }()
-	scanner, err := policy.NewScanner(2 << 20)
-	if err != nil {
-		return nil, err
-	}
-	authorize := func(ctx context.Context, w, id, digest string, epoch int64) error {
-		if w != member.WorktreeID || id != member.ProfileID || digest != member.PolicyDigest || epoch != member.PolicyEpoch {
-			return ErrScopeChanged
-		}
-		return o.state.Check(ctx)
-	}
-	goPaths := func(ctx context.Context) error {
-		return errors.Join(o.proof.CheckPath(ctx, "src"), o.proof.CheckPath(ctx, "pkg/tool/windows_amd64"))
-	}
-	preflight := golanganalysis.LoaderPreflightInput{Snapshot: captured, Profile: p, Inventory: inv, PolicyEpoch: member.PolicyEpoch,
-		Scanner: scanner, AuthorizeScope: authorize, AuthorizePath: func(ctx context.Context, w, file, digest string, epoch int64) error {
-			if policy.CheckConfiguredPath(file, o.binding.Policy.DeniedGlobs) != nil {
-				return ErrAuthority
-			}
-			return authorize(ctx, w, member.ProfileID, digest, epoch)
-		}, VerifyClosure: func(ctx context.Context, snap *snapshot.Snapshot, observed inventory.FileMap) (bool, error) {
-			if snap.Manifest().SnapshotDigest != member.SnapshotDigest || !sameNativeLoaderInventory(observed, inv) {
-				return false, nil
-			}
-			err := checkWorkspace(ctx)
-			return err == nil, err
-		},
-		VerifyToolchain: golanganalysis.LoaderToolchainVerifier(tool, o.goRoot, func(ctx context.Context, profile *model.GoProfile) (bool, error) {
-			err := goPaths(ctx)
-			return err == nil && reflect.DeepEqual(profile, p) && o.proof.Digest() == profile.ToolchainDigest, err
-		}),
-		VerifyDependencies: func(ctx context.Context, profile *model.GoProfile, digests []string) (bool, error) {
-			err := goPaths(ctx)
-			return err == nil && reflect.DeepEqual(profile, p) && slices.Equal(digests, []string{inv.InputDigest}), err
-		}, MaxManifestBytes: windowsManifestLimit, MaxFileBytes: 64 << 10, MaxSourceBytes: 2 << 20}
-	packages := o.proof.StandardPackages()
 	names := make([]string, 0, len(dirs))
 	for dir := range dirs {
 		names = append(names, dir)
 	}
 	sort.Strings(names)
+	scanner, err := policy.NewScanner(2 << 20)
+	if err != nil {
+		return nil, err
+	}
 	selected := map[string]bool{}
-	for _, dir := range names {
-		stdlib, err := golanganalysis.NewTrustedStdlib(ctx, golanganalysis.TrustedStdlibInput{SourceRoot: stdRoot, GoRoot: o.goRoot,
+	err = withWindowsCapturedGo(ctx, o.binding, captured, inv, scratch, o.goRoot, o.goTool, o.proof, scanner, names,
+		o.state.Check, checkWorkspace, verify, func(loader golanganalysis.CapturedLoaderInput) error {
+			loaded, err := golanganalysis.LoadCapturedPackages(ctx, loader)
+			if err != nil {
+				return err
+			}
+			if !loaded.BuildSelectionVerified || len(loaded.Packages) != 1 {
+				return app.ErrCoreUnsupported
+			}
+			for _, file := range loaded.Packages[0].Files {
+				selected[file] = true
+			}
+			return nil
+		})
+	return selected, err
+}
+
+func withWindowsCapturedGo(ctx context.Context, binding catalog.Binding, captured *snapshot.Snapshot,
+	inv inventory.FileMap, scratch *sqlite.WindowsRenameScratch, goRoot string, goTool model.AllowedExecutable,
+	proof *runtime.GoToolchainProof, scanner *policy.Scanner, dirs []string, checkScope, checkWorkspace func(context.Context) error,
+	verify func(context.Context, string, string, *snapshot.Snapshot) (bool, error),
+	use func(golanganalysis.CapturedLoaderInput) error,
+) (resultErr error) {
+	p := binding.Profile
+	manifest := captured.Manifest()
+	bin, err := paths.OpenRoot(filepath.Join(goRoot, "bin"))
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, bin.Close()) }()
+	tool, err := runtime.OpenGoExecutable(ctx, runtime.GoExecutableInput{BinRoot: bin, ExpectedSHA256: goTool.SHA256,
+		MaxBytes: 128 << 20, Authorize: func(ctx context.Context) error { return proof.CheckPath(ctx, "bin/go.exe") }})
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, tool.Close()) }()
+	stdRoot, err := paths.OpenRoot(filepath.Join(goRoot, "src"))
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, stdRoot.Close()) }()
+	authorize := func(ctx context.Context, w, id, digest string, epoch int64) error {
+		if w != binding.WorktreeID || id != binding.ProfileID || digest != binding.PolicyDigest || epoch != binding.PolicyEpoch {
+			return ErrScopeChanged
+		}
+		return checkScope(ctx)
+	}
+	goPaths := func(ctx context.Context) error {
+		return errors.Join(proof.CheckPath(ctx, "src"), proof.CheckPath(ctx, "pkg/tool/windows_amd64"))
+	}
+	preflight := golanganalysis.LoaderPreflightInput{Snapshot: captured, Profile: p, Inventory: inv, PolicyEpoch: binding.PolicyEpoch,
+		Scanner: scanner, AuthorizeScope: authorize, AuthorizePath: func(ctx context.Context, w, file, digest string, epoch int64) error {
+			if policy.CheckConfiguredPath(file, binding.Policy.DeniedGlobs) != nil {
+				return ErrAuthority
+			}
+			return authorize(ctx, w, binding.ProfileID, digest, epoch)
+		}, VerifyClosure: func(ctx context.Context, snap *snapshot.Snapshot, observed inventory.FileMap) (bool, error) {
+			if snap.Manifest().SnapshotDigest != manifest.SnapshotDigest || !sameNativeLoaderInventory(observed, inv) {
+				return false, nil
+			}
+			err := checkWorkspace(ctx)
+			return err == nil, err
+		},
+		VerifyToolchain: golanganalysis.LoaderToolchainVerifier(tool, goRoot, func(ctx context.Context, profile *model.GoProfile) (bool, error) {
+			err := goPaths(ctx)
+			return err == nil && reflect.DeepEqual(profile, p) && proof.Digest() == profile.ToolchainDigest, err
+		}),
+		VerifyDependencies: func(ctx context.Context, profile *model.GoProfile, digests []string) (bool, error) {
+			err := goPaths(ctx)
+			return err == nil && reflect.DeepEqual(profile, p) && slices.Equal(digests, []string{inv.InputDigest}), err
+		}, MaxManifestBytes: windowsManifestLimit, MaxFileBytes: 64 << 10, MaxSourceBytes: 2 << 20}
+	packages := proof.StandardPackages()
+	for _, dir := range dirs {
+		stdlib, err := golanganalysis.NewTrustedStdlib(ctx, golanganalysis.TrustedStdlibInput{SourceRoot: stdRoot, GoRoot: goRoot,
 			Profile: p, Snapshot: captured, DependencyDigest: inv.InputDigest, AllowedPackages: packages, Scanner: scanner,
 			MaxManifestBytes: windowsManifestLimit, MaxFileBytes: 2 << 20, MaxFiles: 8192, MaxSourceBytes: 64 << 20,
-			AuthorizePath: func(ctx context.Context, file string) error { return o.proof.CheckPath(ctx, "src/"+file) },
+			AuthorizePath: func(ctx context.Context, file string) error { return proof.CheckPath(ctx, "src/"+file) },
 			VerifyAuthority: func(ctx context.Context, root, toolchain, dep string, allowed []string) (bool, error) {
 				err := goPaths(ctx)
-				return err == nil && root == filepath.Join(o.goRoot, "src") && toolchain == p.ToolchainDigest &&
+				return err == nil && root == filepath.Join(goRoot, "src") && toolchain == p.ToolchainDigest &&
 					dep == inv.InputDigest && slices.Equal(allowed, packages), err
 			}})
 		if err != nil {
-			return nil, err
+			return err
 		}
-		loaded, err := golanganalysis.LoadCapturedPackages(ctx, golanganalysis.CapturedLoaderInput{Preflight: preflight,
-			GoRoot: o.goRoot, ScratchRoot: scratch.Path, WorkspaceRoot: scratch.Input, PackageDir: dir, Tool: tool, Stdlib: stdlib,
-			VerifyScratch: verify, MaxOutputBytes: 65536})
-		if err != nil {
-			return nil, err
-		}
-		if !loaded.BuildSelectionVerified || len(loaded.Packages) != 1 {
-			return nil, app.ErrCoreUnsupported
-		}
-		for _, file := range loaded.Packages[0].Files {
-			selected[file] = true
+		if err := use(golanganalysis.CapturedLoaderInput{Preflight: preflight,
+			GoRoot: goRoot, ScratchRoot: scratch.Path, WorkspaceRoot: scratch.Input, PackageDir: dir, Tool: tool,
+			Stdlib: stdlib, VerifyScratch: verify, MaxOutputBytes: 65536}); err != nil {
+			return err
 		}
 	}
-	return selected, o.proof.Check(ctx)
+	return proof.Check(ctx)
 }

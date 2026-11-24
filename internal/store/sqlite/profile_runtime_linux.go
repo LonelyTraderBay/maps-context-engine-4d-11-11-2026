@@ -129,6 +129,16 @@ func (o *ProtectedState) TargetApproved(name string) bool {
 	return false
 }
 
+// OpenTargetGitMetadata opens the .git child of a pinned installation target.
+func (o *ProtectedState) OpenTargetGitMetadata(name string) (*paths.Root, error) {
+	for _, target := range o.profile.targets {
+		if path, err := target.CanonicalPath(); err == nil && path == name {
+			return runtime.OpenLocalGitMetadata(target)
+		}
+	}
+	return nil, ErrProfileDenied
+}
+
 func (o *ProtectedState) CursorKey(ctx context.Context) (out [32]byte, resultErr error) {
 	if err := o.Check(ctx); err != nil {
 		return out, err

@@ -151,6 +151,15 @@ type windowsMaintenanceStore struct {
 	head, data windowsMaintenanceFiles
 }
 
+const windowsIndexImageMaxBytes = 4 << 20
+
+func windowsStoreImageLimit(name string) int64 {
+	if name == "index.sqlite" {
+		return windowsIndexImageMaxBytes
+	}
+	return windowsCatalogSeedMaxSize
+}
+
 func (o windowsStoreMaintenance) openStores() ([]windowsMaintenanceStore, func() error, error) {
 	var stores []windowsMaintenanceStore
 	var roots []func() error
@@ -338,7 +347,7 @@ func windowsOperationLeaf(leaf string) bool {
 }
 
 func windowsStageBackupCopy(ctx context.Context, lease *runtime.Lifecycle, image []byte, destination windowsMaintenanceFiles, filename string, limit int64) (out backupImage, resultErr error) {
-	if int64(len(image)) > limit || limit > windowsCatalogSeedMaxSize {
+	if int64(len(image)) > limit || limit > windowsStoreImageLimit(filename) {
 		return out, ErrStateLimit
 	}
 	if err := destination.publishStagedWorktreeFile(ctx, filename, nil); err != nil {

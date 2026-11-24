@@ -22,6 +22,29 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// VerifyInstallation checks the pinned local interpreter and stdlib without
+// starting a process or reading project files.
+func (p *PythonProvider) VerifyInstallation(ctx context.Context) error {
+	if p == nil || ctx == nil {
+		return ErrAuthority
+	}
+	executable, err := OpenPinnedPythonExecutable(p.config.Interpreter, p.config.InterpreterDigest)
+	if err != nil {
+		return err
+	}
+	if err := executable.Close(); err != nil {
+		return err
+	}
+	digest, err := PythonStdlibDigest(ctx, p.config.Stdlib)
+	if err != nil {
+		return err
+	}
+	if digest != p.config.StdlibDigest {
+		return ErrAuthority
+	}
+	return nil
+}
+
 func (p *PythonProvider) Analyze(parent context.Context, job ports.ProviderJob, sink ports.ProviderSink) (model.ProviderDone, error) {
 	var done model.ProviderDone
 	if p == nil || parent == nil || job.Recheck == nil || job.Capture == nil || sink == nil {
@@ -53,7 +76,7 @@ func (p *PythonProvider) Analyze(parent context.Context, job ports.ProviderJob, 
 		return done, err
 	}
 	defer root.Close()
-	interpreter, err := openPinned(cfg.Interpreter, cfg.InterpreterDigest, maxNodeBytes, true)
+	interpreter, err := OpenPinnedPythonExecutable(cfg.Interpreter, cfg.InterpreterDigest)
 	if err != nil {
 		return done, err
 	}
@@ -87,6 +110,12 @@ func (p *PythonProvider) Analyze(parent context.Context, job ports.ProviderJob, 
 		return model.ProviderDone{}, err
 	}
 	return done, nil
+}
+
+// OpenPinnedPythonExecutable opens a verified interpreter for a fixed local
+// program. The caller must still verify the standard library and isolate imports.
+func OpenPinnedPythonExecutable(name, digest string) (*os.File, error) {
+	return openPinned(name, digest, maxNodeBytes, true)
 }
 
 // PythonStdlibDigest binds a root-owned, locally installed standard library.

@@ -83,14 +83,7 @@ func (s *SymbolPackRetention) restorePack(ctx context.Context, raw []byte, token
 	in.Pack.Codec, in.Pack.Token, in.Pack.PrincipalDigest = s.codec, token, principal
 	in.Pack.Guard, in.Pack.MaxArchiveBytes = guard, s.max
 	in.PrincipalID = actor
-	pack, err := RestoreFreshnessEnvelope(ctx, raw, in, s.max)
-	if err != nil {
-		return nil, err
-	}
-	if err := pack.RecheckRetained(ctx, token, principal, guard); err != nil {
-		return nil, packContextError(ctx, err)
-	}
-	return pack, nil
+	return RestoreFreshnessEnvelope(ctx, raw, in, s.max)
 }
 
 // Save publishes before returning a usable handle or token. No token is
@@ -123,7 +116,7 @@ func (s *SymbolPackRetention) Save(ctx context.Context, pack *FreshnessPack, pri
 				return err
 			}
 		}
-		return verified.retainedAuthority(ctx, envelope.Token, principal, guard)
+		return verified.retainedAuthority(ctx, envelope.Token, principal)
 	}
 	if err := s.store.Create(ctx, claims.Binding.ResultID, envelope.Bytes, verify); err != nil {
 		return nil, err
@@ -164,7 +157,7 @@ func (s *SymbolPackRetention) Get(ctx context.Context, token, principal, actor s
 		} else if hash != restoredHash {
 			return ErrValidationAuthority
 		}
-		return restored.retainedAuthority(ctx, token, principal, guard)
+		return restored.retainedAuthority(ctx, token, principal)
 	})
 	if err != nil {
 		return nil, err
@@ -242,6 +235,13 @@ func (p *RetainedSymbolPack) Recheck(ctx context.Context) error {
 }
 
 func (p *RetainedSymbolPack) check(ctx context.Context) error {
+	if err := p.checkStorage(ctx); err != nil {
+		return err
+	}
+	return p.pack.recheck(ctx, p.token, "", p.principal, nil)
+}
+
+func (p *RetainedSymbolPack) checkStorage(ctx context.Context) error {
 	if p == nil || p.owner == nil || p.pack == nil || p.guard == nil {
 		return ErrValidationInput
 	}
@@ -257,11 +257,8 @@ func (p *RetainedSymbolPack) check(ctx context.Context) error {
 		if sha256.Sum256(raw) != p.contentHash {
 			return ErrValidationAuthority
 		}
-		if err := p.pack.retainedAuthority(ctx, p.token, p.principal, p.guard); err != nil {
-			return err
-		}
 		verified = true
-		return nil
+		return ctx.Err()
 	})
 	if err != nil {
 		return err
@@ -269,7 +266,7 @@ func (p *RetainedSymbolPack) check(ctx context.Context) error {
 	if !verified || sha256.Sum256(raw) != p.contentHash {
 		return ErrValidationAuthority
 	}
-	return p.pack.RecheckRetained(ctx, p.token, p.principal, p.guard)
+	return ctx.Err()
 }
 
 func (p *RetainedSymbolPack) First(ctx context.Context, options contextpack.PackPageOptions) (contextpack.PackPage, error) {
@@ -300,10 +297,11 @@ func (p *RetainedSymbolPack) Continue(ctx context.Context, cursor string, option
 }
 
 func (p *RetainedSymbolPack) Validate(ctx context.Context) (CapturedValidation, error) {
-	if err := p.check(ctx); err != nil {
+	if err := p.checkStorage(ctx); err != nil {
 		return CapturedValidation{}, err
 	}
-	result, err := p.pack.Validate(ctx, p.token, p.principal, p.guard)
+	// The validation checks current selection authority before the workspace read.
+	result, err := p.pack.validate(ctx, p.token, p.principal, nil)
 	if err != nil {
 		return CapturedValidation{}, err
 	}

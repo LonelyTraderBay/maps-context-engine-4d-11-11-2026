@@ -360,20 +360,24 @@ func (p *FreshnessPlan) authorizeCoverage(ctx context.Context) error {
 // First and Continue retain the original plan and never re-resolve the active
 // generation. A page that cannot fit its complete envelope is not returned.
 func (p *FreshnessPlan) First(ctx context.Context, options contextpack.PackPageOptions) (contextpack.PackPage, error) {
+	return p.first(ctx, options, nil)
+}
+
+func (p *FreshnessPlan) first(ctx context.Context, options contextpack.PackPageOptions, deliveryCheck func(context.Context) error) (contextpack.PackPage, error) {
 	if p == nil {
 		return contextpack.PackPage{}, ErrValidationInput
 	}
-	return p.page(ctx, "", p.principal, p.guard, options, true)
+	return p.page(ctx, "", p.principal, p.guard, options, true, deliveryCheck)
 }
 
 func (p *FreshnessPlan) Continue(ctx context.Context, token, cursor, principal string, guard contextpack.CursorGuard, options contextpack.PackPageOptions) (contextpack.PackPage, error) {
 	if p == nil || token != p.token || cursor == "" || guard == nil {
 		return contextpack.PackPage{}, ErrValidationInput
 	}
-	return p.page(ctx, cursor, principal, guard, options, false)
+	return p.page(ctx, cursor, principal, guard, options, false, nil)
 }
 
-func (p *FreshnessPlan) page(ctx context.Context, cursor, principal string, guard contextpack.CursorGuard, options contextpack.PackPageOptions, first bool) (contextpack.PackPage, error) {
+func (p *FreshnessPlan) page(ctx context.Context, cursor, principal string, guard contextpack.CursorGuard, options contextpack.PackPageOptions, first bool, deliveryCheck func(context.Context) error) (contextpack.PackPage, error) {
 	if ctx == nil || guard == nil || !coreUUID(options.RequestID) {
 		return contextpack.PackPage{}, ErrValidationInput
 	}
@@ -448,7 +452,7 @@ func (p *FreshnessPlan) page(ctx context.Context, cursor, principal string, guar
 		if errors.Is(err, contextpack.ErrItemTooLarge) && (previous.NextCoverageGap < int64(len(p.coverage.Gaps)) || previous.NextWarningGap < int64(len(data.Gaps))) {
 			page, fitErr := p.fitPage(ctx, data, previous, guard, operation, options, first, full)
 			if fitErr == nil {
-				return p.finishPage(ctx, page, first, cursor, principal, guard, options)
+				return p.finishPage(ctx, page, first, cursor, principal, guard, options, deliveryCheck)
 			}
 			if errors.Is(fitErr, contextpack.ErrBudgetTooSmall) {
 				return contextpack.PackPage{}, contextpack.ErrBudgetTooSmall
@@ -474,7 +478,7 @@ func (p *FreshnessPlan) page(ctx context.Context, cursor, principal string, guar
 		if err != nil {
 			return contextpack.PackPage{}, err
 		}
-		return p.finishPage(ctx, page, first, cursor, principal, guard, options)
+		return p.finishPage(ctx, page, first, cursor, principal, guard, options, deliveryCheck)
 	}
 	// If the next source cannot fit alongside pending safety details, a
 	// details-only page may advance those obligations without consuming it.
@@ -489,7 +493,7 @@ func (p *FreshnessPlan) page(ctx context.Context, cursor, principal string, guar
 		last.NextPosition = previous
 		page, err := p.fitPage(ctx, last, previous, guard, operation, options, first, full)
 		if err == nil {
-			return p.finishPage(ctx, page, first, cursor, principal, guard, options)
+			return p.finishPage(ctx, page, first, cursor, principal, guard, options, deliveryCheck)
 		}
 		if err != nil && !errors.Is(err, contextpack.ErrBudgetTooSmall) {
 			return contextpack.PackPage{}, packContextError(ctx, err)
@@ -498,7 +502,7 @@ func (p *FreshnessPlan) page(ctx context.Context, cursor, principal string, guar
 	return contextpack.PackPage{}, contextpack.ErrBudgetTooSmall
 }
 
-func (p *FreshnessPlan) finishPage(ctx context.Context, page contextpack.PackPage, first bool, cursor, principal string, guard contextpack.CursorGuard, options contextpack.PackPageOptions) (contextpack.PackPage, error) {
+func (p *FreshnessPlan) finishPage(ctx context.Context, page contextpack.PackPage, first bool, cursor, principal string, guard contextpack.CursorGuard, options contextpack.PackPageOptions, deliveryCheck func(context.Context) error) (contextpack.PackPage, error) {
 	if p.mode == "checked_workspace" && !first {
 		sources, err := pageValidationSources(page.Response, nil, p.validation.MaxInputBytes)
 		if err != nil {
@@ -518,11 +522,20 @@ func (p *FreshnessPlan) finishPage(ctx context.Context, page contextpack.PackPag
 		// twice nests the same database observations without another caller.
 		current = nil
 	}
-	if err := p.recheck(ctx, cursor, principal, current); err != nil {
-		return contextpack.PackPage{}, packContextError(ctx, err)
+	if deliveryCheck == nil {
+		if err := p.recheck(ctx, cursor, principal, current); err != nil {
+			return contextpack.PackPage{}, packContextError(ctx, err)
+		}
 	}
 	if err := recheckStructuredHost(ctx, options); err != nil {
 		return contextpack.PackPage{}, err
+	}
+	if deliveryCheck != nil {
+		// Retained delivery checks storage and both guards after callbacks
+		// have finished, immediately before the private page is returned.
+		if err := deliveryCheck(ctx); err != nil {
+			return contextpack.PackPage{}, err
+		}
 	}
 	return page, nil
 }

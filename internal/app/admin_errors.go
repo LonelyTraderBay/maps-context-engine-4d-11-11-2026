@@ -9,4 +9,5 @@ var (
 	ErrAdminUnavailable = errors.New("administrative scope unavailable")
 	ErrAdminConflict    = errors.New("administrative revision conflict")
 	ErrAdminUnsupported = errors.New("administrative capability unavailable")
+	ErrAdminBusy        = errors.New("administrative catalog is busy")
 )

@@ -42,6 +42,11 @@ type ScopeReader struct {
 	Access           ScopeAccess
 	MaxHeads         int
 	MaxManifestBytes int
+
+	// Used within Resolve and Recheck, which bracket all private store reads
+	// with full Access checks. Native Windows authenticates the immutable
+	// images at those boundaries and verifies the live binding at each read.
+	observationAccess ScopeAccess
 }
 
 // ScopeObservation is a pair of matching short observations, not an atomic
@@ -97,11 +102,15 @@ func (r *ScopeReader) observe(ctx context.Context, principal app.CorePrincipal, 
 	if err := r.Access(ctx, principal, r.WorktreeID, r.ProfileID); err != nil {
 		return ScopeObservation{}, err
 	}
+	access := r.Access
+	if r.observationAccess != nil {
+		access = r.observationAccess
+	}
 	authorize := func(ctx context.Context, worktree, profile string) error {
 		if worktree != r.WorktreeID || profile != r.ProfileID {
 			return ErrScopeChanged
 		}
-		return r.Access(ctx, principal, worktree, profile)
+		return access(ctx, principal, worktree, profile)
 	}
 	binding, err := r.Catalog.ReadBinding(ctx, r.WorktreeID, r.ProfileID, authorize)
 	if err != nil {
@@ -128,7 +137,7 @@ func (r *ScopeReader) observe(ctx context.Context, principal app.CorePrincipal, 
 	if err != nil {
 		return ScopeObservation{}, err
 	}
-	if generation.Identity.WorktreeID != r.WorktreeID || generation.ProviderDigest != binding.Profile.ProviderDigest {
+	if generation.Identity.WorktreeID != r.WorktreeID || generation.ProviderDigest != binding.ProviderDigest() {
 		return ScopeObservation{}, ErrScopeChanged
 	}
 	if err := binding.VerifyRoots(r.WorktreeRoot, r.CommonRoot, r.LinkedRelative); err != nil {

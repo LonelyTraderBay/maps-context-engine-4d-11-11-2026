@@ -5,12 +5,19 @@ import json
 import uuid
 
 
-def exercise(root, command, setup, worktree, profile, request, fixture, helpers):
+def exercise(root, command, worktree, profile, policy, helpers, *, change_policy):
+    """Use one fresh protected state for each provenance transition."""
     binding = ["--worktree-id", worktree, "--profile-id", profile]
-    status = command("/mce4d", binding + ["query", "status", "--input-json", "-"], payload={})
-    assert status.returncode == 0
-    envelope = json.loads(status.stdout)
-    member = envelope["data"]["scopes"][0]
+    def run(args, payload=None):
+        process = command("/mce4d", args, payload=payload)
+        assert process.returncode == 0, (args, process.returncode, process.stderr, process.stdout)
+        return process
+
+    def active_member():
+        status = run(binding + ["query", "status", "--input-json", "-"], payload={})
+        return json.loads(status.stdout)["data"]["scopes"][0]
+
+    member = active_member()
     target = root / "target"
     source = target / "a.go"
     original = source.read_bytes()
@@ -67,35 +74,86 @@ def exercise(root, command, setup, worktree, profile, request, fixture, helpers)
     query("list", {"limit": 1, "cursor": token}, (3,), "CURSOR_EXPIRED")
     query("read", {"record_id": first["record_id"]}, (3,), "ACCESS_DENIED", uid=1001)
 
-    # All source edits here are on the disposable target performed by the
-    # independent fixture controller. CLI/engine continue with read-only access.
-    try:
-        source.write_bytes(original + b"\n// synthetic source drift\n")
-        stale = query("read", {"record_id": first["record_id"]}, (6,))["data"]
-        assert stale["record"]["provenance_status"] == "source_changed"
-        assert stale["record"]["effective_status"] == "needs_review" and stale["ui_mapping"] is None
-    finally:
-        source.write_bytes(original)
-    before_gc = helpers.tree(target)
-    for _ in range(3):
-        indexed = command("/mce4d", ["index", *binding, "--full"])
-        assert indexed.returncode == 0
-    gc = command("/mce4d", ["store", "gc", *binding, "--apply", "--confirm"])
-    assert gc.returncode == 0
-    collected = json.loads(gc.stdout)["generations"]
-    assert any(item["generation_id"] == member["generation_id"] and item["applied"] for item in collected)
-    expired = query("read", {"record_id": first["record_id"]}, (6,))["data"]
-    assert expired["record"]["version"] == 2 and expired["record"]["declared_status"] == "approved"
-    assert expired["record"]["effective_status"] == "needs_review" and expired["record"]["provenance_status"] == "snapshot_expired"
-    assert expired["record"]["source_refs"] == [] and expired["ui_mapping"] is None
-    historical = query("read", {"record_id": first["record_id"], "version": 1}, (6,))["data"]
-    assert historical["record"]["declared_status"] == "proposed" and historical["ui_mapping"] is None
-    attempt = dict(approval, record_id=second["record_id"], client_mutation_id=str(uuid.uuid4()))
-    mutate("review", attempt, "pinned snapshot expired")
+    def check_unavailable(provenance):
+        reading = query("read", {"record_id": first["record_id"]}, (6,))["data"]
+        projected = reading["record"]
+        assert projected["record_id"] == first["record_id"] and projected["version"] == 2
+        assert projected["declared_status"] == "approved" and projected["effective_status"] == "needs_review"
+        assert projected["provenance_status"] == provenance, projected
+        assert reading["ui_mapping"] is None and projected["source_refs"] == []
+        history = query("read", {"record_id": first["record_id"], "version": 1}, (6,))["data"]
+        assert history["record"]["record_id"] == first["record_id"] and history["record"]["version"] == 1
+        assert history["record"]["declared_status"] == history["record"]["effective_status"] == "proposed"
+        assert history["record"]["provenance_status"] == provenance
+        assert history["ui_mapping"] is None and history["record"]["source_refs"] == []
+        listing = query("list", {"limit": 20})
+        assert listing["pagination"]["next_cursor"] is None
+        assert [row for row in listing["data"]["records"] if row["record_id"] == first["record_id"]] == [projected]
+
+    index_args = ["index", *binding, "--full"]
+    gc_args = ["store", "gc", *binding]
+    original_generation = member["generation_id"]
+    before = helpers.tree(target)
+    config_before = helpers.tree(root / "host-config")
+    collected_count = 0
+    if change_policy:
+        changed_policy = dict(policy, denied_globs=[*policy["denied_globs"], "a.go"])
+        changed = run(["policy", "set", "--input-json", "-"], {
+            "worktree_id": worktree, "expected_epoch": member["policy_epoch"], "policy": changed_policy,
+        })
+        assert json.loads(changed.stdout)["data"]["policy_epoch"] == member["policy_epoch"] + 1
+        run(index_args)
+        current = active_member()
+        assert current["generation_id"] != original_generation
+        assert current["policy_epoch"] == member["policy_epoch"] + 1
+        assert current["policy_digest"] != member["policy_digest"]
+        check_unavailable("access_denied")
+        # Publish enough recent generations to list the old one in a GC
+        # report. This demonstrates that its bytes were withheld by policy.
+        for _ in range(2):
+            run(index_args)
+        plan = json.loads(run(gc_args + ["--report-only"]).stdout)
+        assert plan["dry_run"]
+        historical = next(row for row in plan["generations"] if row["generation_id"] == original_generation)
+        assert not historical["applied"] and historical["rows"]["generations"] == 1 and historical["rows"]["files"] > 0
+        check_unavailable("access_denied")
+        provenance = "access_denied"
+    else:
+        # Edits here belong to the disposable fixture controller. The engine
+        # reads source under the normal read-only role.
+        try:
+            source.write_bytes(original + b"\n// synthetic source drift\n")
+            check_unavailable("source_changed")
+        finally:
+            source.write_bytes(original)
+        for _ in range(3):
+            run(index_args)
+        active_generation = active_member()["generation_id"]
+        plan = json.loads(run(gc_args + ["--report-only"]).stdout)
+        candidates = {row["generation_id"]: row for row in plan["generations"]}
+        assert plan["dry_run"] and not plan["more"]
+        assert original_generation in candidates and active_generation not in candidates
+        assert all(not row["applied"] and row["rows"]["generations"] == 1 for row in candidates.values())
+        retained = query("read", {"record_id": first["record_id"]})["data"]
+        assert retained["record"]["provenance_status"] == "retained_snapshot"
+        applied = json.loads(run(gc_args + ["--apply", "--confirm"]).stdout)
+        assert not applied["dry_run"]
+        assert [row["generation_id"] for row in applied["generations"]] == list(candidates)
+        assert all(row["applied"] and row["rows"] == candidates[row["generation_id"]]["rows"] for row in applied["generations"])
+        assert active_member()["generation_id"] == active_generation
+        check_unavailable("snapshot_expired")
+        attempt = dict(approval, record_id=second["record_id"], client_mutation_id=str(uuid.uuid4()))
+        mutate("review", attempt, "pinned snapshot expired")
+        collected_count = len(applied["generations"])
+        provenance = "snapshot_expired"
     replay = mutate("review", approval)
-    assert replay["record_id"] == first["record_id"] and replay["version"] == 2 and replay["effective_status"] == "needs_review"
-    assert helpers.tree(target) == before_gc
+    assert replay["record_id"] == first["record_id"] and replay["version"] == 2
+    assert replay["declared_status"] == "approved" and replay["effective_status"] == "needs_review"
+    check_unavailable(provenance)
+    assert helpers.tree(target) == before and helpers.tree(root / "host-config") == config_before
     assert not (root / "result/repo-executed").exists()
-    print(json.dumps({"case": "T047_NATIVE_RECORDS_GC", "status": "PASS",
-                      "gc_collected": len(collected), "same_receipt": True,
-                      "record_version_retained": True, "after_gc": "needs_review", "target_executions": 0}), flush=True)
+    print(json.dumps({"case": "C170_NATIVE_RECORDS_POLICY" if change_policy else "T047_NATIVE_RECORDS_GC",
+                      "status": "PASS", "provenance_status": provenance,
+                      "gc_collected": collected_count, "same_receipt": True, "list_matches_head": True,
+                      "record_version_retained": True, "after_gc": None if change_policy else "needs_review",
+                      "target_executions": 0}), flush=True)

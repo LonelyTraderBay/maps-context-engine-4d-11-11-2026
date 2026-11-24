@@ -9,6 +9,7 @@ import (
 )
 
 var pythonVersionPattern = regexp.MustCompile(`^3\.[0-9]{1,2}\.[0-9]{1,3}$`)
+var powershellVersionPattern = regexp.MustCompile(`^7\.[0-9]{1,2}\.[0-9]{1,3}$`)
 
 type EffectiveProfile interface {
 	normalizedProfile() (EffectiveProfile, error)
@@ -48,6 +49,16 @@ type PythonProfile struct {
 	ModuleRoots         []string `json:"module_roots"`
 	AllowProjectImports bool     `json:"allow_project_imports"`
 	AnalysisMode        string   `json:"analysis_mode"`
+}
+
+type PowerShellProfile struct {
+	SchemaVersion     int64  `json:"schema_version"`
+	Language          string `json:"language"`
+	PowerShellVersion string `json:"powershell_version"`
+	ExecutableDigest  string `json:"executable_digest"`
+	ParserDigest      string `json:"parser_digest"`
+	ProviderDigest    string `json:"provider_digest"`
+	AnalysisMode      string `json:"analysis_mode"`
 }
 
 func sortedStrings(values []string, min, max, maxLen int, pathKind int) ([]string, error) {
@@ -121,6 +132,16 @@ func (p *PythonProfile) normalizedProfile() (EffectiveProfile, error) {
 	return &result, nil
 }
 
+func (p *PowerShellProfile) normalizedProfile() (EffectiveProfile, error) {
+	if p == nil || p.SchemaVersion != 1 || p.Language != "powershell" || p.AnalysisMode != "syntax" ||
+		!powershellVersionPattern.MatchString(p.PowerShellVersion) || !lowerHex(p.ExecutableDigest, 64) ||
+		!lowerHex(p.ParserDigest, 64) || !lowerHex(p.ProviderDigest, 64) {
+		return nil, fmt.Errorf("invalid PowerShell profile")
+	}
+	result := *p
+	return &result, nil
+}
+
 func DecodeEffectiveProfileJSON(data []byte, maxBytes int) (EffectiveProfile, error) {
 	if _, err := DecodeIdentityJSON(data, maxBytes); err != nil {
 		return nil, err
@@ -143,6 +164,9 @@ func DecodeEffectiveProfileJSON(data []byte, maxBytes int) (EffectiveProfile, er
 	case "python":
 		fields = []string{"schema_version", "language", "python_version", "interpreter_digest", "stdlib_digest", "provider_digest", "module_roots", "allow_project_imports", "analysis_mode"}
 		result = &PythonProfile{}
+	case "powershell":
+		fields = []string{"schema_version", "language", "powershell_version", "executable_digest", "parser_digest", "provider_digest", "analysis_mode"}
+		result = &PowerShellProfile{}
 	default:
 		return nil, fmt.Errorf("unknown profile language")
 	}

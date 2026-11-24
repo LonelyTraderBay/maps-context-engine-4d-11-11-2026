@@ -8,7 +8,60 @@ import (
 	"strings"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/policy"
 )
+
+func readPublishedCoverage(ctx context.Context, tx *sql.Tx, id, state string, scanner *policy.Scanner,
+	maxBytes int) (model.Coverage, int, error) {
+	var coverage model.Coverage
+	var count, size, metadataSize int64
+	if err := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(max(length(CAST(summary_json AS BLOB))),0),coalesce(max(length(CAST(capability_key AS BLOB))+length(CAST(scope_key AS BLOB))+length(CAST(status AS BLOB))),0) FROM capability_results WHERE generation_id=?`, id).Scan(&count, &size, &metadataSize); err != nil {
+		return coverage, 0, err
+	}
+	if count != 1 || size < 1 || metadataSize > 2048 {
+		return coverage, 0, ErrPublishIntegrity
+	}
+	if size > int64(maxBytes) {
+		return coverage, 0, ErrCaptureLimit
+	}
+	var key, scope, status string
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT capability_key,scope_key,status,summary_json FROM capability_results WHERE generation_id=?`, id).Scan(&key, &scope, &status, &raw); err != nil {
+		return coverage, 0, err
+	}
+	if int64(len(raw)) != size || scope != "workspace" {
+		return coverage, 0, ErrPublishIntegrity
+	}
+	if err := scanner.CheckContent(raw); err != nil {
+		return coverage, 0, err
+	}
+	switch key {
+	case "provider_coverage":
+		decoded, err := model.DecodeCoverageJSON(raw, maxBytes)
+		if err != nil || decoded.Status != status || decoded.ScopeDescription != "workspace" ||
+			state == "READY" && status != "supported_scope_complete" || state == "READY_PARTIAL" && status != "partial" {
+			return coverage, 0, ErrPublishIntegrity
+		}
+		coverage = decoded
+	case "go_semantics":
+		cap, err := model.DecodeCapabilityJSON(raw, maxBytes)
+		if err != nil || status != "unknown" || state != "READY_PARTIAL" || cap.Name != "go_semantics" ||
+			cap.ProviderID != "not_run" || cap.ProviderVersion != "not-run" || cap.Status != "unknown" {
+			return coverage, 0, ErrPublishIntegrity
+		}
+		coverage = model.Coverage{Status: "unknown", Capabilities: []model.Capability{cap}, Gaps: []model.Gap{{Code: "PROVIDER_NOT_RUN", Reason: "No semantic provider result was published.", SourceRefs: []model.SourceRef{}}}, ScopeDescription: "workspace"}
+	default:
+		return coverage, 0, ErrPublishIntegrity
+	}
+	encoded, err := json.Marshal(coverage)
+	if err != nil || len(encoded) > maxBytes {
+		return coverage, 0, ErrCaptureLimit
+	}
+	if _, err := model.DecodeCoverageJSON(encoded, maxBytes); err != nil {
+		return coverage, 0, ErrPublishIntegrity
+	}
+	return coverage, len(encoded), nil
+}
 
 // readGraphFacts uses a single transaction and bounded keyset pages. The SQL
 // preflight rejects corrupt oversized rows before the driver materializes them.
@@ -39,51 +92,12 @@ func readGraphFacts(ctx context.Context, tx *sql.Tx, r PublishedGraphRequest, g 
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	var coverageCount, coverageLen, coverageMetadataLen int64
-	if err := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(max(length(CAST(summary_json AS BLOB))),0),coalesce(max(length(CAST(capability_key AS BLOB))+length(CAST(scope_key AS BLOB))+length(CAST(status AS BLOB))),0) FROM capability_results WHERE generation_id=?`, id).Scan(&coverageCount, &coverageLen, &coverageMetadataLen); err != nil {
+	coverage, used, err := readPublishedCoverage(ctx, tx, id, g.state, r.Scanner, r.MaxFactBytes)
+	if err != nil {
 		return err
 	}
-	if coverageCount != 1 || coverageLen < 1 || coverageMetadataLen > 2048 {
-		return ErrPublishIntegrity
-	}
-	if coverageLen > int64(r.MaxFactBytes) {
-		return ErrCaptureLimit
-	}
-	var key, scope, status string
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT capability_key,scope_key,status,summary_json FROM capability_results WHERE generation_id=?`, id).Scan(&key, &scope, &status, &raw); err != nil {
-		return err
-	}
-	if int64(len(raw)) != coverageLen || scope != "workspace" {
-		return ErrPublishIntegrity
-	}
-	if err := r.Scanner.CheckContent(raw); err != nil {
-		return err
-	}
-	switch key {
-	case "provider_coverage":
-		g.Coverage, err = model.DecodeCoverageJSON(raw, r.MaxFactBytes)
-		if err != nil || g.Coverage.Status != status || g.Coverage.ScopeDescription != "workspace" || g.state == "READY" && status != "supported_scope_complete" || g.state == "READY_PARTIAL" && status != "partial" {
-			return ErrPublishIntegrity
-		}
-	case "go_semantics":
-		var cap model.Capability
-		cap, err = model.DecodeCapabilityJSON(raw, r.MaxFactBytes)
-		if err != nil || status != "unknown" || g.state != "READY_PARTIAL" || cap.Name != "go_semantics" || cap.ProviderID != "not_run" || cap.ProviderVersion != "not-run" || cap.Status != "unknown" {
-			return ErrPublishIntegrity
-		}
-		g.Coverage = model.Coverage{Status: "unknown", Capabilities: []model.Capability{cap}, Gaps: []model.Gap{{Code: "PROVIDER_NOT_RUN", Reason: "No semantic provider result was published.", SourceRefs: []model.SourceRef{}}}, ScopeDescription: "workspace"}
-	default:
-		return ErrPublishIntegrity
-	}
-	coverageRaw, err := json.Marshal(g.Coverage)
-	if err != nil || len(coverageRaw) > r.MaxFactBytes {
-		return ErrCaptureLimit
-	}
-	if _, err := model.DecodeCoverageJSON(coverageRaw, r.MaxFactBytes); err != nil {
-		return ErrPublishIntegrity
-	}
-	used, observed := len(coverageRaw), int64(0)
+	g.Coverage = coverage
+	var observed int64
 	for _, kind := range []string{"packages", "symbols", "relations", "diagnostics"} {
 		cursor := ""
 		for {

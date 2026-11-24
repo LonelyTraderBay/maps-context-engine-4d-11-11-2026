@@ -58,7 +58,7 @@ func runStoreBackup(ctx context.Context, args []string, selected string, stdout,
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), errors.Is(err, runtime.ErrStoreMaintenance), errors.Is(err, runtime.ErrWorktreeBusy), errors.Is(err, app.ErrCoreLimit):
 			return diagnostic("backup cancelled or limited; retain and inspect chosen output before retrying", 4)
 		case errors.Is(err, ErrStoreSchemaTooNew):
-			return diagnostic("source schema is newer than this build; no migration performed", 3)
+			return diagnostic("SCHEMA_TOO_NEW; source schema is newer than this build; no migration performed", 3)
 		case errors.Is(err, app.ErrCoreStoreRecovery):
 			return diagnostic("STORE_RECOVERY_REQUIRED; use explicit store recovery", 3)
 		case errors.Is(err, os.ErrExist):

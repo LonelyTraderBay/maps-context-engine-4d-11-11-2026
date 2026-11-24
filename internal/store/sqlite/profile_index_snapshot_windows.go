@@ -82,12 +82,12 @@ func (s windowsIndexImages) finishInterruptedIndexReceipt(ctx context.Context, i
 }
 
 func (s windowsIndexImages) preimage(ctx context.Context, pending walAuthorityReceipt) ([]byte, error) {
-	raw, ok, err := s.head.readEntryLimit(ctx, s.headDir, windowsIndexPreimageName, windowsCatalogSeedMaxSize+32)
+	raw, ok, err := s.head.readEntryLimit(ctx, s.headDir, windowsIndexPreimageName, windowsIndexImageMaxBytes+32)
 	if err != nil || !ok || len(raw) < 32+100 || !bytes.Equal(raw[:32], pending.Operation[:]) {
 		return nil, errors.Join(ErrStoreRecoveryRequired, err)
 	}
 	image := raw[32:]
-	proof, err := digestCheckpointedMain(ctx, bytes.NewReader(image), int64(len(image)), binary.BigEndian.Uint32(image[28:32]), windowsCatalogSeedMaxSize)
+	proof, err := digestCheckpointedMain(ctx, bytes.NewReader(image), int64(len(image)), binary.BigEndian.Uint32(image[28:32]), windowsIndexImageMaxBytes)
 	if err != nil || proof != pending.Image {
 		return nil, errors.Join(ErrStoreRecoveryRequired, err)
 	}

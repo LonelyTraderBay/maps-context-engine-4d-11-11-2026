@@ -57,6 +57,10 @@ func TestCurrentSpecAndMutationRejections(t *testing.T) {
 			break
 		}
 	}
+	missingEvidence := "E1000"
+	for n := 1001; strings.Contains(valid, "| "+missingEvidence+" |"); n++ {
+		missingEvidence = fmt.Sprintf("E%d", n)
+	}
 	tests := []struct {
 		name, old, replacement, want string
 	}{
@@ -64,8 +68,8 @@ func TestCurrentSpecAndMutationRejections(t *testing.T) {
 		{"missing task", "| T003 | G0 | T001 |", "| T999 | G0 | T001 |", "task"},
 		{"done without evidence", firstTask, badDone, "evidence"},
 		{"wrong evidence result", "| E004 | T002 |", "| E004 | T999 |", "evidence"},
-		{"evidence outside log", "| T004 | G1 |", "| E999 | misplaced |\n| T004 | G1 |", "evidence outside"},
-		{"unknown last evidence", "  last_evidence_id: " + yamlScalar(resume, "last_evidence_id"), "  last_evidence_id: E999", "last evidence"},
+		{"evidence outside log", "| T004 | G1 |", "| " + missingEvidence + " | misplaced |\n| T004 | G1 |", "evidence outside"},
+		{"unknown last evidence", "  last_evidence_id: " + yamlScalar(resume, "last_evidence_id"), "  last_evidence_id: " + missingEvidence, "last evidence"},
 		{"backward dependency", "T001 → T002 → T003 → T105", "T002 → T001 → T003 → T105", "order"},
 		{"bad schema ref", `"$ref": "#/$defs/Response"`, `"$ref": "#/$defs/NotDefined"`, "reference"},
 		{"external schema ref", `"$ref": "#/$defs/Response"`, `"$ref": "https://example.test/schema"`, "reference"},

@@ -186,7 +186,7 @@ func (p *FreshnessPack) First(ctx context.Context, options contextpack.PackPageO
 			return contextpack.PackPage{}, err
 		}
 	}
-	if err := p.recheck(ctx, p.token, "", p.principal, p.guard); err != nil {
+	if err := p.recheck(ctx, p.token, "", p.principal, nil); err != nil {
 		return contextpack.PackPage{}, packContextError(ctx, err)
 	}
 	if err := recheckStructuredHost(ctx, options); err != nil {
@@ -249,19 +249,22 @@ func (p *FreshnessPack) checkHistoricalPage(page contextpack.PackPage, operation
 // Validate always repeats full membership/content/configuration verification.
 // The result is an observation, not a filesystem lock or permission to apply.
 func (p *FreshnessPack) Validate(ctx context.Context, token, principal string, currentGuard contextpack.CursorGuard) (CapturedValidation, error) {
-	if p == nil || ctx == nil || currentGuard == nil || token != p.token || principal != p.principal {
+	if currentGuard == nil {
 		return CapturedValidation{}, ErrValidationInput
 	}
-	safeCurrent := sanitizedPackGuard(currentGuard)
-	if err := p.recheck(ctx, token, "", principal, safeCurrent); err != nil {
+	return p.validate(ctx, token, principal, sanitizedPackGuard(currentGuard))
+}
+
+func (p *FreshnessPack) validate(ctx context.Context, token, principal string, current contextpack.CursorGuard) (CapturedValidation, error) {
+	if p == nil || ctx == nil || token != p.token || principal != p.principal {
+		return CapturedValidation{}, ErrValidationInput
+	}
+	report, err := p.checkedSlice(ctx, token, "", principal, current)
+	if err != nil {
 		return CapturedValidation{}, packContextError(ctx, err)
 	}
 	if p.validation.CurrentScope == nil || p.validation.ResolveCapture == nil || p.validation.AuthorizeSource == nil || p.validation.VerifyWorkspace == nil {
 		return CapturedValidation{}, ErrFreshnessUnknown
-	}
-	report, err := p.slice.Read(ctx)
-	if err != nil {
-		return CapturedValidation{}, packContextError(ctx, err)
 	}
 	sources, err := sliceValidationSources(report, p.service, p.validation.MaxInputBytes)
 	if err != nil {
@@ -273,7 +276,7 @@ func (p *FreshnessPack) Validate(ctx context.Context, token, principal string, c
 	if err != nil {
 		return CapturedValidation{}, err
 	}
-	if err := p.recheck(ctx, token, "", principal, safeCurrent); err != nil {
+	if err := p.recheck(ctx, token, "", principal, current); err != nil {
 		return CapturedValidation{}, packContextError(ctx, err)
 	}
 	return result, nil
@@ -318,56 +321,63 @@ func recheckStructuredHost(ctx context.Context, options contextpack.PackPageOpti
 	return validationContextError(ctx)
 }
 
-func (p *FreshnessPack) recheck(ctx context.Context, token, cursor, principal string, currentGuard contextpack.CursorGuard) error {
-	check := func(ctx context.Context, b contextpack.CursorBinding) error {
-		if err := p.guard(ctx, b); err != nil {
-			return err
+func (p *FreshnessPack) recheck(ctx context.Context, token, cursor, principal string, current contextpack.CursorGuard) error {
+	_, err := p.checkedSlice(ctx, token, cursor, principal, current)
+	return err
+}
+
+// checkedSlice brackets the copy with authenticated scope and lifetime checks.
+// A retained handle uses its own guard. A public call also supplies its current
+// request guard.
+func (p *FreshnessPack) checkedSlice(ctx context.Context, token, cursor, principal string, current contextpack.CursorGuard) (contextpack.SliceReport, error) {
+	check := p.guard
+	if current != nil {
+		check = func(ctx context.Context, b contextpack.CursorBinding) error {
+			if err := p.guard(ctx, b); err != nil {
+				return err
+			}
+			return current(ctx, b)
 		}
-		return currentGuard(ctx, b)
 	}
 	claims, err := p.codec.VerifyPrincipal(ctx, token, "pack", principal, check)
-	if err != nil || claims.Binding.ResultID != p.pack.ID() {
-		if err != nil {
-			return err
-		}
-		return ErrValidationAuthority
+	if err != nil {
+		return contextpack.SliceReport{}, err
+	}
+	if claims.Binding.ResultID != p.pack.ID() {
+		return contextpack.SliceReport{}, ErrValidationAuthority
 	}
 	if cursor != "" {
 		if _, err := p.codec.VerifyPrincipal(ctx, cursor, "list", principal, check); err != nil {
-			return err
+			return contextpack.SliceReport{}, err
 		}
 	}
-	if _, err := p.slice.Read(ctx); err != nil {
-		return err
+	report, err := p.slice.Read(ctx)
+	if err != nil {
+		return contextpack.SliceReport{}, err
 	}
 	if err := p.codec.Recheck(ctx, claims, check); err != nil {
-		return err
+		return contextpack.SliceReport{}, err
 	}
-	return validationContextError(ctx)
+	if err := validationContextError(ctx); err != nil {
+		return contextpack.SliceReport{}, err
+	}
+	return report, nil
 }
 
-// retainedAuthority authenticates already verified immutable archive bytes at a
-// storage boundary. The retention owner must still call RecheckRetained after
-// the storage operation, before returning a handle or any page. It avoids
-// recursively reading the entire selection in every byte-verifier callback.
-func (p *FreshnessPack) retainedAuthority(ctx context.Context, token, principal string, current contextpack.CursorGuard) error {
-	if p == nil || ctx == nil || current == nil || p.token != token || p.principal != principal {
+// retainedAuthority verifies token and scope while storage verifies byte
+// identity. The owner must recheck the complete selection after storage.
+func (p *FreshnessPack) retainedAuthority(ctx context.Context, token, principal string) error {
+	if p == nil || ctx == nil || p.guard == nil || p.token != token || p.principal != principal {
 		return ErrValidationAuthority
 	}
-	check := func(ctx context.Context, binding contextpack.CursorBinding) error {
-		if err := p.guard(ctx, binding); err != nil {
-			return err
-		}
-		return current(ctx, binding)
-	}
-	claims, err := p.codec.VerifyPrincipal(ctx, token, "pack", principal, check)
+	claims, err := p.codec.VerifyPrincipal(ctx, token, "pack", principal, p.guard)
 	if err != nil {
 		return err
 	}
 	if claims.Binding.ResultID != p.pack.ID() {
 		return ErrValidationAuthority
 	}
-	return p.codec.Recheck(ctx, claims, check)
+	return p.codec.Recheck(ctx, claims, p.guard)
 }
 
 // Re-serialize after changing freshness; never emit a page over the original

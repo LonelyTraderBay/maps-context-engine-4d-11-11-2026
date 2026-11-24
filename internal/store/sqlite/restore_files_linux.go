@@ -38,7 +38,7 @@ type restoreExchange struct {
 	kind               string
 }
 
-func (l restoreLayout) exchanges(target string) []restoreExchange {
+func (l restoreLayout) exchanges(j MaintenanceJournal) []restoreExchange {
 	makeStore := func(kind, head string) []restoreExchange {
 		return []restoreExchange{
 			{kind + "_main", l.state + "/" + kind + ".sqlite", l.stateStage + "/db/" + kind + ".sqlite", "main"},
@@ -46,11 +46,71 @@ func (l restoreLayout) exchanges(target string) []restoreExchange {
 			{kind + "_head", head, l.controlStage + "/head-" + kind, "head"},
 		}
 	}
-	if target == "catalog" {
+	if j.Target == "catalog" {
 		return append(makeStore("catalog", "control/catalog"), restoreExchange{"profile_manifest", "profile.json", l.controlStage + "/manifest.json", "manifest"})
 	}
-	a, b := makeStore("index", l.control+"/index"), makeStore("records", l.control+"/records")
-	return []restoreExchange{a[0], b[0], a[1], b[1], a[2], b[2], {"worktree_manifest", l.control + "/worktree.json", l.controlStage + "/manifest.json", "manifest"}}
+	a := makeStore("index", l.control+"/index")
+	manifest := restoreExchange{"worktree_manifest", l.control + "/worktree.json", l.controlStage + "/manifest.json", "manifest"}
+	if j.IndexRebuild != nil {
+		return append(a, manifest)
+	}
+	b := makeStore("records", l.control+"/records")
+	return []restoreExchange{a[0], b[0], a[1], b[1], a[2], b[2], manifest}
+}
+
+func (l restoreLayout) provePreservedRecords(ctx context.Context, worktree string) (_ MaintenanceIndexRebuild, resultErr error) {
+	control, err := l.root.OpenDirectory(l.control)
+	if err != nil {
+		return MaintenanceIndexRebuild{}, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, control.Close()) }()
+	m, _, err := readWorktreeManifest(ctx, control, l.profile.ProfileID, worktree)
+	if err != nil {
+		return MaintenanceIndexRebuild{}, err
+	}
+	digest, err := l.recordsFingerprint(ctx)
+	return MaintenanceIndexRebuild{RecordsIncarnation: m.RecordsIncarnation, RecordsSHA256: digest}, err
+}
+
+func (l restoreLayout) checkPreservedRecords(ctx context.Context, j *MaintenanceJournal) error {
+	if j.IndexRebuild == nil {
+		return nil
+	}
+	digest, err := l.recordsFingerprint(ctx)
+	if err != nil || digest != j.IndexRebuild.RecordsSHA256 {
+		return errors.Join(ErrStateChanged, err)
+	}
+	return nil
+}
+
+func (l restoreLayout) recordsFingerprint(ctx context.Context) (_ string, resultErr error) {
+	state, err := l.root.OpenDirectory(l.state)
+	if err != nil {
+		return "", err
+	}
+	defer func() { resultErr = errors.Join(resultErr, state.Close()) }()
+	h := sha256.New()
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		name := "records.sqlite" + suffix
+		digest, err := fingerprintRestoreFile(ctx, state, name, l.profile.EngineUID, l.profile.EngineGID, 0600, walLogicalImageMaxBytes, false)
+		if suffix != "" && errors.Is(err, os.ErrNotExist) {
+			digest, err = "absent", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		_, _ = io.WriteString(h, name+"\x00"+digest+"\x00")
+	}
+	journal, err := l.fingerprint(ctx, l.state+"/.maintenance/records", "records_journal")
+	if err != nil {
+		return "", err
+	}
+	head, err := l.fingerprint(ctx, l.control+"/records", "head")
+	if err != nil {
+		return "", err
+	}
+	_, _ = io.WriteString(h, "journal\x00"+journal+"\x00head\x00"+head)
+	return hex.EncodeToString(h.Sum(nil)), state.Verify()
 }
 
 func enterRestoreParent(root *paths.Root, name string) (*paths.Root, string, func() error, error) {
@@ -82,7 +142,7 @@ func (l restoreLayout) fingerprint(ctx context.Context, name, kind string) (dige
 		return hash, err
 	case "manifest":
 		return fingerprintRestoreFile(ctx, parent, leaf, 0, 0, 0444, profileManifestLimit, false)
-	case "journal", "head":
+	case "journal", "records_journal", "head":
 		dir, err := parent.OpenDirectory(leaf)
 		if err != nil {
 			return "", err
@@ -122,13 +182,18 @@ func (l restoreLayout) fingerprint(ctx context.Context, name, kind string) (dige
 			if entry.Name() == logName {
 				continue
 			}
-			if kind != "journal" || entry.Name() != "lifecycle.lock" {
+			if kind == "head" || entry.Name() != "lifecycle.lock" {
 				return "", ErrStateUnsafe
 			}
 			gateHash, err = fingerprintRestoreFile(ctx, dir, entry.Name(), uid, gid, 0600, 1024, false)
 			if err != nil {
 				return "", err
 			}
+		}
+		if kind == "records_journal" {
+			// The first authenticated read can create the coordination lock.
+			// Its ownership is checked above; durable records exclude the lock.
+			gateHash = ""
 		}
 		hash := sha256.Sum256([]byte(kind + "\x00" + logHash + "\x00" + gateHash))
 		return hex.EncodeToString(hash[:]), dir.Verify()

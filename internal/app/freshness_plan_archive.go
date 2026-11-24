@@ -40,7 +40,7 @@ type retainedPlanRequest struct {
 // authenticatedRetainedPlanRequest is the only request passed to a restore
 // factory. It verifies the signed bytes, actor and original request digest
 // before an owner uses the request to select declaration authority.
-func authenticatedRetainedPlanRequest(ctx context.Context, raw []byte, codec *contextpack.CursorCodec, token, principal, actor string, guard contextpack.CursorGuard, maxBytes int) (retainedPlanRequest, error) {
+func authenticatedRetainedPlanRequest(ctx context.Context, raw []byte, codec *contextpack.CursorCodec, token, principal, actor string, claims contextpack.SignedCursor, guard contextpack.CursorGuard, maxBytes int) (retainedPlanRequest, error) {
 	var empty retainedPlanRequest
 	if ctx == nil || codec == nil || guard == nil || actor == "" || len(actor) > 4096 {
 		return empty, ErrValidationInput
@@ -70,10 +70,8 @@ func authenticatedRetainedPlanRequest(ctx context.Context, raw []byte, codec *co
 	if _, err := model.DecodeCoverageJSON(metadata.Coverage, 1024*1024); err != nil {
 		return empty, ErrValidationInput
 	}
-	claims, err := codec.VerifyPrincipal(ctx, token, "pack", principal, sanitizedPackGuard(guard))
-	if err != nil {
-		return empty, packContextError(ctx, err)
-	}
+	// The caller authenticated these claims for this exact pack token.
+	// ReadPlanArchiveMetadata also checks the matching signed token pair.
 	digest, err := model.RequestDigest("context_pack", actor, "PackRequest", request, 65536, 4)
 	if err != nil || digest != claims.Binding.RequestDigest {
 		return empty, ErrValidationAuthority

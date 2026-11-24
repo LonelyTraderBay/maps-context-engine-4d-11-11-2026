@@ -14,8 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/snapshot"
 	"golang.org/x/sys/windows"
 )
@@ -51,7 +53,7 @@ func (p *WindowsScopedPools) PinRenameProvider(ctx context.Context, provider mod
 			pinned, release = nil, nil
 		}
 	}()
-	parent, err := p.openWindowsToolCache(ctx, cache)
+	parent, err := openWindowsToolCache(ctx, p.config.control, p.preparation.TargetRoots, p.worktree, cache)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -84,19 +86,28 @@ type WindowsRenameScratch struct {
 // LSP session settle. Only the configured LSP role may read the capture or
 // write the five disposable tool-output directories.
 func (p *WindowsScopedPools) OpenRenameScratch(ctx context.Context, captured *snapshot.Snapshot, limit int64) (_ *WindowsRenameScratch, resultErr error) {
-	if p == nil || captured == nil {
+	if p == nil {
+		return nil, ErrProfileDenied
+	}
+	return openWindowsGoScratch(ctx, captured, limit, p.binding, p.config.control, p.preparation, p.worktree, p.worktreeLease, p.Check)
+}
+
+func openWindowsGoScratch(ctx context.Context, captured *snapshot.Snapshot, limit int64, binding catalog.Binding,
+	config *paths.Root, preparation windowsProfilePreparation, worktree windowsMaintenanceFiles,
+	lease *runtime.Lifecycle, check func(context.Context) error) (_ *WindowsRenameScratch, resultErr error) {
+	if captured == nil {
 		return nil, ErrProfileDenied
 	}
 	m := captured.Manifest()
-	if m.WorktreeID != p.binding.WorktreeID || m.ProfileID != p.binding.ProfileID || m.PolicyDigest != p.binding.PolicyDigest ||
+	if m.WorktreeID != binding.WorktreeID || m.ProfileID != binding.ProfileID || m.PolicyDigest != binding.PolicyDigest ||
 		len(m.Files) == 0 || len(m.Files) > 128 || model.VerifyCaptureDigest(m, 1<<20) != nil {
 		return nil, ErrProfileDenied
 	}
-	sid, err := windows.StringToSid(p.preparation.LspSID)
+	sid, err := windows.StringToSid(preparation.LspSID)
 	if err != nil || sid.SubAuthorityCount() != 8 {
 		return nil, errors.Join(ErrProfileDenied, err)
 	}
-	cache, err := p.ReserveRenameCache(ctx, limit, min(int64(256<<20), max(1, limit/2)))
+	cache, err := reserveWindowsCache(ctx, worktree, lease, preparation.LspSID, check, limit, min(int64(256<<20), max(1, limit/2)))
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +121,7 @@ func (p *WindowsScopedPools) OpenRenameScratch(ctx context.Context, captured *sn
 	if _, err := rand.Read(id[:]); err != nil {
 		return nil, err
 	}
-	parent, err := p.openWindowsToolCache(ctx, cache)
+	parent, err := openWindowsToolCache(ctx, config, preparation.TargetRoots, worktree, cache)
 	if err != nil {
 		return nil, err
 	}
@@ -232,13 +243,13 @@ func (s *WindowsRenameScratch) Close(parent context.Context) error {
 	return err
 }
 
-func (p *WindowsScopedPools) openWindowsToolCache(ctx context.Context, reservation *WindowsCacheReservation) (windowsMaintenanceFiles, error) {
+func openWindowsToolCache(ctx context.Context, config *paths.Root, targets []string, slot windowsMaintenanceFiles, reservation *WindowsCacheReservation) (windowsMaintenanceFiles, error) {
 	name := reservation.toolPath
-	state, err := p.config.control.CanonicalPath()
+	state, err := config.CanonicalPath()
 	if err != nil {
 		return windowsMaintenanceFiles{}, err
 	}
-	for _, approved := range append(append([]string{}, p.preparation.TargetRoots...), state) {
+	for _, approved := range append(append([]string{}, targets...), state) {
 		if windowsPathContains(name, approved) || windowsPathContains(approved, name) {
 			return windowsMaintenanceFiles{}, ErrProfileDenied
 		}
@@ -258,7 +269,6 @@ func (p *WindowsScopedPools) openWindowsToolCache(ctx context.Context, reservati
 	if err != nil {
 		return windowsMaintenanceFiles{}, err
 	}
-	slot := p.worktree
 	slot.control = child
 	slot.acl = reservation.toolACL
 	dir, err := slot.directory(ctx)

@@ -81,7 +81,7 @@ func readObservedFile(root *paths.Root, path string, file *os.File, reader io.Re
 	if err := paths.VerifyRegularFile(file); err != nil {
 		return nil, err
 	}
-	before, err := file.Stat()
+	before, err := observeGitFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func readObservedFile(root *paths.Root, path string, file *os.File, reader io.Re
 	if err = paths.VerifyRegularFile(file); err != nil {
 		return nil, err
 	}
-	after, err := file.Stat()
+	after, err := observeGitFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func readObservedFile(root *paths.Root, path string, file *os.File, reader io.Re
 	if err != nil {
 		return nil, errors.Join(changedErr, err)
 	}
-	currentInfo, statErr := current.Stat()
+	currentInfo, statErr := observeGitFile(current)
 	closeErr := current.Close()
 	if statErr != nil || closeErr != nil {
 		return nil, errors.Join(statErr, closeErr)
@@ -120,6 +120,21 @@ func readObservedFile(root *paths.Root, path string, file *os.File, reader io.Re
 	return data, nil
 }
 
-func sameObservedFile(a, b os.FileInfo) bool {
-	return os.SameFile(a, b) && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && a.Mode() == b.Mode() && sameFileChangeTime(a, b)
+type gitFileObservation struct {
+	info    os.FileInfo
+	changed [2]int64
+}
+
+func observeGitFile(file *os.File) (gitFileObservation, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return gitFileObservation{}, err
+	}
+	changed, err := gitFileChangeTime(file, info)
+	return gitFileObservation{info: info, changed: changed}, err
+}
+
+func sameObservedFile(a, b gitFileObservation) bool {
+	return os.SameFile(a.info, b.info) && a.info.Size() == b.info.Size() &&
+		a.info.ModTime().Equal(b.info.ModTime()) && a.info.Mode() == b.info.Mode() && a.changed == b.changed
 }

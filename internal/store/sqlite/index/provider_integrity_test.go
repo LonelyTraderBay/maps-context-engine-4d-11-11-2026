@@ -54,3 +54,31 @@ func TestValidateStoredProviderFactsChecksLaterPages(t *testing.T) {
 		t.Fatalf("later invalid fact accepted: %v", err)
 	}
 }
+
+func TestValidateStoredProviderFactsPagesCapturedAndExternalSymbols(t *testing.T) {
+	store, stage := providerStageFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stage.MaxFrameBytes = 1 << 20
+	captured := stage.Batch.Symbols[0]
+	for i := 0; i < 130; i++ {
+		item := captured
+		item.SymbolID = fmt.Sprintf("symbol-%03d", i)
+		stage.Batch.Symbols = append(stage.Batch.Symbols, item)
+	}
+	external := captured
+	external.SymbolID = "external-symbol"
+	external.Kind, external.Path, external.Range = "external", nil, nil
+	stage.Batch.Symbols = append(stage.Batch.Symbols, external)
+	if _, err := store.StageProviderBatch(ctx, stage); err != nil {
+		t.Fatal(err)
+	}
+	manifest := stage.Capture.Snapshot.Manifest()
+	const factCount = 134 // one package, 132 symbols and one relation
+	if err := validateStoredProviderFacts(ctx, store.writer, fixtureWorktree, stage.Capture, manifest, factCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateStoredProviderFacts(ctx, store.writer, fixtureWorktree, stage.Capture, manifest, factCount-1); !errors.Is(err, ErrCaptureLimit) {
+		t.Fatalf("fact accounting changed across symbol groups: %v", err)
+	}
+}

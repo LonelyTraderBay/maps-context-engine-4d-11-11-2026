@@ -4,9 +4,9 @@ Never invoke against an existing state or target directory.
 import os,pathlib,subprocess,hashlib,fcntl,struct,stat,json,socket,time,re,shutil
 run=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_RUN']).resolve(strict=True);root=run/'rootfs';built=pathlib.Path(os.environ['MCE4D_ACCEPTANCE_BUILD']).resolve(strict=True)
 approved=json.loads(pathlib.Path(os.environ['MCE4D_ACCEPTANCE_APPROVALS']).read_text())
+suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0','records','records-policy','ui_map','ui_gc','ui_gc_faults','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench','ui_real','ui_flow','ui_large_graph','groups')
+preview_suites=('ui_map','ui_gc','ui_gc_faults','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench')
 assert set(approved['binaries'])=={'mce4d','state-profile','go-toolchain'}
-suite=os.environ.get('MCE4D_ACCEPTANCE_SUITE','security');assert suite in ('security','gc','backup','restore','scale','bench','bench-context','bench-retention','spec-only','self-index','typed-graph','typed-mutations','typed-dependencies','typed-profiles','explorer','explorer-shell','explorer-gu0','records','ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench','ui_real','ui_flow','ui_large_graph','groups')
-preview_suites=('ui_map','ui_preview','ui_interact','ui_pick','ui_reverse','ui_hmr','ui_records','ui_context','ui_bench')
 assert os.getpid()==1, 'run broker in a fresh private PID/mount/network namespace'
 import importlib.util,sys
 sys.dont_write_bytecode=True
@@ -135,6 +135,8 @@ try:
   config={'pack_ttl_seconds':native_matrix.TEST_PACK_TTL,'rename_result_ttl_seconds':native_matrix.TEST_RENAME_TTL}
  if suite=='ui_hmr':
   config={'writer_lock_wait_ms':200}
+ if suite in ('ui_gc','ui_gc_faults'):
+  config={'writer_lock_wait_ms':300}
  if suite in ('ui_flow','ui_large_graph'):
   config={'query_timeout_ms':30000,'max_output_bytes':65536}
  if suite=='ui_large_graph':
@@ -147,6 +149,9 @@ try:
  p=command('/mce4d',['repo','add','--root','/target']);assert p.returncode==0;worktree=re.search(r'Registered worktree ([0-9a-f-]{36})',p.stdout).group(1)
  policy={'schema_version':1,'allowed_roots':['/target'],'denied_globs':[],'trusted_rule_paths':['AGENTS.md'],'dependency_roots':[],'allowed_executables':[{'path':'/git','sha256':hashlib.sha256((root/'git').read_bytes()).hexdigest()},{'path':'/toolchain/bin/go','sha256':hashlib.sha256((root/'toolchain/bin/go').read_bytes()).hexdigest()},{'path':'/bin/gopls','sha256':hashlib.sha256((root/'bin/gopls').read_bytes()).hexdigest()}],'allow_target_execution':False,'allow_runtime_download':False,'max_file_bytes':65536,'max_source_bytes':2097152,'max_output_bytes':65536,'secret_rules_version':'builtin-v1'}
  if suite in ('scale','bench'):policy['max_source_bytes']=32<<20
+ if suite=='bench' and authored['cohort'] not in scale.PACK_COHORTS:
+  # Ordinary benchmark cohorts have no authored project rule file.
+  policy['trusted_rule_paths']=[]
  if suite=='ui_large_graph':
   policy.update(max_file_bytes=128<<10,max_source_bytes=3<<20)
  if suite=='scale' and authored['cohort'] in scale.PACK_COHORTS:policy['max_output_bytes']=config['max_output_bytes']
@@ -194,6 +199,10 @@ try:
   exercise_shell(root,setup,worktree,profile_id,active,"benchmark")
   assert tree(root/'target')==before and tree(root/'host-config')==before_config
   assert not (root/'result/repo-executed').exists()
+ elif suite in ('records','records-policy'):
+  sys.path.insert(0,str(module_path.parent))
+  import native_records
+  native_records.exercise(root,command,worktree,profile_id,policy,security,change_policy=suite=='records-policy')
  elif suite=='groups':
   native_groups.exercise(root,command,worktree,profile_id,profile,policy)
   assert tree(root/'target')==before and tree(root/'peer')==before_peer and tree(root/'host-config')==before_config
@@ -240,6 +249,9 @@ try:
  elif suite=='typed-profiles':
   typed_graph.check_profiles(root,command,worktree,profile_id,profile)
   assert tree(root/'target')==before
+ elif suite in ('ui_gc','ui_gc_faults'):
+  native_ui_map.exercise_gc(root,command,worktree,profile_id,maps,security,
+                           fault_profile=profile if suite=='ui_gc_faults' else None)
  elif suite=='ui_map':
   native_ui_map.exercise(root,command,worktree,profile_id,maps)
   assert tree(root/'target')==before and tree(root/'host-config')==before_config

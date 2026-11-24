@@ -245,7 +245,16 @@ func removeNativeRenameScratch(ctx context.Context, s *nativeRenameScratch) erro
 	if !strings.HasPrefix(s.name, "lsp-") || len(s.name) != 40 {
 		return app.ErrValidationAuthority
 	}
-	anchor, err := s.root.DirectoryHandle()
+	return removeNativeJobScratch(ctx, s.root, s.parent, s.name, func() error {
+		return errors.Join(s.n.stores.Check(ctx), s.root.Verify(), runtime.CheckCleanupRoot(s.root, s.protected))
+	})
+}
+
+func removeNativeJobScratch(ctx context.Context, root, parent *paths.Root, name string, check func() error) error {
+	if err := check(); err != nil {
+		return err
+	}
+	anchor, err := root.DirectoryHandle()
 	if err != nil {
 		return err
 	}
@@ -260,7 +269,7 @@ func removeNativeRenameScratch(ctx context.Context, s *nativeRenameScratch) erro
 		if e != nil {
 			return e
 		}
-		listing := os.NewFile(uintptr(listFD), "owned-rename-scratch")
+		listing := os.NewFile(uintptr(listFD), "owned-job-scratch")
 		defer listing.Close()
 		for {
 			entries, e := listing.ReadDir(128)
@@ -309,13 +318,13 @@ func removeNativeRenameScratch(ctx context.Context, s *nativeRenameScratch) erro
 	if err := walk(int(anchor.Fd()), 0); err != nil {
 		return err
 	}
-	if err := errors.Join(s.n.stores.Check(ctx), s.root.Verify(), runtime.CheckCleanupRoot(s.root, s.protected)); err != nil {
+	if err := check(); err != nil {
 		return err
 	}
-	parent, err := s.parent.DirectoryHandle()
+	dir, err := parent.DirectoryHandle()
 	if err != nil {
 		return err
 	}
-	defer parent.Close()
-	return unix.Unlinkat(int(parent.Fd()), s.name, unix.AT_REMOVEDIR)
+	defer dir.Close()
+	return unix.Unlinkat(int(dir.Fd()), name, unix.AT_REMOVEDIR)
 }

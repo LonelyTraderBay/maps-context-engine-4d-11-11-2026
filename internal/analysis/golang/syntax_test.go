@@ -37,6 +37,40 @@ func syntaxFixture(t *testing.T, filename, content string) SyntaxInput {
 	return SyntaxInput{Snapshot: captured, Profile: profile, Path: filename, PackageKey: "fixture-package", ImportPath: "example.invalid/fixture", ModuleKey: "fixture-module", PackageName: "sample", Variant: "production", Scanner: scanner, MaxManifestBytes: 8192, MaxFileBytes: 65536, MaxNodes: 10000, MaxDepth: 256, MaxFacts: 1000, MaxOutputBytes: 4 * 1024 * 1024}
 }
 
+func TestSyntaxContainmentFollowsLexicalOwners(t *testing.T) {
+	const source = "package sample\ntype Box struct{ Field int }\nfunc Run(param int) {\n { inner := param; _ = inner }\n}"
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := AnalyzeSyntaxFile(ctx, syntaxFixture(t, "p.go", source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	relations, err := SyntaxContainment(ctx, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]model.SymbolFact)
+	for _, symbol := range result.Symbols {
+		byID[symbol.SymbolID] = symbol
+	}
+	want := map[string]string{"sample": "p.go", "Box": "p.go", "Field": "Box", "Run": "p.go", "param": "Run", "inner": "Run"}
+	for _, relation := range relations {
+		if relation.Kind != "CONTAINS" || relation.EvidenceKind != "syntax_exact" || relation.TargetSymbolID == nil {
+			t.Fatalf("unexpected syntax relationship: %+v", relation)
+		}
+		target := byID[*relation.TargetSymbolID]
+		if owner := byID[relation.SourceSymbolID].Name; want[target.Name] != owner ||
+			relation.SitePath != "p.go" || *target.Range != relation.Range ||
+			source[relation.Range.StartByte:relation.Range.EndByte] != target.Name {
+			t.Fatalf("incorrect owner or declaration evidence for %q: owner=%q relation=%+v", target.Name, owner, relation)
+		}
+		delete(want, target.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing relationships: %v", want)
+	}
+}
+
 func TestSyntaxDeclarationsScopesAndCapturedRanges(t *testing.T) {
 	const source = "package sample\nimport f \"fmt\"\ntype Box[T any] struct { Field string `json:\"field\"`; *Other }\nfunc (b *Box[T]) Use(p int) (result int) {\n x := p\n x, y := x, 1\n { x := y; _ = x }\n for k, v := range []int{x, y} { _ = k; _ = v }\n f := func(p int) int { return p }\n g := func(p int) int { return p }\n switch x := any(x).(type) { case int: _ = x; case string: _ = x }\n _ = f; _ = g; return x\n}\n"
 	input := syntaxFixture(t, "pkg/main.go", source)

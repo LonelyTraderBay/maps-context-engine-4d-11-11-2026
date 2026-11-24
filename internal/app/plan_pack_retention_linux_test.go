@@ -37,8 +37,17 @@ type planRetentionFixture struct {
 }
 
 func TestPlanRetentionRechecksDocumentApprovalAfterStorage(t *testing.T) {
-	for _, boundary := range []string{"publication", "readback"} {
-		t.Run(boundary, func(t *testing.T) {
+	for _, check := range []struct {
+		name        string
+		publication bool
+		combined    bool
+	}{
+		{"publication", true, false},
+		{"readback", false, false},
+		{"save_first_publication", true, true},
+		{"save_first_readback", false, true},
+	} {
+		t.Run(check.name, func(t *testing.T) {
 			f := newPlanRetentionFixture(t)
 			state, target := planRetentionDirs(t)
 			base, _ := openFreshnessStoreFixture(t, f.ctx, state, target)
@@ -55,11 +64,22 @@ func TestPlanRetentionRechecksDocumentApprovalAfterStorage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if boundary == "publication" {
+			if check.publication {
 				store.afterCreate = func() { allowed = false }
 			}
+			options := contextpack.PackPageOptions{RequestID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", MaxOutputBytes: 16384, DeliveryMode: "cli"}
+			if check.combined {
+				if !check.publication {
+					store.afterRead = func() { allowed = false }
+				}
+				page, err := retention.SaveFirst(f.ctx, f.pack, f.binding.PrincipalDigest, "fixture-actor", f.request, f.guard, options)
+				if err == nil || len(page.Blocks) != 0 {
+					t.Fatal("revoked document approval received a page from SaveFirst")
+				}
+				return
+			}
 			handle, err := retention.Save(f.ctx, f.pack, f.binding.PrincipalDigest, "fixture-actor", f.request, f.guard)
-			if boundary == "publication" {
+			if check.publication {
 				if err == nil || handle != nil {
 					t.Fatal("revoked document approval received a saved handle")
 				}
@@ -69,7 +89,7 @@ func TestPlanRetentionRechecksDocumentApprovalAfterStorage(t *testing.T) {
 				t.Fatal(err)
 			}
 			store.afterRead = func() { allowed = false }
-			if page, err := handle.First(f.ctx, contextpack.PackPageOptions{RequestID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", MaxOutputBytes: 16384, DeliveryMode: "cli"}); err == nil || len(page.Blocks) != 0 {
+			if page, err := handle.First(f.ctx, options); err == nil || len(page.Blocks) != 0 {
 				t.Fatal("revoked document approval received a page")
 			}
 		})
@@ -283,7 +303,11 @@ func TestPlanPackRetentionCrossProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := retention.restorePlan(f.ctx, envelope.Bytes, f.token, f.binding.PrincipalDigest, "other-actor", f.guard); err == nil || loads != 0 {
+	archiveClaims, err := retention.claims(f.ctx, f.token, f.binding.PrincipalDigest, f.guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := retention.restorePlan(f.ctx, envelope.Bytes, f.token, f.binding.PrincipalDigest, "other-actor", archiveClaims, f.guard); err == nil || loads != 0 {
 		t.Fatalf("factory saw an unauthenticated actor: calls=%d err=%v", loads, err)
 	}
 	changedRequest, err := model.DecodePackRequestJSON(f.request, 65536)
@@ -298,7 +322,7 @@ func TestPlanPackRetentionCrossProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := retention.restorePlan(f.ctx, signedWrongRequest, f.token, f.binding.PrincipalDigest, "fixture-actor", f.guard); err == nil || loads != 0 {
+	if _, err := retention.restorePlan(f.ctx, signedWrongRequest, f.token, f.binding.PrincipalDigest, "fixture-actor", archiveClaims, f.guard); err == nil || loads != 0 {
 		t.Fatalf("factory saw a request inconsistent with token: calls=%d err=%v", loads, err)
 	}
 	handle, err := retention.Save(f.ctx, f.pack, f.binding.PrincipalDigest, "fixture-actor", f.request, f.guard)

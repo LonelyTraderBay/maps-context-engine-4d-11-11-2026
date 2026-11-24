@@ -127,6 +127,7 @@ func (b *CoreBackend) verifyPackDelivery(ctx context.Context, principal app.Core
 	}
 	guard := b.packGuard(principal)
 	var recheck func(context.Context) error
+	needInitialCheck := true
 	if response.Budget.DeliveryMode == "cli" {
 		release, err := b.acquireCLIPackWork(ctx)
 		if err != nil {
@@ -134,6 +135,8 @@ func (b *CoreBackend) verifyPackDelivery(ctx context.Context, principal app.Core
 		}
 		defer release()
 		if handle := app.SymbolPackForDelivery(ctx, token, principal.Digest); handle != nil {
+			// This request checked the same handle after its last page or validation.
+			needInitialCheck = false
 			recheck = handle.Recheck
 		} else {
 			handle, err := b.loadCLIPack(ctx, principal, token)
@@ -148,8 +151,10 @@ func (b *CoreBackend) verifyPackDelivery(ctx context.Context, principal app.Core
 			return err
 		}
 	}
-	if err := recheck(ctx); err != nil {
-		return coreStoreError(err)
+	if needInitialCheck {
+		if err := recheck(ctx); err != nil {
+			return coreStoreError(err)
+		}
 	}
 	packClaims, err := b.Cursor.VerifyPrincipal(ctx, token, "pack", principal.Digest, guard)
 	if err != nil {
@@ -159,7 +164,10 @@ func (b *CoreBackend) verifyPackDelivery(ctx context.Context, principal app.Core
 		return contextpack.ErrCursorInvalid
 	}
 	matchesPack := func(cursor contextpack.SignedCursor) bool {
-		return cursor.Binding.ResultID == packClaims.Binding.ResultID && cursor.Binding.ResultDigest == packClaims.Binding.ResultDigest && cursor.Binding.RequestDigest == packClaims.Binding.RequestDigest && cursor.Binding.BindingDigest == packClaims.Binding.BindingDigest && model.ComparePinnedScope(cursor.Binding.Scope, packClaims.Binding.Scope, 32768) == nil
+		return cursor.Binding.ResultID == packClaims.Binding.ResultID && cursor.Binding.ResultDigest == packClaims.Binding.ResultDigest &&
+			cursor.Binding.RequestDigest == packClaims.Binding.RequestDigest && cursor.Binding.BindingDigest == packClaims.Binding.BindingDigest &&
+			cursor.Binding.OrderVersion == packClaims.Binding.OrderVersion &&
+			model.ComparePinnedScope(cursor.Binding.Scope, packClaims.Binding.Scope, 32768) == nil
 	}
 	var previous contextpack.SignedCursor
 	if previousCursor != nil {

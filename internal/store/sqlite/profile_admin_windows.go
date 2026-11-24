@@ -6,6 +6,9 @@ import (
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	powershellprovider "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/packages/powershell-provider"
+	pythonprovider "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/packages/python-provider"
+	tsprovider "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/packages/ts-provider"
 )
 
 // CheckWindowsCatalogAdmin authenticates the controller and both role peers
@@ -29,12 +32,31 @@ func SetWindowsCatalogProfile(ctx context.Context, installation, worktree string
 	if err != nil || request.WorktreeID != worktree {
 		return model.ProfileAdminData{}, errors.Join(ErrProfileDenied, err)
 	}
-	profile, ok := request.Profile.(*model.GoProfile)
-	if !ok || profile.Goos != "windows" || profile.Goarch != "amd64" {
+	switch profile := request.Profile.(type) {
+	case *model.GoProfile:
+		if profile.Goos != "windows" || profile.Goarch != "amd64" {
+			return model.ProfileAdminData{}, catalog.ErrUnsupportedProfile
+		}
+		return setWindowsCatalogAdmin(ctx, installation, "profile", worktree, nil, func(store *catalog.Store) (model.ProfileAdminData, error) {
+			return store.SetProfile(ctx, raw)
+		})
+	case *model.PowerShellProfile:
+		if err := powershellprovider.VerifyProfile(profile); err != nil {
+			return model.ProfileAdminData{}, catalog.ErrUnsupportedProfile
+		}
+	case *model.TSProfile:
+		if err := tsprovider.VerifyWindowsProfile(profile); err != nil {
+			return model.ProfileAdminData{}, catalog.ErrUnsupportedProfile
+		}
+	case *model.PythonProfile:
+		if err := pythonprovider.VerifyWindowsProfile(profile); err != nil {
+			return model.ProfileAdminData{}, catalog.ErrUnsupportedProfile
+		}
+	default:
 		return model.ProfileAdminData{}, catalog.ErrUnsupportedProfile
 	}
 	return setWindowsCatalogAdmin(ctx, installation, "profile", worktree, nil, func(store *catalog.Store) (model.ProfileAdminData, error) {
-		return store.SetProfile(ctx, raw)
+		return store.SetAddonProfile(ctx, raw)
 	})
 }
 

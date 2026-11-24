@@ -7,9 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/app"
@@ -17,7 +15,6 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/contextpack"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/packstore"
-	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/policy"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 	sqliteowner "github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
@@ -39,6 +36,9 @@ func OpenNativeConfig(ctx context.Context, installation, selected string, cpus i
 	defer cancel()
 	state, err := sqliteowner.OpenProtectedState(bounded, installation)
 	if err != nil {
+		if errors.Is(err, sqliteowner.ErrProfileDenied) {
+			err = errors.Join(app.ErrAdminDenied, err)
+		}
 		return nil, nil, err
 	}
 	service, err := protectedConfig(bounded, state, selected, cpus)
@@ -53,6 +53,7 @@ type NativeCatalogAdmin struct {
 	store          *catalog.Store
 	mutation       *runtime.Writer
 	kind, worktree string
+	installation   string
 }
 
 func OpenNativeAdmin(ctx context.Context, installation, selected, kind, worktree string) (_ *NativeCatalogAdmin, release func() error, resultErr error) {
@@ -65,7 +66,7 @@ func OpenNativeAdmin(ctx context.Context, installation, selected, kind, worktree
 	if err != nil {
 		return nil, nil, err
 	}
-	admin := &NativeCatalogAdmin{state: state, kind: kind, worktree: worktree}
+	admin := &NativeCatalogAdmin{state: state, kind: kind, worktree: worktree, installation: installation}
 	closeAll := func() error {
 		var err error
 		if admin.mutation != nil {
@@ -124,6 +125,21 @@ func (a *NativeCatalogAdmin) SetProfile(ctx context.Context, raw []byte) (model.
 	}
 	if a == nil || a.kind != "profile" || a.worktree != request.WorktreeID {
 		return model.ProfileAdminData{}, app.ErrAdminDenied
+	}
+	if _, goProfile := request.Profile.(*model.GoProfile); !goProfile {
+		root, err := a.state.StateRoot().CanonicalPath()
+		if err != nil {
+			return model.ProfileAdminData{}, err
+		}
+		provider, err := openNativeAddonProvider(ctx, a.installation, filepath.Join(root, "worktrees"), request.Profile)
+		if err != nil {
+			return model.ProfileAdminData{}, errors.Join(app.ErrAdminUnsupported, err)
+		}
+		if err := provider.worker.VerifyInstallation(ctx); err != nil {
+			return model.ProfileAdminData{}, errors.Join(app.ErrAdminUnsupported, err)
+		}
+		data, err := a.store.SetAddonProfile(ctx, raw)
+		return data, nativeAdminError(err)
 	}
 	data, err := a.store.SetProfile(ctx, raw)
 	return data, nativeAdminError(err)
@@ -235,21 +251,32 @@ func openNativeCoreParts(ctx context.Context, installation, selected, worktree, 
 		return errors.Join(boundStores.Check(ctx), sourceRoot.Verify(), metadataRoot.Verify())
 	}
 	reader := &ScopeReader{Catalog: cat, Index: idx, Records: records, WorktreeRoot: target, CommonRoot: common, LinkedRelative: linked, WorktreeID: worktree, ProfileID: profile, Access: access, MaxHeads: 100000, MaxManifestBytes: 64 << 20}
+	boundPath := func(ctx context.Context, p app.CorePrincipal, config model.PolicyConfig, name string) error {
+		if p != principal {
+			return ErrAuthority
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := policy.CheckConfiguredPath(name, config.DeniedGlobs); err != nil {
+			return err
+		}
+		file, err := sourceRoot.OpenRegular(name)
+		if err != nil {
+			return err
+		}
+		return errors.Join(file.Close(), sourceRoot.Verify(), metadataRoot.Verify())
+	}
 	authority := &BoundCoreAuthority{Reader: reader, AuthenticatePrincipal: func(ctx context.Context) (app.CorePrincipal, error) {
 		return principal, access(ctx, principal, worktree, profile)
 	},
+		CheckMetadataPath:  policy.CheckConfiguredPath,
+		AuthorizeBoundPath: boundPath,
 		AuthorizePath: func(ctx context.Context, p app.CorePrincipal, policyConfig model.PolicyConfig, name string) error {
 			if err := access(ctx, p, worktree, profile); err != nil {
 				return err
 			}
-			if err := policy.CheckConfiguredPath(name, policyConfig.DeniedGlobs); err != nil {
-				return err
-			}
-			file, err := sourceRoot.OpenRegular(name)
-			if err != nil {
-				return err
-			}
-			return errors.Join(file.Close(), sourceRoot.Verify())
+			return boundPath(ctx, p, policyConfig, name)
 		}}
 	key, err := state.CursorKey(bounded)
 	if err != nil {
@@ -305,34 +332,4 @@ func openNativeCoreParts(ctx context.Context, installation, selected, worktree, 
 		}
 	}
 	return &nativeCoreParts{backend: backend, config: config, effective: effective, scope: n}, release, nil
-}
-
-func nativeLinkedRelative(target *paths.Root, common string) (string, error) {
-	local, err := runtime.OpenLocalGitMetadata(target)
-	if err == nil {
-		return "", local.Close()
-	}
-	f, err := target.OpenRegular(".git")
-	if err != nil {
-		return "", err
-	}
-	raw, readErr := io.ReadAll(io.LimitReader(f, 4097))
-	closeErr := f.Close()
-	if errors.Join(readErr, closeErr) != nil || len(raw) > 4096 {
-		return "", ErrAuthority
-	}
-	text := strings.TrimSuffix(string(raw), "\n")
-	if !strings.HasPrefix(text, "gitdir: ") {
-		return "", ErrAuthority
-	}
-	pointer := strings.TrimPrefix(text, "gitdir: ")
-	prefix := filepath.Join(common, "worktrees") + string(filepath.Separator)
-	if !strings.HasPrefix(pointer, prefix) {
-		return "", ErrAuthority
-	}
-	name := strings.TrimPrefix(pointer, prefix)
-	if name == "" || strings.ContainsAny(name, "/\\\r\n\x00") || name == "." || name == ".." {
-		return "", ErrAuthority
-	}
-	return "worktrees/" + name, nil
 }

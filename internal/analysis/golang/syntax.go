@@ -50,6 +50,8 @@ type Scope struct {
 	Path      string
 	StartByte int64
 	EndByte   int64
+
+	OwnerSymbolID string `json:",omitempty"`
 }
 
 type SyntaxImport struct {
@@ -99,8 +101,8 @@ func AnalyzeSyntaxFile(ctx context.Context, input SyntaxInput) (SyntaxResult, er
 	if _, ok := ctx.Deadline(); !ok {
 		return SyntaxResult{}, ErrInvalidInput
 	}
-	manifest := input.Snapshot.Manifest()
-	if model.VerifyCaptureDigest(manifest, input.MaxManifestBytes) != nil {
+	manifest, err := input.Snapshot.VerifiedIdentity(input.MaxManifestBytes)
+	if err != nil {
 		return SyntaxResult{}, ErrInputMismatch
 	}
 	profileID, err := model.ProfileDigest(input.Profile, input.MaxManifestBytes)

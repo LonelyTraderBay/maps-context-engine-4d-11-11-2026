@@ -71,3 +71,14 @@ func TestStoreBackupSanitizesSourceFailure(t *testing.T) {
 		t.Fatalf("unsafe backup error: %d %s %s", code, out.String(), stderr.String())
 	}
 }
+
+func TestStoreBackupReportsSchemaTooNew(t *testing.T) {
+	var out, stderr bytes.Buffer
+	deps := Dependencies{CPUs: 1, StoreBackup: func(context.Context, string, string, string, string) (StoreBackupReport, error) {
+		return StoreBackupReport{}, errors.Join(ErrStoreSchemaTooNew, errors.New("private source path"))
+	}}
+	code := Run(context.Background(), []string{"store", "backup", "--target", "catalog", "--output", filepath.Join(t.TempDir(), "new")}, io.NopCloser(strings.NewReader("")), &out, &stderr, deps)
+	if code != 3 || out.Len() != 0 || !strings.HasPrefix(stderr.String(), "mce4d: SCHEMA_TOO_NEW;") || strings.Contains(stderr.String(), "private source path") {
+		t.Fatalf("unexpected schema refusal: %d %s %s", code, out.String(), stderr.String())
+	}
+}

@@ -198,7 +198,7 @@ func (s *retentionBoundaryFixture) Read(ctx context.Context, id string, verify f
 }
 
 func TestSymbolRetentionRechecksPathsAfterVerifiedStorageBytes(t *testing.T) {
-	for _, boundary := range []string{"publication", "readback"} {
+	for _, boundary := range []string{"publication", "readback", "validate"} {
 		t.Run(boundary, func(t *testing.T) {
 			f, retention, original, _, _ := symbolRetentionFixture(t, 60)
 			storage := &retentionBoundaryFixture{SymbolPackStorage: retention.store}
@@ -219,6 +219,12 @@ func TestSymbolRetentionRechecksPathsAfterVerifiedStorageBytes(t *testing.T) {
 			// Token/scope guards remain valid; only the source path is revoked
 			// after the store's final byte-verifier callback has succeeded.
 			storage.afterRead = func() { f.denied = true }
+			if boundary == "validate" {
+				if result, err := handle.Validate(f.ctx); err == nil || result.Data.EditPreconditionValidated {
+					t.Fatal("path revoked after storage verification was validated")
+				}
+				return
+			}
 			if page, err := handle.First(f.ctx, freshnessOptions()); err == nil || len(page.Blocks) != 0 {
 				t.Fatal("path revoked after storage verification received a page")
 			}

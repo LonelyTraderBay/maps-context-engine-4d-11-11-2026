@@ -299,6 +299,31 @@ func TestWindowsPackagedProfileRoleVerification(t *testing.T) {
 		}
 		return out
 	}
+	tsMaterial, pyMaterial := os.Getenv("MCE4D_WIN_TS_FIXTURE"), os.Getenv("MCE4D_WIN_PYTHON_FIXTURE")
+	if tsMaterial != "" || pyMaterial != "" {
+		prepareSecondWindowsWorktree(t, secondTarget)
+		registered := strings.Fields(string(register(0, "0", "0", secondTarget, true)))
+		if len(registered) != 5 || !model.ValidUUID(registered[2]) {
+			t.Fatal("language fixture registration is missing")
+		}
+		run(0, "worktree-create", "--root", root, "--worktree-id", registered[2])
+		if tsMaterial != "" {
+			testPackagedWindowsTypeScript(t, ctx, bin, root, secondTarget, registered[2], tsMaterial)
+		} else {
+			testPackagedWindowsPython(t, ctx, bin, root, secondTarget, registered[2], pyMaterial)
+		}
+		return
+	}
+	if powershell := os.Getenv("MCE4D_WIN_POWERSHELL_FIXTURE"); powershell != "" && os.Getenv("MCE4D_WIN_POWERSHELL_ONLY") == "1" {
+		prepareSecondWindowsWorktree(t, secondTarget)
+		registered := strings.Fields(string(register(0, "0", "0", secondTarget, true)))
+		if len(registered) != 5 || !model.ValidUUID(registered[2]) {
+			t.Fatal("PowerShell fixture registration is missing")
+		}
+		run(0, "worktree-create", "--root", root, "--worktree-id", registered[2])
+		testPackagedWindowsPowerShell(t, ctx, bin, root, secondTarget, registered[2], powershell)
+		return
+	}
 	if os.Getenv("MCE4D_WIN_RENAME_PUBLIC") == "only" {
 		prepareSecondWindowsWorktree(t, secondTarget)
 		registered := strings.Fields(string(register(0, "0", "0", secondTarget, true)))
@@ -515,6 +540,9 @@ func TestWindowsPackagedProfileRoleVerification(t *testing.T) {
 	run(0, "worktree-create", "--root", root, "--worktree-id", second[2])
 	testWindowsScopedMaintenance(t, ctx, filepath.Join(bin, "mce4d.exe"), root, target, worktree, registration[4], second[2], second[4])
 	testWindowsCatalogAdmin(t, ctx, filepath.Join(bin, "mce4d.exe"), root, target, worktree)
+	if powershell := os.Getenv("MCE4D_WIN_POWERSHELL_FIXTURE"); powershell != "" {
+		testPackagedWindowsPowerShell(t, ctx, bin, root, secondTarget, second[2], powershell)
+	}
 	if os.Getenv("MCE4D_WIN_RENAME_PUBLIC") == "1" {
 		testWindowsPublicRename(t, ctx, bin, root, secondTarget, second[2])
 	}

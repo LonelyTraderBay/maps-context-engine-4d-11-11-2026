@@ -45,16 +45,12 @@ func (s *PlanPackRetention) claims(ctx context.Context, token, principal string,
 	return claims, nil
 }
 
-func (s *PlanPackRetention) restorePlan(ctx context.Context, raw []byte, token, principal, actor string, guard contextpack.CursorGuard) (*FreshnessPlan, error) {
-	claims, err := s.claims(ctx, token, principal, guard)
-	if err != nil {
-		return nil, err
-	}
+func (s *PlanPackRetention) restorePlan(ctx context.Context, raw []byte, token, principal, actor string, claims contextpack.SignedCursor, guard contextpack.CursorGuard) (*FreshnessPlan, error) {
 	binding, err := copyRetentionBinding(claims.Binding)
 	if err != nil {
 		return nil, err
 	}
-	request, err := authenticatedRetainedPlanRequest(ctx, raw, s.codec, token, principal, actor, guard, s.max)
+	request, err := authenticatedRetainedPlanRequest(ctx, raw, s.codec, token, principal, actor, claims, guard, s.max)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +83,32 @@ func (s *PlanPackRetention) restorePlan(ctx context.Context, raw []byte, token, 
 // Save persists before returning a usable handle. Errors, including an
 // uncertain publication, never return a token to the caller.
 func (s *PlanPackRetention) Save(ctx context.Context, plan *FreshnessPlan, principal, actor string, requestJSON []byte, guard contextpack.CursorGuard) (*RetainedPlanPack, error) {
+	handle, err := s.save(ctx, plan, principal, actor, requestJSON, guard)
+	if err != nil {
+		return nil, err
+	}
+	if err := handle.plan.recheck(ctx, "", principal, guard); err != nil {
+		return nil, packContextError(ctx, err)
+	}
+	return handle, nil
+}
+
+// SaveFirst publishes and renders in one call. The handle stays private
+// until First has checked the installed bytes and both authority guards.
+func (s *PlanPackRetention) SaveFirst(ctx context.Context, plan *FreshnessPlan, principal, actor string, requestJSON []byte, guard contextpack.CursorGuard, options contextpack.PackPageOptions) (contextpack.PackPage, error) {
+	handle, err := s.save(ctx, plan, principal, actor, requestJSON, guard)
+	if err != nil {
+		return contextpack.PackPage{}, err
+	}
+	page, err := handle.First(ctx, options)
+	if err != nil {
+		guarded, _ := GuardOversizedError(err, handle.Recheck, nil)
+		return contextpack.PackPage{}, guarded
+	}
+	return page, nil
+}
+
+func (s *PlanPackRetention) save(ctx context.Context, plan *FreshnessPlan, principal, actor string, requestJSON []byte, guard contextpack.CursorGuard) (*RetainedPlanPack, error) {
 	if s == nil || plan == nil || guard == nil || actor == "" {
 		return nil, ErrValidationInput
 	}
@@ -109,10 +131,9 @@ func (s *PlanPackRetention) Save(ctx context.Context, plan *FreshnessPlan, princ
 		}
 		if verified == nil {
 			var err error
-			verified, err = s.restorePlan(ctx, raw, envelope.Token, principal, actor, guard)
-			if err != nil {
-				return err
-			}
+			verified, err = s.restorePlan(ctx, raw, envelope.Token, principal, actor, claims, guard)
+			// Restore ends with the complete owner and caller recheck.
+			return err
 		}
 		return verified.retainedAuthority(ctx, principal, guard)
 	}
@@ -122,14 +143,7 @@ func (s *PlanPackRetention) Save(ctx context.Context, plan *FreshnessPlan, princ
 	if verified == nil {
 		return nil, ErrValidationAuthority
 	}
-	handle := &RetainedPlanPack{owner: s, plan: verified, token: envelope.Token, principal: principal, guard: guard, resultID: claims.Binding.ResultID, contentHash: expected}
-	// Create already synced, read back and verified these exact installed
-	// bytes. Recheck complete authority after its last callback; First will
-	// independently verify current storage again before releasing a page.
-	if err := verified.recheck(ctx, "", principal, guard); err != nil {
-		return nil, packContextError(ctx, err)
-	}
-	return handle, nil
+	return &RetainedPlanPack{owner: s, plan: verified, token: envelope.Token, principal: principal, guard: guard, resultID: claims.Binding.ResultID, contentHash: expected}, nil
 }
 
 // Get authenticates and restores an existing result; missing or expired
@@ -148,7 +162,7 @@ func (s *PlanPackRetention) Get(ctx context.Context, token, principal, actor str
 		hash := sha256.Sum256(raw)
 		if restored == nil {
 			var err error
-			restored, err = s.restorePlan(ctx, raw, token, principal, actor, guard)
+			restored, err = s.restorePlan(ctx, raw, token, principal, actor, claims, guard)
 			if err != nil {
 				return err
 			}
@@ -254,9 +268,16 @@ func (p *RetainedPlanPack) First(ctx context.Context, options contextpack.PackPa
 	if p == nil || p.plan == nil {
 		return contextpack.PackPage{}, ErrValidationInput
 	}
-	page, err := p.plan.First(ctx, options)
-	if checkErr := p.check(ctx); checkErr != nil {
-		return contextpack.PackPage{}, checkErr
+	checked := false
+	page, err := p.plan.first(ctx, options, func(ctx context.Context) error {
+		checked = true
+		return p.check(ctx)
+	})
+	if !checked {
+		// Some paging errors occur before the delivery check is reached.
+		if checkErr := p.check(ctx); checkErr != nil {
+			return contextpack.PackPage{}, checkErr
+		}
 	}
 	return page, err
 }

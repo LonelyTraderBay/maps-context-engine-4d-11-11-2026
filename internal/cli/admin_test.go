@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/contracts"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/app"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 )
 
@@ -141,5 +142,32 @@ func TestRunProfileAdminMatchesFlagAndBody(t *testing.T) {
 	code := Run(context.Background(), args, io.NopCloser(bytes.NewReader(profile)), &out, &errOut, deps)
 	if code != 0 || errOut.Len() != 0 || owner.calls != 1 || decodeAdmin(t, "profile", Result{JSON: bytes.TrimSpace(out.Bytes()), ExitCode: code}).Error != nil {
 		t.Fatal("CLI profile administration failed")
+	}
+}
+
+func TestAdminReportsKnownCatalogContention(t *testing.T) {
+	_, policy := adminRequests(t)
+	owner := &adminFixture{err: app.ErrAdminBusy}
+	for _, candidate := range []struct {
+		name  string
+		owner AdminOwner
+		err   error
+	}{
+		{"opening", nil, app.ErrAdminBusy},
+		{"applying", owner, nil},
+	} {
+		t.Run(candidate.name, func(t *testing.T) {
+			result, err := ExecuteAdmin(context.Background(), "policy", "", policy, 4, "", func(context.Context, string, string, string) (AdminOwner, func() error, error) {
+				return candidate.owner, func() error { return nil }, candidate.err
+			})
+			if err != nil || result.ExitCode != 4 {
+				t.Fatalf("expected catalog contention, got exit %d: %v", result.ExitCode, err)
+			}
+			response := decodeAdmin(t, "policy", result)
+			if response.Error == nil || response.Error.Code != "STORE_MAINTENANCE" ||
+				!response.Error.Retryable || response.Error.SuggestedAction != "retry_bounded" || response.Data != nil {
+				t.Fatalf("invalid catalog contention response: %s", result.JSON)
+			}
+		})
 	}
 }

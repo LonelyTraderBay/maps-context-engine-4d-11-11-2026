@@ -29,12 +29,12 @@ type GoToolchainProof struct {
 
 type windowsToolchainEntry struct {
 	file      windows.ByHandleFileInformation
-	basic     windowsToolchainBasic
+	basic     windowsFileBasicInfo
 	digest    [32]byte
 	directory bool
 }
 
-type windowsToolchainBasic struct {
+type windowsFileBasicInfo struct {
 	created, accessed, written, changed int64
 	attributes, reserved                uint32
 }

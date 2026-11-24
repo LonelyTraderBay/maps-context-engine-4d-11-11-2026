@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/url"
-	"os"
 	"path/filepath"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
@@ -105,19 +104,24 @@ func (o *quiescentOwner) stageRestoreDatabase(ctx context.Context, source, desti
 	if err := o.rotateStagedIncarnation(ctx, destination, entry, newIncarnation); err != nil {
 		return out, err
 	}
-	// Validation and checkpoint used the same owned writable staging pool;
-	// close removed its sidecars. A second readonly WAL opener could recreate
-	// sidecars without removing them at close. Never erase them by filename.
-	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
-		f, err := destination.root.OpenRegular(entry.FileName + suffix)
-		if err == nil {
-			return out, errors.Join(ErrStateUnsafe, f.Close())
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return out, err
-		}
+	out, err = checkpointedRestoreImage(ctx, destination, entry.FileName)
+	if err != nil {
+		return out, err
 	}
-	f, err := destination.root.OpenRegular(entry.FileName)
+	current, err := o.authenticatedImage(ctx, original)
+	if err != nil || current != before {
+		return out, errors.Join(ErrStateChanged, err)
+	}
+	return out, errors.Join(o.check(ctx), source.Check(ctx), destination.Check(ctx))
+}
+
+func checkpointedRestoreImage(ctx context.Context, destination *stateDomain, name string) (out walLogicalImage, resultErr error) {
+	// The owned staging pool has checkpointed and closed. A second read-only
+	// SQLite opener can recreate sidecars. Verify through regular handles.
+	if err := checkNoRestoreSidecars(destination.root, name); err != nil {
+		return out, err
+	}
+	f, err := destination.root.OpenRegular(name)
 	if err != nil {
 		return out, err
 	}
@@ -142,14 +146,10 @@ func (o *quiescentOwner) stageRestoreDatabase(ctx context.Context, source, desti
 	if err != nil {
 		return out, err
 	}
-	if _, err := hashBackupArtifact(ctx, destination, entry.FileName, st.Size()); err != nil {
+	if _, err := hashBackupArtifact(ctx, destination, name, st.Size()); err != nil {
 		return out, err
 	}
-	current, err := o.authenticatedImage(ctx, original)
-	if err != nil || current != before {
-		return out, errors.Join(ErrStateChanged, err)
-	}
-	return out, errors.Join(o.check(ctx), source.Check(ctx), destination.Check(ctx))
+	return out, destination.Check(ctx)
 }
 
 func (o *quiescentOwner) rotateStagedIncarnation(ctx context.Context, destination *stateDomain, entry StoreBackupFile, next string) (resultErr error) {

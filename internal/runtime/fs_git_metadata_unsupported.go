@@ -1,7 +1,9 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package runtime
 
 import "os"
 
-func sameFileChangeTime(os.FileInfo, os.FileInfo) bool { return false }
+func gitFileChangeTime(*os.File, os.FileInfo) ([2]int64, error) {
+	return [2]int64{}, ErrGitMetadataUnverified
+}

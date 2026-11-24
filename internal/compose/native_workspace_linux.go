@@ -60,17 +60,29 @@ func nativeWorkspaceVerifier(n *nativeScope, reader *ScopeReader, principal app.
 		}
 		previous := i.request.Exclude
 		i.request.Exclude = func(name string, directory bool) bool { return blocked[name] != "" || previous(name, directory) }
-		files, err := i.Observe(ctx)
+		i.matchManifestInventory = true
+
+		proof, err := n.state.ObserveCatalogReadFence(ctx)
 		if err != nil {
 			return app.WorkspaceUnknown, err
 		}
-		if len(manifest.DependencyInputDigests) != 1 || manifest.DependencyInputDigests[0] != files.InputDigest {
-			if err := check(); err != nil {
-				return app.WorkspaceUnknown, err
-			}
-			return app.WorkspaceChanged, nil
+		if err := n.recheckBinding(ctx); err != nil {
+			return app.WorkspaceUnknown, err
 		}
-		err = i.observeCaptured(ctx, nativeCapture{snapshot: captured, files: files, blocked: blocked}, captured, false)
+		// Validate the full binding between two observations of the same
+		// authenticated head. A later head change needs a new full read.
+		if proof(ctx) == nil {
+			authorizeRoot := func(ctx context.Context) error {
+				if err := proof(ctx); err != nil {
+					return n.recheckBinding(ctx)
+				}
+				return errors.Join(n.stores.Check(ctx), n.binding.VerifyRoots(n.target, n.common, n.linked))
+			}
+			i.authorizeSourceRoot = authorizeRoot
+			i.request.AuthorizeRoot = authorizeRoot
+		}
+		err = i.observeCaptured(ctx, nativeCapture{snapshot: captured, blocked: blocked}, captured, false)
+
 		if postcheck := check(); postcheck != nil {
 			return app.WorkspaceUnknown, errors.Join(err, postcheck)
 		}

@@ -17,7 +17,7 @@ var (
 )
 
 // AdminOwner is an authenticated, scope-bound administrative use case. The
-// four sentinel errors may be returned only before a mutation was committed;
+// administrative sentinel errors may be returned only before a mutation was committed;
 // any other error is conservatively treated as an unknown commit outcome.
 type AdminOwner interface {
 	SetProfile(context.Context, []byte) (model.ProfileAdminData, error)
@@ -48,6 +48,9 @@ func ExecuteAdmin(ctx context.Context, kind, flagWorktree string, raw []byte, cp
 		response.Status, response.Readiness = "error", "blocked"
 		response.Error = &model.ErrorInfo{Code: code, Message: message, Retryable: retry, SuggestedAction: suggested, Details: []model.Gap{}}
 		return marshalResponse(registry, contracts.CLI, name, response, exit, cpus)
+	}
+	busy := func() (Result, error) {
+		return fail("STORE_MAINTENANCE", "The catalog is busy. Wait for active maintenance or close the catalog readers before retrying.", "retry_bounded", true, 4)
 	}
 	if ctx.Err() != nil {
 		return contextFailure(fail, ctx.Err())
@@ -100,6 +103,9 @@ func ExecuteAdmin(ctx context.Context, kind, flagWorktree string, raw []byte, cp
 		if errors.Is(err, ErrAdminUnsupported) {
 			return fail("UNSUPPORTED_CAPABILITY", "The administrative capability is unavailable.", "none", false, 3)
 		}
+		if errors.Is(err, app.ErrAdminBusy) {
+			return busy()
+		}
 		return fail("INTERNAL_ERROR", "The administrative owner is unavailable.", "none", false, 5)
 	}
 	if ctx.Err() != nil {
@@ -138,6 +144,8 @@ func ExecuteAdmin(ctx context.Context, kind, flagWorktree string, raw []byte, cp
 			return fail("UNKNOWN_WORKTREE", "The requested worktree is unavailable.", "register_scope", false, 3)
 		case errors.Is(err, ErrAdminUnsupported):
 			return fail("UNSUPPORTED_CAPABILITY", "The administrative capability is unavailable.", "none", false, 3)
+		case errors.Is(err, app.ErrAdminBusy):
+			return busy()
 		default:
 			return fail("STORE_RECOVERY_REQUIRED", "The change may have been applied; inspect the state before retrying.", "recover_store", false, 3)
 		}

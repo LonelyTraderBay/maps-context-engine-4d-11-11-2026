@@ -17,6 +17,46 @@ func OpenLocalGitMetadata(worktree *paths.Root) (*paths.Root, error) {
 	return worktree.OpenDirectory(".git")
 }
 
+// OpenApprovedGitMetadata supports local .git directories and worktree slots
+// beneath the .git directory of a separately approved checkout. openApproved
+// must check the installation grant before opening the candidate common dir.
+func OpenApprovedGitMetadata(worktree *paths.Root, openApproved func(string) (*paths.Root, error)) (*paths.Root, string, error) {
+	local, localErr := OpenLocalGitMetadata(worktree)
+	if localErr == nil {
+		return local, "", nil
+	}
+	base, err := worktree.CanonicalPath()
+	if err != nil {
+		return nil, "", errors.Join(ErrGitMetadataUnverified, err)
+	}
+	raw, err := readGitPointer(worktree, ".git")
+	if err != nil {
+		return nil, "", errors.Join(ErrGitMetadataUnverified, localErr, err)
+	}
+	slot, ok := gitPointerPath(raw, "gitdir: ", base)
+	if !ok {
+		return nil, "", ErrGitMetadataUnverified
+	}
+	slots := filepath.Dir(slot)
+	commonPath := filepath.Dir(slots)
+	if filepath.Base(slots) != "worktrees" || filepath.Base(commonPath) != ".git" {
+		return nil, "", ErrGitMetadataUnverified
+	}
+	common, err := openApproved(filepath.Dir(commonPath))
+	if err != nil {
+		return nil, "", errors.Join(ErrGitMetadataUnverified, err)
+	}
+	relative := "worktrees/" + filepath.Base(slot)
+	binding, err := BindLinkedGitMetadata(worktree, common, relative)
+	if err != nil {
+		return nil, "", errors.Join(err, common.Close())
+	}
+	if err := binding.Close(); err != nil {
+		return nil, "", errors.Join(err, common.Close())
+	}
+	return common, relative, nil
+}
+
 // LinkedGitMetadata checks the reciprocal Git worktree pointers using roots
 // explicitly supplied by the caller. It does not establish registration,
 // authorization, ownership, or trust in Git configuration. The caller must
@@ -155,12 +195,17 @@ func readGitPointer(root *paths.Root, path string) (data []byte, resultErr error
 }
 
 func pointerMatches(data []byte, prefix, base, expected string) bool {
+	value, ok := gitPointerPath(data, prefix, base)
+	return ok && value == expected
+}
+
+func gitPointerPath(data []byte, prefix, base string) (string, bool) {
 	if !utf8.Valid(data) {
-		return false
+		return "", false
 	}
 	value := string(data)
 	if !strings.HasPrefix(value, prefix) {
-		return false
+		return "", false
 	}
 	value = strings.TrimPrefix(value, prefix)
 	if strings.HasSuffix(value, "\n") {
@@ -168,24 +213,29 @@ func pointerMatches(data []byte, prefix, base, expected string) bool {
 		value = strings.TrimSuffix(value, "\r")
 	}
 	if value == "" {
-		return false
+		return "", false
 	}
 	for _, r := range value {
 		if unicode.IsControl(r) {
-			return false
+			return "", false
 		}
 	}
+	// Git for Windows writes forward slashes in absolute and relative pointers.
+	value = filepath.FromSlash(value)
 	if filepath.IsAbs(value) {
 		// Lexical cleanup across a symlink can differ from kernel path
 		// resolution; do not attest such a pointer.
 		if filepath.Clean(value) != value {
-			return false
+			return "", false
 		}
 	} else {
+		if filepath.VolumeName(value) != "" || strings.HasPrefix(value, string(filepath.Separator)) {
+			return "", false
+		}
 		seenName := false
 		for _, part := range strings.Split(value, string(filepath.Separator)) {
 			if part == "" || part == "." || (part == ".." && seenName) {
-				return false
+				return "", false
 			}
 			if part != ".." {
 				seenName = true
@@ -193,5 +243,5 @@ func pointerMatches(data []byte, prefix, base, expected string) bool {
 		}
 		value = filepath.Join(base, value)
 	}
-	return filepath.Clean(value) == expected
+	return value, true
 }

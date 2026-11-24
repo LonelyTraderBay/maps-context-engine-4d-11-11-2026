@@ -24,6 +24,23 @@ import (
 // be a process-wide race. This does not alter the launching shell's mask.
 func prepareNativeProcess() { unix.Umask(0077) }
 
+func nativeLocalAdminError(err error) error {
+	switch {
+	case errors.Is(err, sqlite.ErrStoreRecoveryRequired):
+		return app.ErrCoreStoreRecovery
+	case errors.Is(err, catalog.ErrCatalogCommitUnknown), errors.Is(err, sqlite.ErrNativeOutcomeUnknown),
+		errors.Is(err, index.ErrCommitUnknown), errors.Is(err, index.ErrAfterCommit):
+		return errors.Join(cli.ErrIndexRecovery, err)
+	case errors.Is(err, sqlite.ErrProfileDenied), errors.Is(err, sqlite.ErrProfileIncomplete), errors.Is(err, compose.ErrAuthority),
+		errors.Is(err, index.ErrGenerationConflict):
+		return errors.Join(cli.ErrBindingDenied, err)
+	case errors.Is(err, sqlite.ErrCacheCapacity):
+		return errors.Join(app.ErrCoreLimit, err)
+	default:
+		return err
+	}
+}
+
 func configureNativeDependencies(deps *cli.Dependencies) {
 	root, err := sqlite.ProtectedProfileRootFromEnvironment()
 	if err != nil {
@@ -129,9 +146,26 @@ func configureNativeDependencies(deps *cli.Dependencies) {
 		registered, err := compose.RegisterNativeRepo(ctx, root, selected, path, deps.CPUs)
 		return cli.RegisteredRepo{WorktreeID: registered.WorktreeID, ProfileID: registered.ProfileID}, err
 	}
+	deps.ListRepos = func(ctx context.Context, selected string) ([]model.LocalWorktree, error) {
+		entries, err := compose.RunNativeRepoList(ctx, root, selected, "")
+		return entries, nativeLocalAdminError(err)
+	}
+	deps.UpdateRepo = func(ctx context.Context, selected, worktree, target string, purge bool) (int64, error) {
+		revision, err := compose.RunNativeRepoUpdate(ctx, root, selected, worktree, target, purge, deps.CPUs)
+		return revision, nativeLocalAdminError(err)
+	}
+	deps.CacheProfile = func(ctx context.Context, selected, worktree string) (string, error) {
+		profile, err := compose.ResolveNativeCacheProfile(ctx, root, selected, worktree)
+		return profile, nativeLocalAdminError(err)
+	}
+	deps.InspectCache = func(ctx context.Context, selected, worktree string) (model.LocalCacheUsage, error) {
+		report, err := compose.InspectNativeCache(ctx, root, selected, worktree, deps.CPUs)
+		return report, nativeLocalAdminError(err)
+	}
 	deps.Index = func(ctx context.Context, selected, worktree, profile string, full, watch bool, progress func(cli.IndexProgress) error) error {
 		err := compose.RunNativeIndex(ctx, root, selected, worktree, profile, deps.CPUs, full, watch, func(value compose.NativeIndexProgress) error {
-			return progress(cli.IndexProgress{GenerationID: value.GenerationID, SnapshotDigest: value.SnapshotDigest, Files: value.Files, Unchanged: value.Unchanged, Typed: value.Typed})
+			return progress(cli.IndexProgress{GenerationID: value.GenerationID, SnapshotDigest: value.SnapshotDigest, Files: value.Files, Unchanged: value.Unchanged, Typed: value.Typed,
+				ProviderID: value.ProviderID, ProviderStatus: value.ProviderStatus})
 		})
 		switch {
 		case errors.Is(err, sqlite.ErrStoreRecoveryRequired):
@@ -196,6 +230,13 @@ func configureNativeDependencies(deps *cli.Dependencies) {
 		} else {
 			result, err = sqlite.RecoverProtectedStore(ctx, root, target, worktree, true, wait)
 		}
+		if errors.Is(err, sqlite.ErrStoreRecoveryRequired) {
+			err = app.ErrCoreStoreRecovery
+		}
+		return cli.StoreRestoreReport(result), err
+	}
+	deps.StoreRebuildIndex = func(ctx context.Context, worktree string, wait time.Duration) (cli.StoreRestoreReport, error) {
+		result, err := sqlite.RebuildProtectedIndex(ctx, root, worktree, true, wait)
 		if errors.Is(err, sqlite.ErrStoreRecoveryRequired) {
 			err = app.ErrCoreStoreRecovery
 		}

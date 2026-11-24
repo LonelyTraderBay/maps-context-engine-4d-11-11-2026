@@ -283,11 +283,12 @@ func (j windowsMaintenanceFiles) closedWorktreeImage(ctx context.Context, dir *o
 	if err := j.requireAbsent(name+"-wal", name+"-shm", name+"-journal"); err != nil {
 		return walLogicalImage{}, errors.Join(ErrProfileIncomplete, err)
 	}
-	data, found, err := j.readEntryLimit(ctx, dir, name, windowsCatalogSeedMaxSize)
+	limit := windowsStoreImageLimit(name)
+	data, found, err := j.readEntryLimit(ctx, dir, name, limit)
 	if err != nil || !found || len(data) < 100 {
 		return walLogicalImage{}, errors.Join(ErrProfileIncomplete, err)
 	}
-	image, err := digestCheckpointedMain(ctx, bytes.NewReader(data), int64(len(data)), binary.BigEndian.Uint32(data[28:32]), windowsCatalogSeedMaxSize)
+	image, err := digestCheckpointedMain(ctx, bytes.NewReader(data), int64(len(data)), binary.BigEndian.Uint32(data[28:32]), limit)
 	if err != nil {
 		return walLogicalImage{}, err
 	}

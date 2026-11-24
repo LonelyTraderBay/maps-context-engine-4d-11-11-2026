@@ -52,7 +52,7 @@ func attachNativeRename(ctx context.Context, n *nativeScope, b *CoreBackend, p a
 	profile := n.binding.Profile
 	goBinary, goOK := nativeRenameExecutable(n.binding.Policy, "go")
 	lspBinary, lspOK := nativeRenameExecutable(n.binding.Policy, "gopls")
-	if profile.AnalysisMode != "typed_when_available" || !goOK || !lspOK {
+	if profile == nil || profile.AnalysisMode != "typed_when_available" || !goOK || !lspOK {
 		return b, nil
 	}
 	root, lease, protected, err := n.stores.CacheResources(ctx)

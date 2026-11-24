@@ -38,12 +38,18 @@ type Dependencies struct {
 	SQLiteProbe         func(context.Context) (string, bool, error)
 	LookupExecutable    func(string) (string, error)
 	AddRepo             func(context.Context, string, string) (RegisteredRepo, error)
+	ListRepos           func(context.Context, string) ([]model.LocalWorktree, error)
+	UpdateRepo          func(context.Context, string, string, string, bool) (int64, error)
+	InspectCache        func(context.Context, string, string) (model.LocalCacheUsage, error)
+	CacheProfile        func(context.Context, string, string) (string, error)
+	RenderBenchmark     func(context.Context, []byte) ([]byte, error)
 	Index               RunIndex
 	LocalInventory      bool
 	StoreGC             RunStoreGC
 	StoreBackup         RunStoreBackup
 	StoreRecoveryReport RunStoreRecoveryReport
 	StoreRestore        RunStoreRestore
+	StoreRebuildIndex   RunStoreRebuildIndex
 }
 
 const help = `mce4d (development build)
@@ -101,6 +107,21 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		if deps.StoreGC != nil {
 			text += "  mce4d store gc --worktree-id <id> --profile-id <id> [--report-only | --apply --confirm]\nGC defaults to a read-only report; each applied generation is a separate transaction.\n"
 		}
+		if deps.ListRepos != nil {
+			text += "  mce4d repo list --json\n"
+		}
+		if deps.UpdateRepo != nil {
+			text += "  mce4d repo rebind --worktree-id <id> --root <approved-absolute-path> --confirm\n  mce4d repo remove --worktree-id <id> --confirm [--purge-index]\n"
+		}
+		if deps.InspectCache != nil {
+			text += "  mce4d cache inspect --worktree-id <id> --json\n"
+		}
+		if deps.CacheProfile != nil && deps.StoreGC != nil {
+			text += "  mce4d cache gc --worktree-id <id> --dry-run|--confirm\nCache commands require a single registered profile. Use store gc for an explicit profile.\n"
+		}
+		if deps.RenderBenchmark != nil {
+			text += "  mce4d bench --suite <local-suite-json> --output <new-artifact-dir>\n"
+		}
 		if deps.StoreBackup != nil {
 			text += "  mce4d store backup --target catalog --output <approved-new-private-directory>\n  mce4d store backup --target worktree --worktree-id <id> --output <approved-new-private-directory>\nBackup writes fresh artifacts below the selected store's private backups directory.\n"
 		}
@@ -109,6 +130,9 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		}
 		if deps.StoreRestore != nil {
 			text += "  mce4d store restore --manifest <approved-local-file> --confirm --wait-ms <1..30000>\n  mce4d store recover --target catalog|worktree [--worktree-id <id>] --apply --confirm --wait-ms <1..30000>\nRestore and recovery apply require the installed profile administrator.\n"
+		}
+		if deps.StoreRebuildIndex != nil {
+			text += "  mce4d store rebuild-index --worktree-id <id> --confirm --wait-ms <1..30000>\nReplaces the derived index only. Run index for each profile to publish again.\n"
 		}
 		if deps.OpenRecords != nil {
 			text += "  mce4d --worktree-id <id> --profile-id <id> records list|read --input-json <file-or-dash>\n"
@@ -234,13 +258,19 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 		return result.ExitCode
 	}
 	if len(args) > 0 && args[0] == "store" {
-		if len(args) > 1 && (args[1] == "restore" || args[1] == "recover" && containsFlag(args[2:], "--apply")) {
-			return runStoreRestore(ctx, args, configPath, stdout, stderr, deps.StoreRestore)
+		if len(args) > 1 && (args[1] == "restore" || args[1] == "rebuild-index" || args[1] == "recover" && containsFlag(args[2:], "--apply")) {
+			return runStoreRestore(ctx, args, configPath, stdout, stderr, deps.StoreRestore, deps.StoreRebuildIndex)
 		}
 		if len(args) > 1 && args[1] == "recover" {
 			return runStoreRecoveryReport(ctx, args, configPath, stdout, stderr, deps.StoreRecoveryReport)
 		}
 		return runStore(ctx, args, configPath, stdout, stderr, deps.StoreGC, deps.StoreBackup)
+	}
+	if len(args) > 0 && args[0] == "bench" {
+		if configPath != "" {
+			return diagnostic("bench takes its inputs from the local suite", 2)
+		}
+		return runBenchmark(ctx, args[1:], stdout, stderr, deps.RenderBenchmark)
 	}
 	if len(args) == 4 && args[0] == "repo" && args[1] == "add" && args[2] == "--root" {
 		if !filepath.IsAbs(args[3]) || filepath.Clean(args[3]) != args[3] {
@@ -267,6 +297,12 @@ func Run(ctx context.Context, args []string, stdin io.ReadCloser, stdout, stderr
 			return diagnostic("registration response unavailable; inspect state before retrying", 5)
 		}
 		return 0
+	}
+	if len(args) > 0 && args[0] == "repo" {
+		return runRepoAdmin(ctx, args[1:], configPath, stdout, stderr, deps)
+	}
+	if len(args) > 0 && args[0] == "cache" {
+		return runCacheAdmin(ctx, args[1:], configPath, stdout, stderr, deps)
 	}
 	if len(args) == 5 && args[0] == "mcp" && args[1] == "--worktree-id" && args[3] == "--profile-id" {
 		scope := model.ScopeRequest{WorktreeID: &args[2], ProfileID: &args[4]}

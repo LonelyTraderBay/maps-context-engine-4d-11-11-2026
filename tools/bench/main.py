@@ -87,7 +87,10 @@ def make_plan(seed, repeats, settings):
 
 
 def checked_plan(path):
-    supplied = read_json(path)
+    return verify_plan(read_json(path))
+
+
+def verify_plan(supplied):
     if not isinstance(supplied, dict) or not {"seed", "repeats", "settings"} <= supplied.keys():
         raise ValueError("invalid plan")
     expected = make_plan(supplied["seed"], supplied["repeats"], supplied["settings"])

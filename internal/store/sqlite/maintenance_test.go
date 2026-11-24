@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -125,5 +126,51 @@ func TestMaintenanceIndexRollbackBindsScopeAndPreservedRecords(t *testing.T) {
 	next.IndexRollback.Sidecars[0].SHA256 = strings.Repeat("e", 64)
 	if validMaintenanceAdvance(previous, next) {
 		t.Fatal("replacement changed the authorized sidecar proof")
+	}
+}
+
+func TestMaintenanceIndexRebuildBindsPreservedRecords(t *testing.T) {
+	rebuild := func() MaintenanceJournal {
+		j := maintenanceJournalFixture()
+		j.Target, j.WorktreeID, j.Phase = "worktree", "33333333-3333-4333-8333-333333333333", "PREPARED"
+		j.BackupDirectory = "index-rebuild"
+		j.OldStores[0].Kind, j.OldStores[0].LogicalSHA256 = "index", j.BackupManifestSHA256
+		j.NewStores[0].Kind, j.NewStores[0].LogicalSHA256 = "index", strings.Repeat("b", 64)
+		j.IndexRebuild = &MaintenanceIndexRebuild{
+			RecordsIncarnation: "44444444-4444-4444-8444-444444444444", RecordsSHA256: strings.Repeat("c", 64),
+		}
+		for _, step := range maintenanceJournalSteps(j) {
+			j.Files = append(j.Files, MaintenanceFileProof{step, strings.Repeat("e", 64), strings.Repeat("f", 64)})
+		}
+		return j
+	}
+	check := func(j MaintenanceJournal) error {
+		raw, err := json.Marshal(j)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = decodeMaintenanceJournal(raw, j.ProfileInstallationID, j.WorktreeID)
+		return err
+	}
+	if err := check(rebuild()); err != nil {
+		t.Fatalf("index-only rebuild journal: %v", err)
+	}
+	for _, change := range []func(*MaintenanceJournal){
+		func(j *MaintenanceJournal) { j.IndexRebuild.RecordsIncarnation = j.NewStores[0].Incarnation },
+		func(j *MaintenanceJournal) { j.IndexRebuild.RecordsSHA256 = "" },
+		func(j *MaintenanceJournal) { j.Files[0].Step = "records_main" },
+		func(j *MaintenanceJournal) { j.IndexRollback = &MaintenanceIndexRollback{} },
+	} {
+		j := rebuild()
+		change(&j)
+		if err := check(j); !errors.Is(err, ErrStoreRecoveryRequired) {
+			t.Fatalf("invalid rebuild journal: %v", err)
+		}
+	}
+	before, after := rebuild(), rebuild()
+	after.Phase = "REPLACING"
+	after.IndexRebuild.RecordsSHA256 = strings.Repeat("d", 64)
+	if validMaintenanceAdvance(before, after) {
+		t.Fatal("replacement changed the preserved records proof")
 	}
 }

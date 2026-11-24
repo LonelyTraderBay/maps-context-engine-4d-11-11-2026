@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -37,5 +38,13 @@ func TestReadGenerationPinsAndValidatesPublishedManifest(t *testing.T) {
 	}
 	if pinned, err := store.ReadGeneration(ctx, manifest.ProfileID, capture.GenerationID, request.AuthorizeGeneration, 8192); err != nil || pinned.GenerationID != capture.GenerationID {
 		t.Fatalf("pinned published generation lost: %+v %v", pinned, err)
+	}
+	manifest.Files[0].Path = "other.go"
+	changed, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.verifyGenerationManifest(changed, value, 8192); !errors.Is(err, ErrCaptureMismatch) {
+		t.Fatalf("changed manifest reused a prior validation proof: %v", err)
 	}
 }

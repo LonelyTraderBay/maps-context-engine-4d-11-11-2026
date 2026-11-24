@@ -107,6 +107,7 @@ func (c *syntaxCollector) visit(node ast.Node) bool {
 		parent = c.frames[len(c.frames)-1].node
 	}
 	openKind := ""
+	symbolCount := len(c.result.Symbols)
 	var caseBinding *ast.Ident
 	var receiverTypeParams []*ast.Ident
 	switch n := node.(type) {
@@ -253,7 +254,7 @@ func (c *syntaxCollector) visit(node ast.Node) bool {
 	opened := 0
 	if block, ok := node.(*ast.BlockStmt); ok && c.rangeBodies[block] != nil {
 		rangeStmt := c.rangeBodies[block]
-		c.openScope("range", block)
+		c.openScope("range", block, "")
 		if c.err != nil {
 			return false
 		}
@@ -266,14 +267,23 @@ func (c *syntaxCollector) visit(node ast.Node) bool {
 			}
 		}
 		if c.err == nil {
-			c.openScope("block", block)
+			c.openScope("block", block, "")
 			if c.err == nil {
 				opened++
 			}
 		}
 	}
 	if openKind != "" {
-		c.openScope(openKind, node)
+		var owner string
+		// These declarations emit their own symbol before opening the scope
+		// that contains their parameters, fields or local declarations.
+		switch node.(type) {
+		case *ast.FuncDecl, *ast.FuncLit, *ast.TypeSpec:
+			if len(c.result.Symbols) > symbolCount {
+				owner = c.result.Symbols[symbolCount].SymbolID
+			}
+		}
+		c.openScope(openKind, node, owner)
 		if c.err != nil {
 			if opened > 0 {
 				c.scopes = c.scopes[:len(c.scopes)-opened]
@@ -360,7 +370,7 @@ func (c *syntaxCollector) signatureRange(first, last token.Pos) string {
 	return text
 }
 
-func (c *syntaxCollector) openScope(kind string, node ast.Node) {
+func (c *syntaxCollector) openScope(kind string, node ast.Node, owner string) {
 	start, err := c.offset(node.Pos())
 	if err != nil {
 		c.err = err
@@ -387,11 +397,11 @@ func (c *syntaxCollector) openScope(kind string, node ast.Node) {
 		c.err = err
 		return
 	}
-	if !c.reserveOutput(128, id, parent, kind, c.input.Path) {
+	if !c.reserveOutput(128, id, parent, kind, c.input.Path, owner) {
 		c.err = ErrSyntaxLimit
 		return
 	}
-	c.result.Scopes = append(c.result.Scopes, Scope{ID: id, ParentID: parent, Kind: kind, Path: c.input.Path, StartByte: start, EndByte: end})
+	c.result.Scopes = append(c.result.Scopes, Scope{ID: id, ParentID: parent, Kind: kind, Path: c.input.Path, StartByte: start, EndByte: end, OwnerSymbolID: owner})
 	c.scopes = append(c.scopes, id)
 	c.occurrenceScopes = append(c.occurrenceScopes, occurrenceID)
 }

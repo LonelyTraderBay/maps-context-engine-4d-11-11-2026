@@ -49,6 +49,19 @@ func TestFreezeMatchesIndependentCanonicalDigestAndOwnsInputs(t *testing.T) {
 	if err := model.VerifyCaptureDigest(got, 32768); err != nil {
 		t.Fatal(err)
 	}
+	identity, err := s.VerifiedIdentity(s.manifestBytes)
+	if err != nil || identity != (Identity{manifest.WorktreeID, manifest.ProfileID, manifest.PolicyDigest, manifest.ProviderDigest, want}) {
+		t.Fatalf("wrong identity at manifest budget: %+v, %v", identity, err)
+	}
+	if _, err := s.VerifiedIdentity(s.manifestBytes - 1); !errors.Is(err, ErrManifestMismatch) {
+		t.Fatalf("accepted identity over budget: %v", err)
+	}
+	if err := model.VerifyCaptureDigest(got, s.manifestBytes); err != nil || model.VerifyCaptureDigest(got, s.manifestBytes-1) == nil {
+		t.Fatal("frozen identity and manifest verification disagree on the byte budget")
+	}
+	if _, err := new(Snapshot).VerifiedIdentity(32768); !errors.Is(err, ErrManifestMismatch) {
+		t.Fatalf("accepted an unfrozen snapshot: %v", err)
+	}
 	*manifest.Files[0].ContentHash = strings.Repeat("f", 64)
 	files[0].source[0] = 'x'
 	*got.Files[0].ContentHash = strings.Repeat("f", 64)

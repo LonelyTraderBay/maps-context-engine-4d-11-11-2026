@@ -186,8 +186,12 @@ func (j windowsMaintenanceFiles) readEntryLimit(ctx context.Context, dir *os.Fil
 	if err != nil || info.Size() < 1 || info.Size() > limit {
 		return nil, true, errors.Join(ErrStoreRecoveryRequired, err)
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
-	if err != nil || int64(len(raw)) != info.Size() {
+	raw := make([]byte, info.Size())
+	if _, err := io.ReadFull(file, raw); err != nil {
+		return nil, true, errors.Join(ErrStoreRecoveryRequired, err)
+	}
+	var extra [1]byte
+	if n, err := file.Read(extra[:]); n != 0 || err != io.EOF {
 		return nil, true, errors.Join(ErrStoreRecoveryRequired, err)
 	}
 	if err := errors.Join(ctx.Err(), j.control.Verify(), paths.VerifyRegularFile(file), j.acl.check(file), j.acl.check(dir)); err != nil {

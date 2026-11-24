@@ -49,6 +49,7 @@ var (
 	idPattern      = regexp.MustCompile(`([TRC])([0-9]{3})((\.\.|–|-)([TRC])?([0-9]{3}))?`)
 	versionPattern = regexp.MustCompile(`(?m)^spec_version: ([^\r\n]+)$`)
 	resumeVersion  = regexp.MustCompile(`(?m)^  spec_version: ([^\r\n]+)$`)
+	evidenceID     = regexp.MustCompile(`^E(?:[0-9]{3}|[1-9][0-9]{3,})$`)
 )
 
 func validate(text, root string) []string {
@@ -90,7 +91,7 @@ func validate(text, root string) []string {
 		add("task count: got %d, want 108", len(tasks))
 	}
 	evidence := map[string][]string{}
-	for _, row := range tableRows(section(text, "S21", "S22"), regexp.MustCompile(`^E[0-9]{3}$`)) {
+	for _, row := range tableRows(section(text, "S21", "S22"), evidenceID) {
 		if len(row) != 8 {
 			add("evidence row has %d columns", len(row))
 			continue
@@ -103,7 +104,7 @@ func validate(text, root string) []string {
 			add("unknown evidence result %s", row[0])
 		}
 	}
-	if len(tableRows(text, regexp.MustCompile(`^E[0-9]{3}$`))) != len(tableRows(section(text, "S21", "S22"), regexp.MustCompile(`^E[0-9]{3}$`))) {
+	if len(tableRows(text, evidenceID)) != len(tableRows(section(text, "S21", "S22"), evidenceID)) {
 		add("evidence outside S21")
 	}
 	last := yamlScalar(section(text, "S22", "S23"), "last_evidence_id")
@@ -655,7 +656,7 @@ func checkContracts(text, root string, tasks map[string]task, add func(string, .
 			add("schema authority version or root reference invalid")
 		}
 		defs, ok := schema["$defs"].(map[string]any)
-		if !ok || len(defs) != 152 {
+		if !ok || len(defs) != 153 {
 			add("schema definition count mismatch")
 		}
 		checkRefs(schema, schema, add)

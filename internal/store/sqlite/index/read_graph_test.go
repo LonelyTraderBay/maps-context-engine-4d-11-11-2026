@@ -163,7 +163,7 @@ func TestReadPublishedGraphRejectsLimitsAndRevocation(t *testing.T) {
 			calls := 0
 			r.AuthorizePath = func(context.Context, string, string, string, int64) error {
 				calls++
-				if calls >= 4 {
+				if calls == 2 {
 					return errFixtureLease
 				}
 				return nil
@@ -267,8 +267,61 @@ func TestReadPublishedGraphVerifierRechecksAuthority(t *testing.T) {
 
 func TestReadPublishedGraphCapturedOnlyReportsUnknown(t *testing.T) {
 	store, _, stage := stageFixture(t)
+	checkCapturedOnlyGraph(t, store, stage)
+}
+
+func TestReadPublishedGraphAuthorizesSparseMetadataWithoutReadingSource(t *testing.T) {
+	reason := "OUTSIDE_CAPTURE_SCOPE"
+	omitted := model.ManifestFile{Path: "omitted.go", Status: "excluded", ReasonCode: &reason}
+	store, _, stage := stageFixture(t, omitted)
+	ctx, r := checkCapturedOnlyGraph(t, store, stage)
+	pathChecks := 0
+	r.AuthorizePath = func(_ context.Context, _, name, _ string, _ int64) error {
+		if name != "main.go" {
+			return errFixtureLease
+		}
+		pathChecks++
+		return nil
+	}
+	if got, err := store.ReadPublishedGraph(ctx, r); got != nil || !errors.Is(err, errFixtureLease) {
+		t.Fatalf("missing file passed regular authorization: %v", err)
+	}
+	pathChecks = 0
+	metadataChecks := 0
+	r.AuthorizeMetadataPath = func(_ context.Context, _, name, _ string, _ int64) error {
+		if name != omitted.Path {
+			t.Fatalf("routed captured source to metadata authorization: %s", name)
+		}
+		metadataChecks++
+		return nil
+	}
+	graph, err := store.ReadPublishedGraph(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := graph.Snapshot.File(omitted.Path); found || metadataChecks != 2 || pathChecks != 2 {
+		t.Fatalf("unexpected source or authorization checks: source=%t metadata=%d path=%d", found, metadataChecks, pathChecks)
+	}
+	if err := graph.VerifyCatalogPaths(ctx, r.Member); err != nil || metadataChecks != 3 || pathChecks != 3 {
+		t.Fatalf("catalog reuse lost its path checks: metadata=%d path=%d error=%v", metadataChecks, pathChecks, err)
+	}
+	metadataChecks = 0
+	r.AuthorizeMetadataPath = func(context.Context, string, string, string, int64) error {
+		metadataChecks++
+		if metadataChecks == 2 {
+			return errFixtureLease
+		}
+		return nil
+	}
+	if got, err := store.ReadPublishedGraph(ctx, r); got != nil || !errors.Is(err, errFixtureLease) {
+		t.Fatalf("accepted metadata revocation: %v", err)
+	}
+}
+
+func checkCapturedOnlyGraph(t *testing.T, store *Store, stage StageFilesRequest) (context.Context, PublishedGraphRequest) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 	if err := store.StageFiles(ctx, stage); err != nil {
 		t.Fatal(err)
 	}
@@ -282,4 +335,5 @@ func TestReadPublishedGraphCapturedOnlyReportsUnknown(t *testing.T) {
 	if err != nil || result.Coverage.Status != "unknown" || len(result.Coverage.Gaps) != 1 || result.Coverage.Gaps[0].Code != "PROVIDER_NOT_RUN" || len(result.Diagnostics) != 1 || len(result.Relations) != 0 {
 		t.Fatalf("captured-only coverage was misrepresented: %v", err)
 	}
+	return ctx, r
 }

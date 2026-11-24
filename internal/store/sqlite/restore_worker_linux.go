@@ -30,6 +30,7 @@ type restoreWorkerPlan struct {
 	Backup       string
 	ManifestHash string
 	NewIDs       []string
+	RebuildIndex bool `json:",omitempty"`
 }
 
 type restoreWorkerReply struct {
@@ -108,8 +109,14 @@ func (o *quiescentOwner) prepareRestore(ctx context.Context, operation string) (
 		return nil, nil, err
 	}
 	plan, err := readRestorePlan(ctx, planRoot)
-	if err != nil || plan.Operation != operation || plan.Profile != o.profile.manifest.ProfileID || plan.Scope != o.scope || len(plan.NewIDs) != len(o.stores) {
+	if err != nil || plan.Operation != operation || plan.Profile != o.profile.manifest.ProfileID || plan.Scope != o.scope {
 		return nil, nil, errors.Join(ErrProfileDenied, err)
+	}
+	if plan.RebuildIndex {
+		return o.prepareIndexRebuild(ctx, planRoot, operation)
+	}
+	if len(plan.NewIDs) != len(o.stores) {
+		return nil, nil, ErrProfileDenied
 	}
 	backup, err := o.domain.Child(ctx, "backups/"+plan.Backup)
 	if err != nil {
@@ -186,7 +193,14 @@ func readRestorePlan(ctx context.Context, root *paths.Root) (restoreWorkerPlan, 
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&plan) != nil || !model.ValidDigest(plan.ManifestHash) || plan.Backup == "" || strings.Contains(plan.Backup, "/") || model.ValidateRelativePath(plan.Backup, false) != nil {
+	if d.Decode(&plan) != nil {
+		return restoreWorkerPlan{}, ErrProfileInput
+	}
+	if plan.RebuildIndex {
+		if !model.ValidUUID(plan.Scope) || plan.Backup != "" || plan.ManifestHash != "" || len(plan.NewIDs) != 0 {
+			return restoreWorkerPlan{}, ErrProfileInput
+		}
+	} else if !model.ValidDigest(plan.ManifestHash) || plan.Backup == "" || strings.Contains(plan.Backup, "/") || model.ValidateRelativePath(plan.Backup, false) != nil {
 		return restoreWorkerPlan{}, ErrProfileInput
 	}
 	return plan, nil

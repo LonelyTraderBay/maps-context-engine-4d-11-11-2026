@@ -12,17 +12,16 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
 )
 
-// ReadWindowsTrackedIndex reads a bounded local index for the supported
-// SHA-1 repository configuration. It neither walks untracked files nor runs
-// Git. Callers still authorize and revalidate each selected file.
-func ReadWindowsTrackedIndex(ctx context.Context, metadata *paths.Root, maxEntries int) (IndexObservation, string, bool, error) {
+// readWindowsTrackedIndex pairs the common repository configuration with the
+// index of the selected checkout. The caller binds both metadata sources.
+func readWindowsTrackedIndex(ctx context.Context, metadata *paths.Root, readIndex func(context.Context, int) ([]byte, error), maxEntries int) (IndexObservation, string, bool, error) {
 	const maxIndex = 4 << 20
 	capture := func() ([]byte, []byte, error) {
 		config, err := readObservedCapture(ctx, metadata, "config", 64<<10)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, nil, err
 		}
-		index, err := readObservedCapture(ctx, metadata, "index", maxIndex)
+		index, err := readIndex(ctx, maxIndex)
 		if errors.Is(err, os.ErrNotExist) {
 			return config, nil, nil
 		}

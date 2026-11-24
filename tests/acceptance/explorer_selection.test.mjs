@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialSelection, selectionReducer as select } from '../../web/explorer/src/shell/selection.ts';
+import { initialSelection, retainGraphChoice, selectionReducer as select } from '../../web/explorer/src/shell/selection.ts';
 import { selectionLocator } from '../../web/explorer/src/shell/context_locator.ts';
 import { layout } from '../../web/explorer/src/features/graph/layout.ts';
 
@@ -36,6 +36,35 @@ test('Explorer selection is scoped to the current graph digest', () => {
   assert.equal(changed.position, -1);
   assert.equal(changed.compactPane, 'right');
   assert.equal(select(changed, { type: 'history', delta: 1 }), changed);
+});
+
+test('automatic graph refresh retains an exact selection in the new generation only', () => {
+  const binding = { worktree_id: 'worktree', profile_id: 'profile', policy_digest: 'policy', policy_epoch: 1,
+    binding_revision: 2, record_epoch: 0, service_id: null, index_incarnation: 'index', records_incarnation: 'records' };
+  const scope = generation => ({ kind: 'single', catalog_incarnation: 'catalog', vector_digest: generation,
+    members: [{ ...binding, generation_id: generation }] });
+  const node = (generation, hash) => ({ node_id: generation, ref: { kind: 'symbol', symbol_id: 'symbol' },
+    label: 'Read', kind: 'function', source_refs: [{ ...binding, generation_id: generation, path: 'entry.ps1', content_hash: hash }] });
+  const oldNode = node('previous', 'old-source');
+  const newNode = node('current', 'new-source');
+  const previous = scope('previous');
+  const current = scope('current');
+  const choice = { node: oldNode.node_id, source: 0 };
+  const retain = retainGraphChoice(previous, current, choice, oldNode, [newNode]);
+  assert.deepEqual(retain, { node: newNode.node_id, source: 0 });
+  const state = select({ ...initialSelection, scope: 'previous', history: [choice], position: 0 },
+    { type: 'scope', digest: 'current', retain });
+  assert.deepEqual(state.history, [retain]);
+  assert.equal(state.position, 0);
+
+  assert.equal(retainGraphChoice(previous, current, choice, oldNode, []), undefined);
+  assert.equal(retainGraphChoice(previous, current, choice, oldNode, [newNode, newNode]), undefined);
+  assert.equal(retainGraphChoice(previous, current, choice, oldNode, [{ ...newNode, label: 'Renamed' }]), undefined);
+  assert.equal(retainGraphChoice(previous, current, { ...choice, mappingSource: oldNode.source_refs[0] }, oldNode, [newNode]), undefined);
+  for (const changed of [{ policy_epoch: 2 }, { binding_revision: 3 }, { index_incarnation: 'restored' }]) {
+    const revised = { ...current, members: [{ ...current.members[0], ...changed }] };
+    assert.equal(retainGraphChoice(previous, revised, choice, oldNode, [newNode]), undefined);
+  }
 });
 
 test('Preview keeps different instances of one graph node in history and drops stale scope and duplicate selection', () => {

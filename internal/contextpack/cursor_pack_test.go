@@ -17,6 +17,63 @@ func packCursorBinding(slice *TaskSlice) CursorBinding {
 	return CursorBinding{Purpose: "pack", PrincipalDigest: strings.Repeat("1", 64), BindingDigest: strings.Repeat("2", 64), RequestDigest: strings.Repeat("3", 64), OrderVersion: "pack-v1", Scope: slice.report.Scope}
 }
 
+func TestExplorePackDeliversTargetDirectCallBeforeOtherEvidence(t *testing.T) {
+	ctx, input, policy, rules := taskFixture(t)
+	selection, err := Select(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slice, err := BuildTaskSlice(ctx, SliceInput{Selection: selection, Policy: policy, TaskKind: "explore",
+		RuleAnchors: rules[:2], MaxBytes: 4 << 20,
+		VerifyNoApprovedRecords: func(context.Context, model.ScopeVector) (bool, error) { return true, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := NewCursorCodec([32]byte{1, 2, 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := PackPageOptions{RequestID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", MaxOutputBytes: 24576, MaxItems: 1, DeliveryMode: "mcp_dual"}
+	binding := packCursorBinding(slice)
+	original, _, err := NewPagedPack(ctx, slice, codec, binding, allowCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding.OrderVersion = ExplorePackOrder
+	pack, token, err := NewPagedPack(ctx, slice, codec, binding, allowCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := pack.First(ctx, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := first.Response.Data.(model.PackData).Items
+	if len(items) != 1 || items[0].Kind != "reference_catalog" || items[0].RequiredForReview ||
+		len(items[0].EvidenceRefs) != 1 || items[0].EvidenceRefs[0].EvidenceID != "r-helper" ||
+		items[0].EvidenceRefs[0].Kind != "type_resolved" {
+		t.Fatalf("expected the selected symbol's verified outgoing call, got %+v", items)
+	}
+	paging := first.Response.Pagination
+	if paging.NextCursor == nil || paging.RequiredPending == nil || *paging.RequiredPending == 0 {
+		t.Fatalf("required evidence must remain pending: %+v", paging)
+	}
+	second, err := pack.Continue(ctx, token, *paging.NextCursor, binding.PrincipalDigest, allowCursor, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldFirst, err := original.First(ctx, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldItems := oldFirst.Response.Data.(model.PackData).Items
+	nextItems := second.Response.Data.(model.PackData).Items
+	if len(oldItems) != 1 || oldItems[0].WhyIncluded != "target_source" ||
+		len(nextItems) != 1 || nextItems[0].ItemID != oldItems[0].ItemID {
+		t.Fatalf("the original source must remain available by continuation: %+v, %+v", oldItems, nextItems)
+	}
+}
+
 func TestPagedPackOversizedDescriptorBindsPosition(t *testing.T) {
 	ctx, slice, _, _ := fragmentFixture(t)
 	codec, err := NewCursorCodec([32]byte{1, 2, 3})
@@ -284,5 +341,41 @@ func TestPagedPackRechecksAuthorityAfterHostProbe(t *testing.T) {
 	}}
 	if _, err = pager.First(ctx, opts); !errors.Is(err, ErrAuthority) || calls != 2 {
 		t.Fatalf("late authority change ignored: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestPagedPackRechecksSourceAfterHostProbe(t *testing.T) {
+	ctx, slice, _, _ := fragmentFixture(t)
+	codec, _ := NewCursorCodec([32]byte{7})
+	allowed := true
+	pathAuth := slice.selection.pathAuth
+	slice.selection.pathAuth = func(ctx context.Context, member model.ScopeMember, path string) error {
+		if !allowed {
+			return ErrAuthority
+		}
+		return pathAuth(ctx, member, path)
+	}
+	guard := func(context.Context, CursorBinding) error { return nil }
+	pager, token, err := NewPagedPack(ctx, slice, codec, packCursorBinding(slice), guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := PackPageOptions{RequestID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", MaxOutputBytes: 8192, MaxItems: 1, DeliveryMode: "cli"}
+	first, err := pager.First(ctx, opts)
+	if err != nil || first.Response.Pagination.NextCursor == nil {
+		t.Fatalf("fixture did not yield a continuation: %v", err)
+	}
+	calls := 0
+	opts.DeliveryMode = "mcp_structured_verified"
+	opts.VerifyStructuredHost = func(context.Context) error {
+		calls++
+		if calls == 2 {
+			allowed = false
+		}
+		return nil
+	}
+	page, err := pager.Continue(ctx, token, *first.Response.Pagination.NextCursor, packCursorBinding(slice).PrincipalDigest, guard, opts)
+	if !errors.Is(err, ErrAuthority) || calls != 2 || len(page.Blocks) != 0 {
+		t.Fatalf("late source revocation leaked a continuation page: calls=%d err=%v", calls, err)
 	}
 }

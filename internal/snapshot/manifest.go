@@ -12,8 +12,18 @@ var ErrManifestMismatch = errors.New("capture manifest does not match captured i
 // Snapshot contains a canonical capture manifest and its captured inputs. It
 // has no parser/type results and makes no claim about filesystem atomicity.
 type Snapshot struct {
-	manifest model.CaptureManifest
-	files    map[string]File
+	manifest      model.CaptureManifest
+	manifestBytes int
+	files         map[string]File
+}
+
+// Identity holds the bindings verified when the immutable snapshot was frozen.
+type Identity struct {
+	WorktreeID     string
+	ProfileID      string
+	PolicyDigest   string
+	ProviderDigest string
+	SnapshotDigest string
 }
 
 // Freeze checks the complete supplied input set, computes capture-v1, and
@@ -26,7 +36,7 @@ func Freeze(input model.CaptureManifest, captured []File, maxManifestBytes int, 
 	if len(captured) > len(input.Files) {
 		return nil, ErrManifestMismatch
 	}
-	digest, err := model.ComputeCaptureDigest(input, maxManifestBytes)
+	digest, manifestBytes, err := model.ComputeCaptureDigestAndSize(input, maxManifestBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +86,17 @@ func Freeze(input model.CaptureManifest, captured []File, maxManifestBytes int, 
 	if used != len(byPath) {
 		return nil, ErrManifestMismatch
 	}
-	return &Snapshot{manifest: manifest, files: byPath}, nil
+	return &Snapshot{manifest: manifest, manifestBytes: manifestBytes, files: byPath}, nil
+}
+
+// VerifiedIdentity checks the caller's byte budget without copying or hashing
+// the manifest again. Only Freeze can establish this identity.
+func (s *Snapshot) VerifiedIdentity(maxBytes int) (Identity, error) {
+	if s == nil || s.manifestBytes < 1 || s.manifestBytes > maxBytes {
+		return Identity{}, ErrManifestMismatch
+	}
+	m := s.manifest
+	return Identity{m.WorktreeID, m.ProfileID, m.PolicyDigest, m.ProviderDigest, m.SnapshotDigest}, nil
 }
 
 // Manifest returns a deep copy, including the nullable scalar fields.

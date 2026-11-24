@@ -29,6 +29,16 @@ type WindowsJobChild struct {
 var errWindowsJobInput = errors.New("invalid Windows process job input")
 
 func NewWindowsProcessJob(activeLimit uint32) (*WindowsProcessJob, error) {
+	return newWindowsProcessJob(activeLimit, 0)
+}
+
+// NewWindowsProviderJob bounds a native parser to one process and a finite
+// amount of committed private memory.
+func NewWindowsProviderJob() (*WindowsProcessJob, error) {
+	return newWindowsProcessJob(1, 768<<20)
+}
+
+func newWindowsProcessJob(activeLimit uint32, memoryLimit uintptr) (*WindowsProcessJob, error) {
 	if activeLimit < 1 || activeLimit > 32 {
 		return nil, errWindowsJobInput
 	}
@@ -40,6 +50,10 @@ func NewWindowsProcessJob(activeLimit uint32) (*WindowsProcessJob, error) {
 	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
 		windows.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
 	limits.BasicLimitInformation.ActiveProcessLimit = activeLimit
+	if memoryLimit != 0 {
+		limits.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_PROCESS_MEMORY
+		limits.ProcessMemoryLimit = memoryLimit
+	}
 	if _, err := windows.SetInformationJobObject(handle, windows.JobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
 		return nil, errors.Join(err, windows.CloseHandle(handle))

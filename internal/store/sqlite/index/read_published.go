@@ -150,36 +150,11 @@ func (s *Store) readPublishedFile(ctx context.Context, request PublishedFileRequ
 	if entry == nil || entry.Status != "captured" || entry.ContentHash == nil || entry.ByteLength == nil {
 		return PublishedFile{}, ErrPublishedFileUnavailable
 	}
-	var status, hash string
-	var length, blobLength int64
-	err = tx.QueryRowContext(ctx, `SELECT f.status,f.content_hash,f.byte_length,length(b.bytes) FROM files f JOIN content_blobs b ON b.content_hash=f.content_hash WHERE f.generation_id=? AND f.path=?`, generation, request.Path).Scan(&status, &hash, &length, &blobLength)
-	if errors.Is(err, sql.ErrNoRows) {
-		return PublishedFile{}, ErrPublishedFileUnavailable
-	}
+	data, err := readPublishedBlob(ctx, tx, generation, *entry, request.Scanner, request.MaxFileBytes)
 	if err != nil {
 		return PublishedFile{}, err
 	}
-	if status != "indexed" && status != "parse_error" || hash != *entry.ContentHash || length != *entry.ByteLength || blobLength != length || length < 0 {
-		return PublishedFile{}, ErrCaptureMismatch
-	}
-	if length > int64(request.MaxFileBytes) {
-		return PublishedFile{}, ErrCaptureLimit
-	}
-	var data []byte
-	if err := tx.QueryRowContext(ctx, `SELECT b.bytes FROM files f JOIN content_blobs b ON b.content_hash=f.content_hash WHERE f.generation_id=? AND f.path=?`, generation, request.Path).Scan(&data); err != nil {
-		return PublishedFile{}, err
-	}
-	if int64(len(data)) != length {
-		return PublishedFile{}, ErrCaptureMismatch
-	}
-	sum := sha256.Sum256(data)
-	if hex.EncodeToString(sum[:]) != hash {
-		return PublishedFile{}, ErrBlobMismatch
-	}
-	if err := request.Scanner.CheckContent(data); err != nil {
-		return PublishedFile{}, err
-	}
-	file := PublishedFile{WorktreeID: s.identity.WorktreeID, IndexIncarnation: s.identity.Incarnation, ProfileID: request.ProfileID, GenerationID: generation, SnapshotDigest: digest, PolicyDigest: policyDigest, PolicyEpoch: epoch, State: state, Path: request.Path, ContentHash: hash, Bytes: data}
+	file := PublishedFile{WorktreeID: s.identity.WorktreeID, IndexIncarnation: s.identity.Incarnation, ProfileID: request.ProfileID, GenerationID: generation, SnapshotDigest: digest, PolicyDigest: policyDigest, PolicyEpoch: epoch, State: state, Path: request.Path, ContentHash: *entry.ContentHash, Bytes: data}
 	if readFacts != nil {
 		if err := readFacts(ctx, tx, file); err != nil {
 			return PublishedFile{}, err
@@ -198,6 +173,44 @@ func (s *Store) readPublishedFile(ctx context.Context, request PublishedFileRequ
 		return PublishedFile{}, err
 	}
 	return file, nil
+}
+
+// readPublishedBlob reads only a captured entry from the caller's verified,
+// pinned generation. The caller supplies the path and generation authority.
+func readPublishedBlob(ctx context.Context, tx *sql.Tx, generation string, entry model.ManifestFile, scanner *policy.Scanner, maxFileBytes int) ([]byte, error) {
+	if entry.Status != "captured" || entry.ContentHash == nil || entry.ByteLength == nil {
+		return nil, ErrPublishedFileUnavailable
+	}
+	var status, hash string
+	var length, blobLength int64
+	err := tx.QueryRowContext(ctx, `SELECT f.status,f.content_hash,f.byte_length,length(b.bytes) FROM files f JOIN content_blobs b ON b.content_hash=f.content_hash WHERE f.generation_id=? AND f.path=?`, generation, entry.Path).Scan(&status, &hash, &length, &blobLength)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrPublishedFileUnavailable
+	}
+	if err != nil {
+		return nil, err
+	}
+	if status != "indexed" && status != "parse_error" || hash != *entry.ContentHash || length != *entry.ByteLength || blobLength != length || length < 0 {
+		return nil, ErrCaptureMismatch
+	}
+	if length > int64(maxFileBytes) {
+		return nil, ErrCaptureLimit
+	}
+	var data []byte
+	if err := tx.QueryRowContext(ctx, `SELECT b.bytes FROM files f JOIN content_blobs b ON b.content_hash=f.content_hash WHERE f.generation_id=? AND f.path=?`, generation, entry.Path).Scan(&data); err != nil {
+		return nil, err
+	}
+	if int64(len(data)) != length {
+		return nil, ErrCaptureMismatch
+	}
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != hash {
+		return nil, ErrBlobMismatch
+	}
+	if err := scanner.CheckContent(data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func validHash(value string) bool {

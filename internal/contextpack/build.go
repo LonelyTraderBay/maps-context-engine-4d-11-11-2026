@@ -183,9 +183,8 @@ func Select(ctx context.Context, in Input) (*Selection, error) {
 		if err := in.Scanner.CheckContent([]byte(path)); err != nil {
 			return snapshot.File{}, err
 		}
-		if err := s.checkScope(ctx); err != nil {
-			return snapshot.File{}, err
-		}
+		// The surrounding authorize calls pin and recheck the whole scope.
+		// This private pass still checks each path before using its bytes.
 		if err := s.checkPath(ctx, path); err != nil {
 			return snapshot.File{}, err
 		}

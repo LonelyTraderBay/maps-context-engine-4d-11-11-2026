@@ -191,7 +191,7 @@ func (s *Store) StageProviderBatch(ctx context.Context, request StageProviderReq
 	if manifest.WorktreeID != s.identity.WorktreeID || model.VerifyCaptureDigest(manifest, capture.MaxManifestBytes) != nil || shared.jobID != capture.JobID || shared.generationID != capture.GenerationID || shared.digest != manifest.SnapshotDigest {
 		return next, ErrCaptureMismatch
 	}
-	if !providerBatchWithinBudget(request.Batch, request.MaxFrameBytes) {
+	if !ProviderBatchWithinBudget(request.Batch, request.MaxFrameBytes) {
 		return next, ErrCaptureLimit
 	}
 	raw, err := json.Marshal(request.Batch)
@@ -320,7 +320,9 @@ func (s *Store) StageProviderBatch(ctx context.Context, request StageProviderReq
 }
 
 // Bound JSON materialization before marshal, including worst-case escaping.
-func providerBatchWithinBudget(batch model.ProviderBatch, limit int) bool {
+// ProviderBatchWithinBudget applies the staging preflight's conservative
+// framing limits. It does not validate the facts, scope or sequence.
+func ProviderBatchWithinBudget(batch model.ProviderBatch, limit int) bool {
 	if len(batch.Packages) > 512 || len(batch.Symbols) > 2048 || len(batch.Relations) > 4096 || len(batch.Diagnostics) > 512 {
 		return false
 	}

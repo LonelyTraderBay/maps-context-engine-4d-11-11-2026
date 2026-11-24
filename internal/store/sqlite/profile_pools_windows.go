@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
@@ -41,10 +42,12 @@ type WindowsScopedPools struct {
 	Records   *records.Store
 	Target    *paths.Root
 	CommonGit *paths.Root
+	LinkedGit string
 
 	gate          chan struct{}
 	closed        bool
 	checks        []func(context.Context) error
+	headChecks    []func(context.Context) error
 	release       []func() error
 	config        windowsMaintenanceFiles
 	control       windowsMaintenanceFiles
@@ -157,12 +160,12 @@ func OpenWindowsScopedPools(ctx context.Context, installation, worktree, profile
 		return nil, err
 	}
 	p.release = append(p.release, p.Target.Close)
-	p.CommonGit, err = runtime.OpenLocalGitMetadata(p.Target)
+	p.CommonGit, p.LinkedGit, err = openWindowsApprovedGitMetadata(p.Target, manifest.TargetRoots)
 	if err != nil {
 		return nil, err
 	}
 	p.release = append(p.release, p.CommonGit.Close)
-	verifyRoots := func(context.Context) error { return binding.VerifyRoots(p.Target, p.CommonGit, "") }
+	verifyRoots := func(context.Context) error { return binding.VerifyRoots(p.Target, p.CommonGit, p.LinkedGit) }
 	if err := verifyRoots(ctx); err != nil {
 		return nil, err
 	}
@@ -218,6 +221,18 @@ func OpenWindowsScopedPools(ctx context.Context, installation, worktree, profile
 // Check revalidates the role session, profile and Git binding, both leases,
 // recovery state, and all current head chains without entering a SQL pool.
 func (p *WindowsScopedPools) Check(ctx context.Context) error {
+	return p.check(ctx, true)
+}
+
+// CheckObservationBinding verifies the live session, roots, leases and recovery
+// markers during a read of the scoped pools. The caller must bracket the read
+// with Check before it can use the result. The index connector authenticates
+// each borrowed image independently.
+func (p *WindowsScopedPools) CheckObservationBinding(ctx context.Context) error {
+	return p.check(ctx, false)
+}
+
+func (p *WindowsScopedPools) check(ctx context.Context, verifyHeads bool) error {
 	if ctx == nil {
 		return ErrProfileInput
 	}
@@ -238,7 +253,19 @@ func (p *WindowsScopedPools) Check(ctx context.Context) error {
 			return err
 		}
 	}
-	return ctx.Err()
+	if !verifyHeads {
+		return ctx.Err()
+	}
+	// The three stores have independent receipts and file handles. Keep
+	// both role checks and the lease checks ordered, then verify each
+	// image while the session gate still protects all borrowed handles.
+	var heads sync.WaitGroup
+	failures := make([]error, len(p.headChecks))
+	for i, check := range p.headChecks {
+		heads.Go(func() { failures[i] = check(ctx) })
+	}
+	heads.Wait()
+	return errors.Join(ctx.Err(), errors.Join(failures...))
 }
 
 // ReadConfig reads the optional controller-owned startup configuration.
@@ -299,7 +326,7 @@ func (p *WindowsScopedPools) Close() error {
 	for i := len(p.release) - 1; i >= 0; i-- {
 		err = errors.Join(err, p.release[i]())
 	}
-	p.release, p.checks = nil, nil
+	p.release, p.checks, p.headChecks = nil, nil, nil
 	return err
 }
 
@@ -398,7 +425,7 @@ func (p *WindowsScopedPools) openLiveIndexReader(ctx context.Context, head, data
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(0)
 	p.release = append(p.release, db.Close)
-	p.checks = append(p.checks, func(ctx context.Context) error {
+	p.headChecks = append(p.headChecks, func(ctx context.Context) error {
 		_, err := images.capture(ctx)
 		return err
 	})
@@ -448,7 +475,7 @@ func (p *WindowsScopedPools) openCapturedPool(ctx context.Context, head, data wi
 		return nil, err
 	}
 	p.release = append(p.release, release)
-	p.checks = append(p.checks, func(ctx context.Context) error {
+	p.headChecks = append(p.headChecks, func(ctx context.Context) error {
 		_, latest, err := observe(ctx)
 		if err != nil || latest != current {
 			return errors.Join(ErrStoreRecoveryRequired, err)
@@ -462,11 +489,12 @@ func (j windowsMaintenanceFiles) captureWindowsCheckpoint(ctx context.Context, d
 	if err := j.requireAbsent(name+"-wal", name+"-shm", name+"-journal"); err != nil {
 		return nil, walLogicalImage{}, err
 	}
-	data, found, err := j.readEntryLimit(ctx, dir, name, windowsCatalogSeedMaxSize)
+	limit := windowsStoreImageLimit(name)
+	data, found, err := j.readEntryLimit(ctx, dir, name, limit)
 	if err != nil || !found || len(data) < 100 {
 		return nil, walLogicalImage{}, errors.Join(ErrProfileIncomplete, err)
 	}
-	logical, err := digestCheckpointedMain(ctx, bytes.NewReader(data), int64(len(data)), binary.BigEndian.Uint32(data[28:32]), windowsCatalogSeedMaxSize)
+	logical, err := digestCheckpointedMain(ctx, bytes.NewReader(data), int64(len(data)), binary.BigEndian.Uint32(data[28:32]), limit)
 	if err != nil {
 		return nil, walLogicalImage{}, err
 	}

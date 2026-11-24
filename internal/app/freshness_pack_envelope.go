@@ -43,7 +43,7 @@ func (p *FreshnessPack) ArchiveEnvelope(ctx context.Context, principalID string,
 	if err != nil {
 		return RetainedPackEnvelope{}, ErrValidationInput
 	}
-	if err := p.recheck(ctx, p.token, "", p.principal, p.guard); err != nil {
+	if err := p.recheck(ctx, p.token, "", p.principal, nil); err != nil {
 		return RetainedPackEnvelope{}, packContextError(ctx, err)
 	}
 	archive, err := p.pack.ArchiveForRetentionWithMetadata(ctx, maxBytes, ttlSeconds, canonicalRequest)
@@ -54,7 +54,7 @@ func (p *FreshnessPack) ArchiveEnvelope(ctx context.Context, principalID string,
 	if err != nil || len(raw) > maxBytes {
 		return RetainedPackEnvelope{}, contextpack.ErrLimit
 	}
-	if err := p.recheck(ctx, p.token, "", p.principal, p.guard); err != nil {
+	if err := p.recheck(ctx, p.token, "", p.principal, nil); err != nil {
 		return RetainedPackEnvelope{}, packContextError(ctx, err)
 	}
 	return RetainedPackEnvelope{Token: p.token, PrincipalDigest: p.principal, Bytes: raw}, nil

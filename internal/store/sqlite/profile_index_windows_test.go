@@ -116,7 +116,7 @@ func TestWindowsIndexRetriesOnlyProvenUnchangedPrepare(t *testing.T) {
 			}
 			attempted := false
 			err = withOwner(ports.SharedLease, func(o windowsStoreMaintenance) error {
-				_, err := runWindowsIndexWAL(ctx, o, func(context.Context) error { return ctx.Err() },
+				_, err := runWindowsIndexWAL(ctx, o, func(context.Context) error { return ctx.Err() }, windowsCatalogSeedMaxSize,
 					func(*index.Store, *runtime.Writer, string) (struct{}, error) {
 						attempted = true
 						if scenario == "concurrent-read" {
@@ -129,7 +129,7 @@ func TestWindowsIndexRetriesOnlyProvenUnchangedPrepare(t *testing.T) {
 								})
 						}
 						return struct{}{}, nil
-					})
+					}, nil)
 				return err
 			})
 			if scenario == "concurrent-read" {

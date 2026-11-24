@@ -61,6 +61,8 @@ func DecodeProviderStartJSON(data []byte, maxBytes int) (ProviderStart, error) {
 		provider = profile.ProviderDigest
 	case *PythonProfile:
 		provider = profile.ProviderDigest
+	case *PowerShellProfile:
+		provider = profile.ProviderDigest
 	default:
 		return ProviderStart{}, fmt.Errorf("unsupported provider profile")
 	}

@@ -156,6 +156,11 @@ func (e *ExplorerReader) publishedRead(principal app.CorePrincipal, observed Sco
 		if worktree != member.WorktreeID || digest != member.PolicyDigest || epoch != member.PolicyEpoch {
 			return ErrScopeChanged
 		}
+		// The store brackets the read with authorizeGeneration and the
+		// response guard rechecks the full scope before delivery.
+		if b.Authority.AuthorizeBoundPath != nil {
+			return b.Authority.boundPath(ctx, principal, observed.Binding.Policy, name)
+		}
 		if err := b.Authority.samePrincipal(ctx, principal); err != nil {
 			return err
 		}

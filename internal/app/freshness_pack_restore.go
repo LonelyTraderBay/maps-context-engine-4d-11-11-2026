@@ -115,7 +115,7 @@ func RestoreFreshnessPack(ctx context.Context, in FreshnessPackRestoreInput) (*F
 		principal: claims.Binding.PrincipalDigest, binding: claims.Binding.BindingDigest,
 		request: claims.Binding.RequestDigest, token: in.Pack.Token, mode: request.FreshnessMode,
 		firstMax: firstMax, service: service, validation: validation, capture: in.CaptureLive}
-	if err := pack.recheck(ctx, pack.token, "", pack.principal, guard); err != nil {
+	if err := pack.recheck(ctx, pack.token, "", pack.principal, nil); err != nil {
 		return nil, packContextError(ctx, err)
 	}
 	return pack, nil
@@ -133,14 +133,14 @@ func (p *FreshnessPack) ArchiveForRetention(ctx context.Context, maxBytes int, t
 	if p == nil || p.pack == nil {
 		return nil, ErrValidationInput
 	}
-	if err := p.recheck(ctx, p.token, "", p.principal, p.guard); err != nil {
+	if err := p.recheck(ctx, p.token, "", p.principal, nil); err != nil {
 		return nil, packContextError(ctx, err)
 	}
 	raw, err := p.pack.ArchiveForRetention(ctx, maxBytes, ttlSeconds)
 	if err != nil {
 		return nil, packContextError(ctx, err)
 	}
-	if err := p.recheck(ctx, p.token, "", p.principal, p.guard); err != nil {
+	if err := p.recheck(ctx, p.token, "", p.principal, nil); err != nil {
 		return nil, packContextError(ctx, err)
 	}
 	return raw, nil

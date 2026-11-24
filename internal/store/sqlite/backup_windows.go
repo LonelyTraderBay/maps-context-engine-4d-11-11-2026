@@ -138,14 +138,15 @@ func (o windowsStoreMaintenance) backupOne(ctx context.Context, backup windowsMa
 	if err != nil {
 		return file, err
 	}
-	copied, err := windowsStageBackupCopy(ctx, o.lease, image, backup, store.main, windowsCatalogSeedMaxSize)
+	limit := windowsStoreImageLimit(store.main)
+	copied, err := windowsStageBackupCopy(ctx, o.lease, image, backup, store.main, limit)
 	if err != nil {
 		return file, err
 	}
 	if err := backup.flushArtifact(ctx, store.main); err != nil {
 		return file, err
 	}
-	raw, err := backup.requiredBytes(ctx, store.main, windowsCatalogSeedMaxSize)
+	raw, err := backup.requiredBytes(ctx, store.main, limit)
 	if err != nil || int64(len(raw)) != copied.Bytes || !windowsStandaloneImage(raw) {
 		return file, errors.Join(ErrStateChanged, err)
 	}

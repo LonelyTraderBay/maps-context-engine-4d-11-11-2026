@@ -55,11 +55,11 @@ func (b *CoreBackend) cliSymbolRetention(principal app.CorePrincipal, captured *
 	return app.NewSymbolPackRetention(b.cliPackStore, b.Cursor, int(b.cliPackStore.MaxResultBytes()), ttl, factory)
 }
 
-func (b *CoreBackend) cliPlanRetention(principal app.CorePrincipal) (*app.PlanPackRetention, error) {
+func (b *CoreBackend) cliPlanRetention(principal app.CorePrincipal, captured *index.PublishedGraph) (*app.PlanPackRetention, error) {
 	if !b.cliPackStoreWithinLimits() {
 		return nil, app.ErrCoreUnsupported
 	}
-	factory, err := b.PlanRestoreFactory(principal)
+	factory, err := b.planRestoreFactory(principal, captured)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (b *CoreBackend) loadCLIPack(ctx context.Context, principal app.CorePrincip
 		}
 		return retention.Get(ctx, token, principal.Digest, principal.ID, guard)
 	case "plan":
-		retention, err := b.cliPlanRetention(principal)
+		retention, err := b.cliPlanRetention(principal, nil)
 		if err != nil {
 			return nil, err
 		}

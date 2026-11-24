@@ -23,6 +23,7 @@ type StoreRestoreReport struct {
 }
 
 type RunStoreRestore func(context.Context, string, string, string, time.Duration) (StoreRestoreReport, error)
+type RunStoreRebuildIndex func(context.Context, string, time.Duration) (StoreRestoreReport, error)
 
 func containsFlag(args []string, flag string) bool {
 	for _, arg := range args {
@@ -33,10 +34,10 @@ func containsFlag(args []string, flag string) bool {
 	return false
 }
 
-func runStoreRestore(ctx context.Context, args []string, selected string, stdout, stderr io.Writer, run RunStoreRestore) int {
+func runStoreRestore(ctx context.Context, args []string, selected string, stdout, stderr io.Writer, run RunStoreRestore, rebuildIndex RunStoreRebuildIndex) int {
 	diagnostic := func(message string, code int) int { _, _ = fmt.Fprintln(stderr, "mce4d: "+message); return code }
 	bad := func() int {
-		return diagnostic("restore or recovery apply requires an explicit selection, --confirm and --wait-ms", 2)
+		return diagnostic("store replacement requires an explicit selection, --confirm and --wait-ms", 2)
 	}
 	if selected != "" || len(args) < 7 || args[len(args)-3] != "--confirm" || args[len(args)-2] != "--wait-ms" {
 		return bad()
@@ -47,7 +48,16 @@ func runStoreRestore(ctx context.Context, args []string, selected string, stdout
 		return bad()
 	}
 	manifest, target, worktree := "", "", ""
+	rebuilding := args[1] == "rebuild-index"
 	switch {
+	case rebuilding && len(args) == 7 && args[2] == "--worktree-id" && model.ValidUUID(args[3]):
+		target, worktree = "worktree", args[3]
+		if rebuildIndex == nil {
+			return diagnostic("authorized index rebuild unavailable", 3)
+		}
+		run = func(ctx context.Context, _, _, worktree string, wait time.Duration) (StoreRestoreReport, error) {
+			return rebuildIndex(ctx, worktree, wait)
+		}
 	case args[1] == "restore" && len(args) == 7 && args[2] == "--manifest":
 		manifest = args[3]
 		if !filepath.IsAbs(manifest) || filepath.Clean(manifest) != manifest || filepath.Base(manifest) != "backup.json" {
@@ -82,7 +92,8 @@ func runStoreRestore(ctx context.Context, args []string, selected string, stdout
 	if result.Target == "worktree" && !model.ValidUUID(result.WorktreeID) || result.Target == "catalog" && result.WorktreeID != "" {
 		return diagnostic("restore outcome requires inspection", 5)
 	}
-	if result.Outcome != "restored" || !storeStepsMatch(result.Target, result.CompletedSteps, true, target == "worktree") {
+	if result.Outcome != "restored" || rebuilding && len(result.CompletedSteps) != 4 ||
+		!storeStepsMatch(result.Target, result.CompletedSteps, true, target == "worktree") {
 		return diagnostic("restore outcome requires inspection", 5)
 	}
 	return writeJSON(stdout, stderr, result)

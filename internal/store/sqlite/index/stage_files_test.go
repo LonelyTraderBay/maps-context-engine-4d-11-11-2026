@@ -12,9 +12,25 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/snapshot"
 )
 
-func stageFixture(t *testing.T) (*Store, *sql.DB, StageFilesRequest) {
+func stageFixture(t *testing.T, excluded ...model.ManifestFile) (*Store, *sql.DB, StageFilesRequest) {
 	t.Helper()
 	store, db, begin := beginFixture(t)
+	classes := []FileClassification{{Path: "main.go", Kind: "go", Generated: true}}
+	if len(excluded) > 0 {
+		input := begin.Snapshot.Manifest()
+		input.SnapshotDigest = ""
+		input.Files = append(input.Files, excluded...)
+		source, _ := begin.Snapshot.File("main.go")
+		frozen, err := snapshot.Freeze(input, []snapshot.File{source}, 8192, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		begin.Snapshot = frozen
+		classes = classes[:0]
+		for _, file := range frozen.Manifest().Files {
+			classes = append(classes, FileClassification{Path: file.Path, Kind: "go", Generated: file.Path == "main.go"})
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := store.BeginGeneration(ctx, begin); err != nil {
@@ -24,7 +40,7 @@ func stageFixture(t *testing.T) (*Store, *sql.DB, StageFilesRequest) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store, db, StageFilesRequest{Capture: CaptureWrite{GenerationID: begin.GenerationID, JobID: begin.JobID, PolicyEpoch: begin.PolicyEpoch, Snapshot: begin.Snapshot, Writer: begin.Writer, Scanner: scanner, MaxManifestBytes: 8192, MaxSourceBytes: 1024, Authorize: func(context.Context, string, string, string, int64) error { return nil }}, Files: []FileClassification{{Path: "main.go", Kind: "go", Generated: true}}}
+	return store, db, StageFilesRequest{Capture: CaptureWrite{GenerationID: begin.GenerationID, JobID: begin.JobID, PolicyEpoch: begin.PolicyEpoch, Snapshot: begin.Snapshot, Writer: begin.Writer, Scanner: scanner, MaxManifestBytes: 8192, MaxSourceBytes: 1024, Authorize: func(context.Context, string, string, string, int64) error { return nil }}, Files: classes}
 }
 
 func TestStageFilesBindsCaptureAndRejectsReplay(t *testing.T) {

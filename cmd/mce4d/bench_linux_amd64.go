@@ -1,0 +1,10 @@
+package main
+
+import (
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/cli"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/tools/bench"
+)
+
+func configureBenchmark(deps *cli.Dependencies) {
+	deps.RenderBenchmark = bench.RenderSuite
+}

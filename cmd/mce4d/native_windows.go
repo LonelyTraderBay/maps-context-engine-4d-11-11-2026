@@ -12,7 +12,9 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/catalog"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/cli"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/compose"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/explorer"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 )
 
@@ -77,6 +79,16 @@ func configureNativeDependencies(deps *cli.Dependencies) {
 			return service, release, err
 		}
 		deps.OpenRetainedCore = deps.OpenCore
+		deps.OpenExplorer = func(ctx context.Context, selected, worktree, profile string) (explorer.Options, func() error, error) {
+			options, release, err := compose.OpenWindowsExplorer(ctx, root, selected, worktree, profile, deps.CPUs)
+			switch {
+			case errors.Is(err, sqlite.ErrStoreRecoveryRequired):
+				err = app.ErrCoreStoreRecovery
+			case errors.Is(err, sqlite.ErrProfileDenied), errors.Is(err, sqlite.ErrProfileInput):
+				err = errors.Join(cli.ErrBindingDenied, err)
+			}
+			return options, release, err
+		}
 	}
 	if !ipc && (engineErr != nil || clientErr != nil || engine == 0 || client == 0 || engine == client) {
 		return
@@ -123,6 +135,8 @@ func windowsAdminError(err error) error {
 	switch {
 	case errors.Is(err, sqlite.ErrStoreRecoveryRequired), errors.Is(err, catalog.ErrCatalogCommitUnknown):
 		return err
+	case errors.Is(err, runtime.ErrStoreMaintenance):
+		return app.ErrAdminBusy
 	case errors.Is(err, sqlite.ErrProfileDenied), errors.Is(err, sqlite.ErrProfileInput):
 		return app.ErrAdminDenied
 	case errors.Is(err, catalog.ErrRevisionConflict):

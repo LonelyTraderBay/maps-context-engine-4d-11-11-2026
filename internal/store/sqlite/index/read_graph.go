@@ -23,13 +23,17 @@ type PublishedGraphRequest struct {
 	VectorDigest        string
 	AuthorizeGeneration GenerationAuthorizer
 	AuthorizePath       CaptureAuthorizer
-	Scanner             *policy.Scanner
-	MaxManifestBytes    int
-	MaxFileBytes        int
-	MaxSourceBytes      int64
-	MaxFactBytes        int
-	MaxFacts            int
-	MaxSymbols          int // zero uses only MaxFacts
+	// AuthorizeMetadataPath applies path policy to byte-free out-of-scope
+	// metadata. The graph separately checks generation authority before and
+	// after the read. A nil callback uses regular path authority.
+	AuthorizeMetadataPath CaptureAuthorizer
+	Scanner               *policy.Scanner
+	MaxManifestBytes      int
+	MaxFileBytes          int
+	MaxSourceBytes        int64
+	MaxFactBytes          int
+	MaxFacts              int
+	MaxSymbols            int // zero uses only MaxFacts
 }
 
 // PublishedGraph contains the complete bounded provider catalog for exactly
@@ -119,9 +123,9 @@ func (s *Store) graphTransaction(ctx context.Context, r PublishedGraphRequest, v
 }
 
 // ReadPublishedGraph fails rather than silently truncating the fact catalog.
-// File bytes are read after the fact transaction and the generation is checked
-// again afterward. This is a bounded internal adapter, not a live freshness or
-// cross-store authority proof.
+// File bytes and facts come from the same verified SQLite snapshot. Path
+// authority is rechecked before return. This bounded adapter makes no claim
+// about live freshness or cross-store authority.
 func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest) (*PublishedGraph, error) {
 	if ctx == nil || !s.readable() ||
 		r.AuthorizeGeneration == nil || r.AuthorizePath == nil || r.Scanner == nil || !validHash(r.VectorDigest) ||
@@ -148,6 +152,7 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 	}
 	graph := &PublishedGraph{store: s, request: r, Packages: []model.PackageFact{}, Symbols: []model.SymbolFact{}, Relations: []model.RelationFact{}, Diagnostics: []model.DiagnosticFact{}}
 	var manifest model.CaptureManifest
+	var files []snapshot.File
 	err = s.graphTransaction(ctx, r, func(tx *sql.Tx, h graphHeader) error {
 		var raw []byte
 		if err := tx.QueryRowContext(ctx, `SELECT manifest_json FROM generations WHERE generation_id=?`, r.Member.GenerationID).Scan(&raw); err != nil {
@@ -165,42 +170,14 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 			return ErrCaptureMismatch
 		}
 		graph.state = h.state
-		return readGraphFacts(ctx, tx, r, graph)
+		if err := readGraphFacts(ctx, tx, r, graph); err != nil {
+			return err
+		}
+		files, err = readGraphSources(ctx, tx, r, manifest.Files)
+		return err
 	})
 	if err != nil {
 		return nil, err
-	}
-	files := make([]snapshot.File, 0, len(manifest.Files))
-	var total int64
-	for _, entry := range manifest.Files {
-		if err := policy.CheckPath(entry.Path); err != nil {
-			return nil, err
-		}
-		if err := r.Scanner.CheckContent([]byte(entry.Path)); err != nil {
-			return nil, err
-		}
-		if err := r.AuthorizePath(ctx, r.Member.WorktreeID, entry.Path, r.Member.PolicyDigest, r.Member.PolicyEpoch); err != nil {
-			return nil, err
-		}
-		if entry.Status != "captured" {
-			continue
-		}
-		if entry.ByteLength == nil || *entry.ByteLength < 0 || *entry.ByteLength > r.MaxSourceBytes-total {
-			return nil, ErrCaptureLimit
-		}
-		file, err := s.ReadPublishedFile(ctx, PublishedFileRequest{ProfileID: r.Member.ProfileID, GenerationID: r.Member.GenerationID, Path: entry.Path, AuthorizeGeneration: r.AuthorizeGeneration, AuthorizePath: r.AuthorizePath, Scanner: r.Scanner, MaxManifestBytes: r.MaxManifestBytes, MaxFileBytes: r.MaxFileBytes})
-		if err != nil {
-			return nil, err
-		}
-		if file.IndexIncarnation != r.Member.IndexIncarnation || file.SnapshotDigest != r.Member.SnapshotDigest || file.PolicyDigest != r.Member.PolicyDigest || file.PolicyEpoch != r.Member.PolicyEpoch || file.State != graph.state {
-			return nil, ErrCaptureMismatch
-		}
-		frozen, err := snapshot.NewFile(entry.Path, file.Bytes, r.MaxFileBytes)
-		if err != nil {
-			return nil, ErrCaptureMismatch
-		}
-		total += int64(frozen.Len())
-		files = append(files, frozen)
 	}
 	graph.Snapshot, err = snapshot.Freeze(manifest, files, r.MaxManifestBytes, r.MaxSourceBytes)
 	if err != nil {
@@ -214,7 +191,7 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 		return nil, err
 	}
 	for _, entry := range manifest.Files {
-		if err := r.AuthorizePath(ctx, r.Member.WorktreeID, entry.Path, r.Member.PolicyDigest, r.Member.PolicyEpoch); err != nil {
+		if err := r.authorizeManifestEntry(ctx, entry); err != nil {
 			return nil, err
 		}
 	}
@@ -227,6 +204,52 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 		return nil, err
 	}
 	return graph, nil
+}
+
+func (r PublishedGraphRequest) authorizeManifestEntry(ctx context.Context, entry model.ManifestFile) error {
+	authorize := r.AuthorizePath
+	if r.AuthorizeMetadataPath != nil && outsideCaptureScope(entry) {
+		authorize = r.AuthorizeMetadataPath
+	}
+	return authorize(ctx, r.Member.WorktreeID, entry.Path, r.Member.PolicyDigest, r.Member.PolicyEpoch)
+}
+
+func outsideCaptureScope(entry model.ManifestFile) bool {
+	return entry.Status == "excluded" && entry.ReasonCode != nil &&
+		*entry.ReasonCode == "OUTSIDE_CAPTURE_SCOPE" && entry.ContentHash == nil && entry.ByteLength == nil
+}
+
+func readGraphSources(ctx context.Context, tx *sql.Tx, r PublishedGraphRequest, entries []model.ManifestFile) ([]snapshot.File, error) {
+	files := make([]snapshot.File, 0, len(entries))
+	var total int64
+	for _, entry := range entries {
+		if err := policy.CheckPath(entry.Path); err != nil {
+			return nil, err
+		}
+		if err := r.Scanner.CheckContent([]byte(entry.Path)); err != nil {
+			return nil, err
+		}
+		if err := r.authorizeManifestEntry(ctx, entry); err != nil {
+			return nil, err
+		}
+		if entry.Status != "captured" {
+			continue
+		}
+		if entry.ByteLength == nil || *entry.ByteLength < 0 || *entry.ByteLength > r.MaxSourceBytes-total {
+			return nil, ErrCaptureLimit
+		}
+		data, err := readPublishedBlob(ctx, tx, r.Member.GenerationID, entry, r.Scanner, r.MaxFileBytes)
+		if err != nil {
+			return nil, err
+		}
+		frozen, err := snapshot.NewFile(entry.Path, data, r.MaxFileBytes)
+		if err != nil {
+			return nil, ErrCaptureMismatch
+		}
+		total += int64(frozen.Len())
+		files = append(files, frozen)
+	}
+	return files, nil
 }
 
 // VerifyFacts binds the context selection's digest to the exact catalog read
@@ -270,6 +293,24 @@ func (g *PublishedGraph) VerifyCatalog(ctx context.Context, member model.ScopeMe
 		return err
 	}
 	return g.VerifyFacts(ctx, member, digest)
+}
+
+// VerifyCatalogPaths also reauthorizes every manifest entry with the same
+// path and metadata rules that applied when the catalog was read.
+func (g *PublishedGraph) VerifyCatalogPaths(ctx context.Context, member model.ScopeMember) error {
+	if err := g.VerifyCatalog(ctx, member); err != nil {
+		return err
+	}
+	identity, err := g.Snapshot.VerifiedIdentity(g.request.MaxManifestBytes)
+	if err != nil || identity.SnapshotDigest != member.SnapshotDigest {
+		return ErrCaptureMismatch
+	}
+	for _, entry := range g.Snapshot.Manifest().Files {
+		if err := g.request.authorizeManifestEntry(ctx, entry); err != nil {
+			return err
+		}
+	}
+	return g.VerifyFacts(ctx, member, g.digest)
 }
 
 // The digest is the internal context-facts-v1 recipe used by contextpack.

@@ -3,12 +3,39 @@
 package compose
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/indexer"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/inventory"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/snapshot"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite/index"
 )
+
+func TestNativeWatchDefersOnlySettledSourceChanges(t *testing.T) {
+	cleanup := errors.New("provider stream cleanup failed")
+	for _, scenario := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"success", nil, false},
+		{"snapshot and capture changed", errors.Join(indexer.ErrSnapshotChanged, inventory.ErrCaptureChanged), true},
+		{"membership changed", errors.Join(inventory.ErrWalkChanged), true},
+		{"scope changed", ErrScopeChanged, false},
+		{"cleanup failed", fmt.Errorf("index attempt: %w", errors.Join(indexer.ErrSnapshotChanged, cleanup)), false},
+		{"uncertain commit", errors.Join(inventory.ErrCaptureChanged, index.ErrCommitUnknown), false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			if got := nativeWatchSourceChanged(scenario.err); got != scenario.want {
+				t.Fatalf("source change result for %v = %v, want %v", scenario.err, got, scenario.want)
+			}
+		})
+	}
+}
 
 func TestNativeSyntaxUsesConfiguredNearestCapturedModule(t *testing.T) {
 	manifest := model.CaptureManifest{SchemaVersion: 1, WorktreeID: "11111111-1111-4111-8111-111111111111", ProfileID: strings.Repeat("a", 64), PolicyDigest: strings.Repeat("b", 64), ProviderDigest: strings.Repeat("c", 64), Files: []model.ManifestFile{}, DependencyInputDigests: []string{}}

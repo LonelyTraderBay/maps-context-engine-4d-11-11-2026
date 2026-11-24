@@ -19,6 +19,17 @@ var toolchainPin []byte
 
 const ProviderID = "mce4d-python-syntax"
 
+type ToolchainPin struct {
+	Version     string `json:"version"`
+	Interpreter string `json:"interpreter_sha256"`
+	Stdlib      string `json:"stdlib_fingerprint"`
+}
+
+func PinnedToolchain() (pin ToolchainPin, err error) {
+	err = json.Unmarshal(toolchainPin, &pin)
+	return pin, err
+}
+
 // Installation paths are selected by the tool owner. Captured projects cannot
 // select a virtualenv, startup hook, module path, executable, or parser.
 type Installation struct {
@@ -37,12 +48,8 @@ func NewTyped(installation Installation, moduleRoots []string) (*providers.Pytho
 }
 
 func newProvider(installation Installation, moduleRoots []string, mode string) (*providers.PythonProvider, *model.PythonProfile, error) {
-	var pin struct {
-		Version     string `json:"version"`
-		Interpreter string `json:"interpreter_sha256"`
-		Stdlib      string `json:"stdlib_fingerprint"`
-	}
-	if err := json.Unmarshal(toolchainPin, &pin); err != nil {
+	pin, err := PinnedToolchain()
+	if err != nil {
 		return nil, nil, err
 	}
 	program := sha256.Sum256(parserProgram)

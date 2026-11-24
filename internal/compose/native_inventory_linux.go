@@ -21,6 +21,8 @@ import (
 )
 
 type nativeInventory struct {
+	authorizeSourceRoot                     func(context.Context) error
+	matchManifestInventory                  bool
 	scope                                   *nativeScope
 	request                                 inventory.LocalInventoryRequest
 	home, system, sandbox, worktreeMetadata *paths.Root
@@ -71,7 +73,7 @@ func (n *nativeScope) approvedGit(ctx context.Context) (string, error) {
 }
 
 func openNativeInventory(ctx context.Context, n *nativeScope, create bool) (_ *nativeInventory, resultErr error) {
-	if n.binding.Profile.AnalysisMode != "syntax" && n.binding.Profile.AnalysisMode != "typed_when_available" || len(n.binding.Profile.DependencyRoots) != 0 || len(n.binding.Policy.DependencyRoots) != 0 {
+	if len(n.binding.Policy.DependencyRoots) != 0 || n.binding.Profile != nil && len(n.binding.Profile.DependencyRoots) != 0 {
 		return nil, app.ErrCoreUnsupported
 	}
 	git, err := n.approvedGit(ctx)
@@ -185,7 +187,7 @@ func openNativeInventory(ctx context.Context, n *nativeScope, create bool) (_ *n
 			return policy.CheckConfiguredPath(strings.TrimSuffix(name, "/"), n.binding.Policy.DeniedGlobs) == nil, nil
 		},
 		Exclude: func(name string, directory bool) bool {
-			return policy.CheckConfiguredPath(strings.TrimSuffix(name, "/"), n.binding.Policy.DeniedGlobs) != nil || !directory && !nativeTextPath(name)
+			return policy.CheckConfiguredPath(strings.TrimSuffix(name, "/"), n.binding.Policy.DeniedGlobs) != nil || !directory && !n.capturePath(name)
 		},
 	}
 	return i, nil

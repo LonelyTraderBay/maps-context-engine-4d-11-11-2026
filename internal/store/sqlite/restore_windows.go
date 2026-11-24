@@ -140,7 +140,7 @@ func (o windowsStoreMaintenance) readRestoreInput(ctx context.Context, target, w
 
 	// Capture all declared bytes before any artifact is passed to SQLite.
 	for _, file := range out.manifest.Stores {
-		if file.ByteLength > windowsCatalogSeedMaxSize {
+		if file.ByteLength > windowsStoreImageLimit(file.FileName) {
 			return windowsRestoreInput{}, ErrStateLimit
 		}
 		if err := backup.requireAbsent(file.FileName+"-wal", file.FileName+"-shm", file.FileName+"-journal"); err != nil {
@@ -198,7 +198,7 @@ type windowsRestoreFile struct {
 func (o windowsStoreMaintenance) restoreFiles(stores []windowsMaintenanceStore) []windowsRestoreFile {
 	var files []windowsRestoreFile
 	for _, s := range stores {
-		files = append(files, windowsRestoreFile{s.data, s.main, windowsCatalogSeedMaxSize})
+		files = append(files, windowsRestoreFile{s.data, s.main, windowsStoreImageLimit(s.main)})
 	}
 	for _, s := range stores {
 		files = append(files, windowsRestoreFile{s.data, walAuthorityName, walAuthorityMaxBytes})
@@ -326,7 +326,7 @@ func (o windowsStoreMaintenance) stageRestoreImage(ctx context.Context, stage wi
 
 func (o windowsStoreMaintenance) stageRestoredImage(ctx context.Context, stage windowsMaintenanceFiles, store windowsMaintenanceStore,
 	image []byte, file StoreBackupFile, incarnation string) (_ []byte, _ walLogicalImage, resultErr error) {
-	if _, err := windowsStageBackupCopy(ctx, o.lease, image, stage, store.main, windowsCatalogSeedMaxSize); err != nil {
+	if _, err := windowsStageBackupCopy(ctx, o.lease, image, stage, store.main, windowsStoreImageLimit(store.main)); err != nil {
 		return nil, walLogicalImage{}, err
 	}
 	if err := o.rotateStage(ctx, stage, file, incarnation); err != nil {
@@ -402,6 +402,9 @@ func (o windowsStoreMaintenance) rotateStage(ctx context.Context, stage windowsM
 }
 
 func (o windowsStoreMaintenance) runRestoreJournal(ctx context.Context, journal *MaintenanceJournal, boundary func(string)) (out ProtectedRestoreSummary, resultErr error) {
+	if journal.IndexRebuild != nil {
+		return out, ErrStoreRecoveryRequired
+	}
 	defer func() {
 		if resultErr != nil {
 			out = ProtectedRestoreSummary{}
@@ -458,7 +461,7 @@ func (o windowsStoreMaintenance) runRestoreJournal(ctx context.Context, journal 
 		}
 	}
 	if journal.IndexRollback != nil {
-		preimage, err := stage.requiredBytes(ctx, "old-index-committed", windowsCatalogSeedMaxSize)
+		preimage, err := stage.requiredBytes(ctx, "old-index-committed", windowsIndexImageMaxBytes)
 		if err != nil || windowsBytesDigest(preimage) != journal.BackupManifestSHA256 {
 			return out, errors.Join(ErrStoreRecoveryRequired, err)
 		}
@@ -548,7 +551,7 @@ func verifyStagedWindowsAuthorities(ctx context.Context, stores []windowsMainten
 			return errors.Join(ErrStoreRecoveryRequired, err)
 		}
 		image, err := digestCheckpointedMain(ctx, bytes.NewReader(main), int64(len(main)),
-			binary.BigEndian.Uint32(main[28:32]), windowsCatalogSeedMaxSize)
+			binary.BigEndian.Uint32(main[28:32]), windowsStoreImageLimit(store.main))
 		if err != nil || image != authority.head.Image || hex.EncodeToString(image.SHA256[:]) != proofs[i].LogicalSHA256 {
 			return errors.Join(ErrStateChanged, err)
 		}

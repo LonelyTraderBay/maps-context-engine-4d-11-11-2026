@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
 )
 
 func testPackagedWindowsIndex(t *testing.T, ctx context.Context, bin, installation, target, worktree, profile string) {
@@ -106,6 +109,9 @@ func testPackagedWindowsIndex(t *testing.T, ctx context.Context, bin, installati
 	if err := json.Unmarshal(result, &status); err != nil || status.Status != "ok" || status.Data.IndexState != "published" ||
 		len(status.Scope.Members) != 1 || status.Scope.Members[0].WorktreeID != worktree || status.Scope.Members[0].ProfileID != profile {
 		t.Fatalf("published Windows scope: %s, %v", result, err)
+	}
+	if os.Getenv("MCE4D_WIN_EXPLORER_FIXTURE") == "1" {
+		testPackagedWindowsExplorer(t, ctx, bin, installation, status.Scope, source)
 	}
 	verification := `{"verify":"workspace"}`
 	if checked := query("status", verification); !bytes.Contains(checked, []byte(`"status":"observed_current"`)) {
@@ -201,6 +207,16 @@ func testPackagedWindowsIndex(t *testing.T, ctx context.Context, bin, installati
 	t.Log("real CLI cursor survived an ordinary restart but was refused after restoring its published index with the same key and generation")
 	scopedWindowsToken(t, ctx, installation, worktree, profile, "reject", resultToken)
 	t.Log("signed rename spool opened across real NTFS processes and rejected the earlier result token after authenticated worktree restore")
+	if driver := os.Getenv("MCE4D_WIN_EXPLORER_DRIVER"); driver != "" {
+		t.Run("GoExplorerAutoWatch", func(t *testing.T) {
+			member := restored.Scope.Members[0]
+			if goRoot := os.Getenv("MCE4D_WIN_GO_TYPED_WATCH_GOROOT"); goRoot != "" {
+				member = registerWindowsGoTypedWatchProfile(t, ctx, bin, installation, worktree, profile, goRoot)
+			}
+			testPackagedWindowsGoExplorerWatch(t, ctx, bin, installation, target, member,
+				windowsLanguageSource{"marker.go", "PublishMarker", source}, driver)
+		})
+	}
 	testPackagedWindowsWatch(t, ctx, bin, installation, worktree, profile, changedPath, unchangedText)
 	if raw := query("locate", `{"mode":"symbol","query":"WatchMarker","limit":4}`); !bytes.Contains(raw, []byte("WatchMarker")) {
 		t.Fatalf("last watch generation did not survive process exit: %s", raw)
@@ -209,6 +225,176 @@ func testPackagedWindowsIndex(t *testing.T, ctx context.Context, bin, installati
 		t.Fatalf("writer did not release its lease after watch exited: %s", out)
 	}
 	t.Log("foreground watch published an untracked edit and the next CLI process reused its generation")
+}
+
+func registerWindowsGoTypedWatchProfile(t *testing.T, ctx context.Context, bin, installation, worktree, syntaxProfile, goRoot string) model.ScopeMember {
+	t.Helper()
+	proof, err := runtime.InspectGoToolchain(ctx, goRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolchain := proof.Digest()
+	if err := proof.Close(); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(bin, "mce4d.exe")
+	image, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := &model.GoProfile{
+		SchemaVersion: 1, Language: "go", Goos: "windows", Goarch: "amd64", BuildTags: []string{},
+		ModuleRoots: []string{"."}, ModuleMode: "readonly", AnalysisMode: "typed_when_available", DependencyRoots: []string{},
+		ToolchainDigest: toolchain, ProviderDigest: fmt.Sprintf("%x", sha256.Sum256(image)),
+	}
+	id, err := model.ProfileDigest(profile, 32768)
+	if err != nil || id == syntaxProfile {
+		t.Fatalf("invalid typed profile identity: %v", err)
+	}
+	run := func(input []byte, args ...string) []byte {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, executable, args...)
+		cmd.Env = append(os.Environ(), "MCE4D_HOME="+installation, "MCE4D_WINDOWS_ROLE_IPC=1")
+		cmd.Stdin = bytes.NewReader(input)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("typed profile command %q: %v: %s", args[0], err, out)
+		}
+		return out
+	}
+	raw, err := json.Marshal(model.ProfileAdminRequest{WorktreeID: worktree, ProfileName: "go-explorer-typed", Profile: profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registered struct{ Data model.ProfileAdminData }
+	if out := run(raw, "profile", "set", "--worktree-id", worktree, "--input-json", "-"); json.Unmarshal(out, &registered) != nil ||
+		registered.Data.ProfileID != id || registered.Data.WorktreeID != worktree {
+		t.Fatalf("typed profile registration disagreed with the digest: %s", out)
+	}
+	flags := []string{"--worktree-id", worktree, "--profile-id", id}
+	if out := run(nil, append([]string{"index"}, flags...)...); !bytes.Contains(out, []byte("syntax partial")) {
+		t.Fatalf("expected the documented Windows Go fallback: %s", out)
+	}
+	var status struct {
+		Data  model.StatusData
+		Scope model.ScopeVector
+	}
+	out := run([]byte("{}"), append(flags, "query", "status", "--input-json", "-")...)
+	if json.Unmarshal(out, &status) != nil || status.Data.IndexState != "published" || len(status.Scope.Members) != 1 ||
+		status.Scope.Members[0].WorktreeID != worktree || status.Scope.Members[0].ProfileID != id ||
+		!model.ValidUUID(status.Scope.Members[0].GenerationID) {
+		t.Fatalf("typed profile did not reopen its published generation: %s", out)
+	}
+	t.Logf("Go profile typed_when_available %s, toolchain %s, effective Windows index syntax partial", id, toolchain)
+	return status.Scope.Members[0]
+}
+
+func testPackagedWindowsGoExplorerWatch(t *testing.T, parent context.Context, bin, installation, target string,
+	member model.ScopeMember, baseline windowsLanguageSource, driver string) {
+	t.Helper()
+	ctx, stop := context.WithTimeout(parent, 90*time.Second)
+	defer stop()
+	flags := []string{"--worktree-id", member.WorktreeID, "--profile-id", member.ProfileID}
+	command := func(args ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, filepath.Join(bin, "mce4d.exe"), args...)
+		cmd.Env = append(os.Environ(), "MCE4D_HOME="+installation, "MCE4D_WINDOWS_ROLE_IPC=1")
+		return cmd
+	}
+	verify := startWindowsExplorerWatchBrowser(t, ctx, bin, installation, member.WorktreeID, member.ProfileID, driver)
+	generation := member.GenerationID
+	verify("initial", generation, []windowsLanguageSource{baseline}, nil)
+	before := powerShellFixtureHashes(t, target)
+
+	watch := command(append([]string{"watch"}, flags...)...)
+	var stdout bytes.Buffer
+	watch.Stdout = &stdout
+	stderr, err := watch.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := watch.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		stop()
+		_ = watch.Wait()
+		if stdout.Len() != 0 {
+			t.Error("Watch wrote progress to stdout")
+		}
+	})
+	lines := bufio.NewScanner(stderr)
+	await := func(action string) {
+		t.Helper()
+		for lines.Scan() {
+			fields := strings.Fields(lines.Text())
+			if len(fields) != 8 || fields[0] != "mce4d:" || fields[4] != "generation" ||
+				fields[6] != "syntax" || fields[7] != "partial" {
+				t.Fatalf("unexpected Go Watch result: %s", lines.Text())
+			}
+			id := strings.TrimSuffix(fields[5], ";")
+			if fields[1] == "unchanged" && id == generation {
+				if action == "unchanged" {
+					return
+				}
+				continue
+			}
+			if fields[1] == action && action == "indexed" && id != generation && model.ValidUUID(id) {
+				generation = id
+				return
+			}
+			t.Fatalf("unexpected Go Watch generation while awaiting %s: %s", action, lines.Text())
+		}
+		t.Fatalf("Go Watch stopped while awaiting %s: %v", action, lines.Err())
+	}
+	check := func(phase string, present, absent []windowsLanguageSource) {
+		t.Helper()
+		await("indexed")
+		cmd := command(append(append([]string{}, flags...), "query", "status", "--input-json", "-")...)
+		cmd.Stdin = strings.NewReader("{}")
+		raw, err := cmd.Output()
+		var status struct {
+			Data  model.StatusData
+			Scope model.ScopeVector
+		}
+		if err != nil || json.Unmarshal(raw, &status) != nil || status.Data.IndexState != "published" ||
+			len(status.Scope.Members) != 1 || status.Scope.Members[0].WorktreeID != member.WorktreeID ||
+			status.Scope.Members[0].ProfileID != member.ProfileID || status.Scope.Members[0].GenerationID != generation {
+			t.Fatalf("CLI status differs from Go Watch generation %s: %v", generation, err)
+		}
+		verify(phase, generation, append([]windowsLanguageSource{baseline}, present...), absent)
+	}
+	const path, name = "watch_explorer.go", "ExplorerWatchMarker"
+	const prefix = "package fixture\r\n// 🗺 café\r\nfunc " + name + "() string { return "
+	first := windowsLanguageSource{path, name, prefix + "\"A\" }\r\n"}
+	edited := windowsLanguageSource{path, name, prefix + "\"B\" }\r\n"}
+	file := filepath.Join(target, path)
+	await("unchanged")
+	if err := os.WriteFile(file, []byte(first.body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	check("add", []windowsLanguageSource{first}, nil)
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(edited.body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(file, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := os.Stat(file); err != nil || changed.Size() != info.Size() || !changed.ModTime().Equal(info.ModTime()) {
+		t.Fatalf("Go edit must preserve size and mtime: %v", err)
+	}
+	check("edit", []windowsLanguageSource{edited}, nil)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	check("delete", nil, []windowsLanguageSource{edited})
+	if !maps.Equal(before, powerShellFixtureHashes(t, target)) {
+		t.Fatal("Go Watch altered the fixture source or Git metadata")
+	}
+	t.Log("Go Explorer fixture observed add/edit/delete, preserved file size and mtime on edit, and restored source/Git hashes")
 }
 
 func testPackagedWindowsWatch(t *testing.T, ctx context.Context, bin, installation, worktree, profile, path, oldText string) {

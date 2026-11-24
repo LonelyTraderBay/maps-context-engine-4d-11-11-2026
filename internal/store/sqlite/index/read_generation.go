@@ -2,10 +2,12 @@ package index
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/policy"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 )
 
@@ -22,12 +24,45 @@ type GenerationObservation struct {
 	State          string
 }
 
+type generationManifestProof struct {
+	generation GenerationObservation
+	rawDigest  [sha256.Size]byte
+	minBytes   int
+}
+
 // ReadGeneration resolves an active generation once, or checks an explicitly
 // pinned published generation. It validates the immutable captured manifest
 // and checks actor/policy and lifecycle both before and after that read. The
 // caller must authorize the scope before invoking it and recheck catalog and
 // records independently before returning any result.
-func (s *Store) ReadGeneration(ctx context.Context, profileID, generationID string, authorize GenerationAuthorizer, maxManifestBytes int) (output GenerationObservation, resultErr error) {
+func (s *Store) ReadGeneration(ctx context.Context, profileID, generationID string, authorize GenerationAuthorizer, maxManifestBytes int) (GenerationObservation, error) {
+	return s.readGeneration(ctx, profileID, generationID, authorize, maxManifestBytes, nil)
+}
+
+// ReadGenerationWithCoverage reads the published summary when the observation
+// matches, under the same transaction, authorization and lease.
+func (s *Store) ReadGenerationWithCoverage(ctx context.Context, profileID, generationID string, authorize GenerationAuthorizer,
+	maxManifestBytes, maxCoverageBytes int, scanner *policy.Scanner, matches func(GenerationObservation) bool) (GenerationObservation, model.Coverage, error) {
+	if scanner == nil || matches == nil || maxCoverageBytes < 1 || maxCoverageBytes > 16<<20 {
+		return GenerationObservation{}, model.Coverage{}, ErrInvalidStore
+	}
+	var coverage model.Coverage
+	generation, err := s.readGeneration(ctx, profileID, generationID, authorize, maxManifestBytes, func(tx *sql.Tx, value GenerationObservation) error {
+		if !matches(value) {
+			return nil
+		}
+		observed, _, err := readPublishedCoverage(ctx, tx, value.GenerationID, value.State, scanner, maxCoverageBytes)
+		coverage = observed
+		return err
+	})
+	if err != nil {
+		return GenerationObservation{}, model.Coverage{}, err
+	}
+	return generation, coverage, nil
+}
+
+func (s *Store) readGeneration(ctx context.Context, profileID, generationID string, authorize GenerationAuthorizer,
+	maxManifestBytes int, readCoverage func(*sql.Tx, GenerationObservation) error) (output GenerationObservation, resultErr error) {
 	if ctx == nil || !s.readable() || !validHash(profileID) || generationID != "" && !validUUID(generationID) || authorize == nil || maxManifestBytes < 1 || maxManifestBytes > 64*1024*1024 {
 		return GenerationObservation{}, ErrInvalidStore
 	}
@@ -96,9 +131,14 @@ func (s *Store) ReadGeneration(ctx context.Context, profileID, generationID stri
 	if int64(len(raw)) != manifestLength {
 		return GenerationObservation{}, ErrCaptureMismatch
 	}
-	manifest, err := model.DecodeCaptureManifestJSON(raw, maxManifestBytes)
-	if err != nil || model.VerifyCaptureDigest(manifest, maxManifestBytes) != nil || manifest.WorktreeID != identity.WorktreeID || manifest.ProfileID != profileID || manifest.PolicyDigest != value.PolicyDigest || manifest.ProviderDigest != value.ProviderDigest || manifest.SnapshotDigest != value.SnapshotDigest {
-		return GenerationObservation{}, errors.Join(ErrCaptureMismatch, err)
+	value.Identity, value.ProfileID = identity, profileID
+	if err := s.verifyGenerationManifest(raw, value, maxManifestBytes); err != nil {
+		return GenerationObservation{}, err
+	}
+	if readCoverage != nil {
+		if err := readCoverage(tx, value); err != nil {
+			return GenerationObservation{}, err
+		}
 	}
 	if err := authorize(ctx, identity.WorktreeID, profileID, value.PolicyDigest, value.PolicyEpoch); err != nil {
 		return GenerationObservation{}, err
@@ -109,6 +149,27 @@ func (s *Store) ReadGeneration(ctx context.Context, profileID, generationID stri
 	if err := ctx.Err(); err != nil {
 		return GenerationObservation{}, err
 	}
-	value.Identity, value.ProfileID = identity, profileID
 	return value, nil
+}
+
+// Reuse only the validation of identical manifest bytes. The live transaction,
+// store identity, lease, and both authorizer calls are checked on every read.
+func (s *Store) verifyGenerationManifest(raw []byte, value GenerationObservation, maxBytes int) error {
+	sum := sha256.Sum256(raw)
+	if proof := s.manifestProof.Load(); proof != nil && proof.generation == value &&
+		proof.rawDigest == sum && proof.minBytes <= maxBytes {
+		return nil
+	}
+	manifest, err := model.DecodeCaptureManifestJSON(raw, maxBytes)
+	if err != nil {
+		return errors.Join(ErrCaptureMismatch, err)
+	}
+	digest, minBytes, err := model.ComputeCaptureDigestAndSize(manifest, maxBytes)
+	if err != nil || digest != manifest.SnapshotDigest || manifest.WorktreeID != value.Identity.WorktreeID ||
+		manifest.ProfileID != value.ProfileID || manifest.PolicyDigest != value.PolicyDigest ||
+		manifest.ProviderDigest != value.ProviderDigest || manifest.SnapshotDigest != value.SnapshotDigest {
+		return ErrCaptureMismatch
+	}
+	s.manifestProof.Store(&generationManifestProof{generation: value, rawDigest: sum, minBytes: max(len(raw), minBytes)})
+	return nil
 }

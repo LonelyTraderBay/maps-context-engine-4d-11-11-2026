@@ -20,14 +20,20 @@ var (
 )
 
 type RevalidateRequest struct {
-	Inventory          inventory.LocalInventoryRequest
-	Expected           inventory.FileMap
-	Snapshot           *snapshot.Snapshot
-	MaxManifestBytes   int
-	MaxFileBytes       int
-	MaxSourceBytes     int64
-	VerifyAuthority    func(context.Context, model.CaptureManifest) error
-	VerifyDependencies func(context.Context, []string) error
+	Inventory inventory.LocalInventoryRequest
+	Expected  inventory.FileMap
+	Snapshot  *snapshot.Snapshot
+	// MatchManifestInventory uses the first live file map after matching its
+	// input digest to the pinned capture. Only the read-only verifier uses it.
+	MatchManifestInventory bool
+	MaxManifestBytes       int
+	MaxFileBytes           int
+	MaxSourceBytes         int64
+	// AuthorizeSourceRoot is an optional live root proof for each file
+	// read in an observation. Inventory and publication use AuthorizeRoot.
+	AuthorizeSourceRoot func(context.Context) error
+	VerifyAuthority     func(context.Context, model.CaptureManifest) error
+	VerifyDependencies  func(context.Context, []string) error
 }
 
 // RevalidateLocal re-inventories an authorized local worktree, hashes every
@@ -35,6 +41,10 @@ type RevalidateRequest struct {
 // observed stability only for this bounded interval, not an atomic filesystem
 // snapshot. The coordinator must hold the worktree writer lease throughout.
 func RevalidateLocal(ctx context.Context, request RevalidateRequest) error {
+	if request.MatchManifestInventory {
+		return ErrSnapshotUnverifiable
+	}
+	request.AuthorizeSourceRoot = nil
 	return ObserveCapturedLocal(ctx, request)
 }
 
@@ -50,6 +60,10 @@ func ObserveCapturedLocal(ctx context.Context, request RevalidateRequest) error 
 
 // RevalidateLinked applies the same checks to a verified linked-worktree root.
 func RevalidateLinked(ctx context.Context, request RevalidateRequest, binding *runtime.LinkedGitMetadata, common *paths.Root) error {
+	if request.MatchManifestInventory {
+		return ErrSnapshotUnverifiable
+	}
+	request.AuthorizeSourceRoot = nil
 	return ObserveCapturedLinked(ctx, request, binding, common)
 }
 
@@ -77,7 +91,7 @@ func revalidate(ctx context.Context, request RevalidateRequest, observe func(con
 		return ErrSnapshotUnverifiable
 	}
 	expected := copyFileMap(request.Expected)
-	if len(expected.Entries) != len(manifest.Files) {
+	if !request.MatchManifestInventory && len(expected.Entries) != len(manifest.Files) {
 		return ErrSnapshotChanged
 	}
 	if err := request.VerifyAuthority(ctx, request.Snapshot.Manifest()); err != nil {
@@ -90,7 +104,12 @@ func revalidate(ctx context.Context, request RevalidateRequest, observe func(con
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(first, expected) {
+	if request.MatchManifestInventory {
+		if len(manifest.DependencyInputDigests) != 1 || first.InputDigest != manifest.DependencyInputDigests[0] || len(first.Entries) != len(manifest.Files) {
+			return ErrSnapshotChanged
+		}
+		expected = first
+	} else if !reflect.DeepEqual(first, expected) {
 		return ErrSnapshotChanged
 	}
 	if err := verifyCapturedFiles(ctx, request, manifest, expected); err != nil {
@@ -129,6 +148,10 @@ func revalidate(ctx context.Context, request RevalidateRequest, observe func(con
 }
 
 func verifyCapturedFiles(ctx context.Context, request RevalidateRequest, manifest model.CaptureManifest, expected inventory.FileMap) error {
+	source := request.Inventory
+	if request.AuthorizeSourceRoot != nil {
+		source.AuthorizeRoot = request.AuthorizeSourceRoot
+	}
 	var total int64
 	for i, item := range manifest.Files {
 		if err := ctx.Err(); err != nil {
@@ -151,7 +174,7 @@ func verifyCapturedFiles(ctx context.Context, request RevalidateRequest, manifes
 			return ErrSnapshotUnverifiable
 		}
 		total += *item.ByteLength
-		authorize := func(ctx context.Context, name string) error { return authorizeSource(ctx, request.Inventory, name) }
+		authorize := func(ctx context.Context, name string) error { return authorizeSource(ctx, source, name) }
 		current, err := inventory.CaptureFile(ctx, request.Inventory.Root, request.Inventory.Scanner, item.Path, request.MaxFileBytes, authorize)
 		if err != nil {
 			return err

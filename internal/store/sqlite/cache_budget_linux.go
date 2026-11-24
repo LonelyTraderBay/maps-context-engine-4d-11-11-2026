@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/ports"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/runtime"
@@ -24,12 +25,32 @@ const defaultWorktreeCacheBytes int64 = 2 << 30
 // cacheBudget serializes derived-cache growth, not readers or the long job
 // writer lease. It is cooperative engine authority, not a filesystem quota.
 type cacheBudget struct {
-	owner *ProtectedWorktreeOwner
-	gate  *stateDomain
-	limit int64
+	authorize func(context.Context) error
+	root      *paths.Root
+	worktree  string
+	gate      *stateDomain
+	limit     int64
 }
 
 type cacheUsage struct{ other, main, wal, shm int64 }
+
+func (o *ProtectedWorktreeOwner) InspectCacheUsage(ctx context.Context) (model.LocalCacheUsage, error) {
+	if err := o.check(ctx); err != nil {
+		return model.LocalCacheUsage{}, err
+	}
+	if o.quota == nil {
+		return model.LocalCacheUsage{}, ErrCacheCapacity
+	}
+	usage, err := observeCacheUsage(ctx, o.domain.root, 9007199254740991)
+	if err != nil {
+		return model.LocalCacheUsage{}, err
+	}
+	if err := o.check(ctx); err != nil {
+		return model.LocalCacheUsage{}, err
+	}
+	return model.LocalCacheUsage{WorktreeID: o.manifest.WorktreeID, LimitBytes: o.quota.limit,
+		IndexBytes: usage.main, WALBytes: usage.wal, SHMBytes: usage.shm, OtherBytes: usage.other}, nil
+}
 
 // No ordinary descriptor is opened for a database inode: even closing an
 // innocent read descriptor could release this process's native POSIX locks.
@@ -165,13 +186,13 @@ func cacheCharge(usage cacheUsage, image walLogicalImage, commitPages, extra, li
 }
 
 func (q *cacheBudget) check(ctx context.Context, image walLogicalImage, commitPages, extra int64) error {
-	if q == nil || q.owner == nil || q.gate == nil || q.limit < 1 {
+	if q == nil || q.authorize == nil || q.root == nil || q.gate == nil || q.limit < 1 {
 		return ErrStateUnsafe
 	}
-	if err := q.owner.check(ctx); err != nil {
+	if err := q.authorize(ctx); err != nil {
 		return err
 	}
-	usage, err := observeCacheUsage(ctx, q.owner.domain.root, q.limit)
+	usage, err := observeCacheUsage(ctx, q.root, q.limit)
 	if err != nil {
 		return err
 	}
@@ -180,13 +201,13 @@ func (q *cacheBudget) check(ctx context.Context, image walLogicalImage, commitPa
 }
 
 func (q *cacheBudget) acquire(ctx context.Context) (*runtime.Lifecycle, error) {
-	if err := q.owner.check(ctx); err != nil {
+	if err := q.authorize(ctx); err != nil {
 		return nil, err
 	}
 	if err := q.gate.Check(ctx); err != nil {
 		return nil, err
 	}
-	return runtime.AcquireLifecycle(ctx, q.gate.root, q.owner.manifest.WorktreeID, ports.ExclusiveLease, 5*time.Second)
+	return runtime.AcquireLifecycle(ctx, q.gate.root, q.worktree, ports.ExclusiveLease, 5*time.Second)
 }
 
 // CacheReservation keeps the cross-process growth gate and the DB lifecycle
@@ -207,7 +228,7 @@ func (r *CacheReservation) Check(ctx context.Context) error {
 	if r.closed {
 		return ErrOwnerClosed
 	}
-	if err := r.gate.Check(ctx, r.quota.owner.manifest.WorktreeID, ports.ExclusiveLease); err != nil {
+	if err := r.gate.Check(ctx, r.quota.worktree, ports.ExclusiveLease); err != nil {
 		return err
 	}
 	return r.quota.check(ctx, r.image, 0, 0)

@@ -144,24 +144,14 @@ func (b *CoreBackend) contextPlan(ctx context.Context, principal app.CorePrincip
 		return nil, app.ErrCoreLimit
 	}
 	if options.DeliveryMode == "cli" {
-		retention, err := b.cliPlanRetention(principal)
+		retention, err := b.cliPlanRetention(principal, graph)
 		if err != nil {
 			return nil, coreStoreError(err)
 		}
-		handle, err := retention.Save(ctx, pack, principal.Digest, principal.ID, raw, baseGuard)
-		if err != nil || handle == nil || handle.Token() != token {
-			if err == nil {
-				err = app.ErrValidationAuthority
-			}
+		page, err := retention.SaveFirst(ctx, pack, principal.Digest, principal.ID, raw, baseGuard, packPageOptions(options))
+		if err != nil {
 			return nil, coreStoreError(err)
 		}
-		page, err := handle.First(ctx, packPageOptions(options))
-		if err != nil {
-			guarded, _ := app.GuardOversizedError(err, handle.Recheck, nil)
-			return nil, coreStoreError(guarded)
-		}
-		// First checked installed bytes and full declaration/source authority
-		// after preparing this private page. No callback runs before return.
 		return page.Blocks, nil
 	}
 	if err := b.packCache.AdmitRetained(ctx, pack, token, principal.Digest, baseGuard, int64(len(extra))+providerBytes); err != nil {

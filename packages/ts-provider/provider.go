@@ -30,7 +30,11 @@ type Installation struct {
 // New binds the exact worker and compiler installation to an explicit S43
 // profile. The returned profile can be hashed into the capture before Analyze.
 func New(installation Installation, configs []string, mode string) (*providers.NodeProvider, *model.TSProfile, error) {
-	return newProvider(installation, configs, mode, nil)
+	var embedded []byte
+	if installation.Worker == "" {
+		embedded = workerArtifact
+	}
+	return newProvider(installation, configs, mode, embedded)
 }
 
 // NewFrontend selects the pinned worker with the frontend adapter included.

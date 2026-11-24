@@ -30,6 +30,19 @@ type Binding struct {
 	Policy             model.PolicyConfig
 	ProfileID          string
 	Profile            *model.GoProfile
+	AddonProfile       model.EffectiveProfile
+}
+
+func (b Binding) EffectiveProfile() model.EffectiveProfile {
+	if b.Profile != nil {
+		return b.Profile
+	}
+	return b.AddonProfile
+}
+
+func (b Binding) ProviderDigest() string {
+	_, digest := profileFingerprints(b.EffectiveProfile())
+	return digest
 }
 
 // BindingAuthorizer verifies actor and scope; it must not acquire a conflicting
@@ -93,10 +106,14 @@ func readBindingRow(ctx context.Context, tx *sql.Tx, incarnation, worktreeID, pr
 	}
 	result.Profile, _ = profile.(*model.GoProfile)
 	if result.Profile == nil {
+		result.AddonProfile = profile
+	}
+	wantToolchain, wantProvider := profileFingerprints(profile)
+	if wantProvider == "" {
 		return ErrUnsupportedProfile
 	}
-	digest, err := model.ProfileDigest(result.Profile, maxAdminBytes)
-	if err != nil || digest != profileID || result.Profile.ToolchainDigest != toolchain || result.Profile.ProviderDigest != provider {
+	digest, err := model.ProfileDigest(profile, maxAdminBytes)
+	if err != nil || digest != profileID || wantToolchain != toolchain || wantProvider != provider {
 		return errors.Join(ErrUnrecognizedStore, err)
 	}
 	if err := authorize(ctx, worktreeID, profileID); err != nil {

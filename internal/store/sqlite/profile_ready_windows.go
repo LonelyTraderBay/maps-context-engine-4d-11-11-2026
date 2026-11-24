@@ -77,7 +77,7 @@ func ActivateWindowsProtectedProfile(ctx context.Context, installation, worktree
 		}
 		return p.Check(ctx)
 	}, 1<<20)
-	if err != nil || g.ProviderDigest != b.Profile.ProviderDigest {
+	if err != nil || g.ProviderDigest != b.ProviderDigest() {
 		return out, errors.Join(ErrProfileIncomplete, err)
 	}
 	dir, err := p.config.directory(ctx)

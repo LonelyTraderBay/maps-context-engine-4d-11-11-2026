@@ -48,7 +48,7 @@ func registerWindowsStagedRepo(ctx context.Context, installation, target string,
 		}
 		defer func() { err = errors.Join(err, root.Close()) }()
 		err = withRoles(m, control, func(checkRoles func() error) (resultErr error) {
-			common, err := runtime.OpenLocalGitMetadata(root)
+			common, linked, err := openWindowsApprovedGitMetadata(root, m.TargetRoots)
 			if err != nil {
 				return err
 			}
@@ -58,7 +58,7 @@ func registerWindowsStagedRepo(ctx context.Context, installation, target string,
 				return err
 			}
 			out, err = runWindowsCatalogTransaction(ctx, control, m, checkRoles, func(store *catalog.Store) (catalog.Registration, error) {
-				return store.Register(ctx, root, common, "", "default", policy, profile)
+				return store.Register(ctx, root, common, linked, "default", policy, profile)
 			})
 			return err
 		})
@@ -81,6 +81,23 @@ func openWindowsApprovedRegistrationRoot(target string, approved []string) (*pat
 		}
 	}
 	return nil, ErrProfileDenied
+}
+
+func openWindowsApprovedGitMetadata(worktree *paths.Root, approved []string) (*paths.Root, string, error) {
+	return runtime.OpenApprovedGitMetadata(worktree, func(name string) (*paths.Root, error) {
+		root, err := openWindowsApprovedRegistrationRoot(name, approved)
+		if err != nil {
+			return nil, err
+		}
+		common, err := runtime.OpenLocalGitMetadata(root)
+		if err := errors.Join(err, root.Close()); err != nil {
+			if common != nil {
+				err = errors.Join(err, common.Close())
+			}
+			return nil, err
+		}
+		return common, nil
+	})
 }
 
 func windowsRegistrationMaterial(ctx context.Context, target string) (policy, profile []byte, resultErr error) {

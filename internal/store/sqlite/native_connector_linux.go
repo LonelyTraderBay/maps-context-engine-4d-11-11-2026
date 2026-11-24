@@ -332,9 +332,17 @@ func (t *nativeTx) finish(commit bool) error {
 	if rollbackUnknown {
 		return errors.Join(errNativeOutcomeUnknown, sqlErr, t.admission.close())
 	}
-	// An error/cancelled capture never ACKs a commit. A later explicit
-	// recoverUnchangedPending may abort only if the prior image is proven.
-	return errors.Join(t.admission.finish(t.ctx, commit, sqlErr), t.admission.close())
+	// database/sql may roll back after the request context has expired.
+	// When SQL confirms the rollback, a bounded cleanup context lets the
+	// owner prove an unchanged image and write ABORT under the held gate.
+	// A failed proof stays pending; the commit path keeps its own deadline.
+	finishCtx := t.ctx
+	if !commit && sqlErr == nil && t.ctx.Err() != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), 5*time.Second)
+		defer cancel()
+		finishCtx = cleanup
+	}
+	return errors.Join(t.admission.finish(finishCtx, commit, sqlErr), t.admission.close())
 }
 
 func (t *nativeTx) checkCacheCommit() error {

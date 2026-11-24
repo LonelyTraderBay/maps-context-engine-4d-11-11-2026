@@ -269,3 +269,62 @@ func (s *nativeWALStore) recoverUnchangedPending(ctx context.Context) (resultErr
 	}
 	return log.Abort(ctx, log.pending.Operation, observed.Image)
 }
+
+// ObserveCatalogReadFence authenticates a catalog head during a full native
+// admission. The returned check does not authorize a SQLite read or supply a
+// binding. A caller must bracket its ordinary binding read with this proof
+// before using the binding to authorize a sequence of source reads.
+func (o *ProtectedState) ObserveCatalogReadFence(ctx context.Context) (func(context.Context) error, error) {
+	if err := o.Check(ctx); err != nil {
+		return nil, err
+	}
+	if o.native == nil || o.native.scope != "catalog" || o.native.name != "catalog.sqlite" {
+		return nil, ErrStateUnsafe
+	}
+	s := o.native
+	a, err := s.admit(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	var identity unix.Stat_t
+	err = unix.Fstat(int(a.head.file.Fd()), &identity)
+	expectedSize, expectedTail, expectedPosition := a.head.size, a.head.chain, a.head.position
+	protected := a.head.protected
+	if err := errors.Join(err, a.close()); err != nil {
+		return nil, err
+	}
+	if expectedSize <= 0 || identity.Size != expectedSize {
+		return nil, ErrStateChanged
+	}
+	return func(ctx context.Context) (resultErr error) {
+		if err := s.check(ctx); err != nil {
+			return err
+		}
+		file, err := s.control.OpenRegular(walHeadName)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, file.Close()) }()
+		verifyIdentity := func() error {
+			var current unix.Stat_t
+			if err := unix.Fstat(int(file.Fd()), &current); err != nil {
+				return err
+			}
+			if current.Dev != identity.Dev || current.Ino != identity.Ino || current.Size != expectedSize {
+				return ErrStateChanged
+			}
+			return ctx.Err()
+		}
+		if err := verifyIdentity(); err != nil {
+			return err
+		}
+		// This is a read-only observation of the same append-only head, with
+		// all normal root, ownership, size, and authenticated tail checks.
+		observation := walHeadAuthority{root: s.control, protected: protected, file: file,
+			size: expectedSize, chain: expectedTail, position: expectedPosition}
+		if err := observation.check(ctx, expectedPosition); err != nil {
+			return err
+		}
+		return verifyIdentity()
+	}, nil
+}

@@ -334,9 +334,9 @@ func TestNativeFencedOwnersFixture(t *testing.T) {
 	if err := write.Rollback(); err != nil {
 		t.Fatal("rollback/receipt", err)
 	}
-	// Cancel after a SQL write: database/sql rolls back on its goroutine. A
-	// cancelled capture leaves pending, then an independent unchanged image
-	// permits explicit ABORT without opening writable SQLite for recovery.
+	// Cancellation triggers database/sql rollback. After independently
+	// observing the unchanged logical image, the owner settles the rollback
+	// under its gate and a fresh reader may open without offline recovery.
 	cancelled, cancel := context.WithCancel(ctx)
 	write, err = writePool.BeginTx(cancelled, nil)
 	if err != nil {
@@ -347,12 +347,9 @@ func TestNativeFencedOwnersFixture(t *testing.T) {
 	}
 	cancel()
 	_ = write.Rollback()
-	if err := indexState.recoverUnchangedPending(ctx); err != nil {
-		t.Fatal("unchanged pending recovery", err)
-	}
 	tx, err := readers.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("cancelled rollback left the writer pending", err)
 	}
 	var count int
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM generations").Scan(&count); err != nil || count != 1 {

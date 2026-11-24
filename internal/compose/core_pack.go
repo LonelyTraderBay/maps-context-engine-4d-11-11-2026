@@ -18,6 +18,41 @@ import (
 const packFactLimit = 8 * 1024 * 1024
 const packSourceLimit int64 = 8 * 1024 * 1024
 
+func (b *CoreBackend) setPackGraphAuthority(request *index.PublishedGraphRequest, principal app.CorePrincipal, config model.PolicyConfig) {
+	member := request.Member
+	checkScopePath := func(worktree, digest string, epoch int64) error {
+		if worktree != member.WorktreeID || digest != member.PolicyDigest || epoch != member.PolicyEpoch {
+			return ErrScopeChanged
+		}
+		return nil
+	}
+	if checkMetadata := b.Authority.CheckMetadataPath; checkMetadata != nil {
+		request.AuthorizeMetadataPath = func(ctx context.Context, worktree, name, digest string, epoch int64) error {
+			if err := checkScopePath(worktree, digest, epoch); err != nil {
+				return err
+			}
+			if err := checkMetadata(name, config.DeniedGlobs); err != nil {
+				return ErrAuthority
+			}
+			return ctx.Err()
+		}
+	}
+	if checkBoundPath := b.Authority.AuthorizeBoundPath; checkBoundPath != nil {
+		request.AuthorizePath = func(ctx context.Context, worktree, name, digest string, epoch int64) error {
+			if err := checkScopePath(worktree, digest, epoch); err != nil {
+				return err
+			}
+			if err := checkBoundPath(ctx, principal, config, name); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return ErrAuthority
+			}
+			return ctx.Err()
+		}
+	}
+}
+
 func (b *CoreBackend) packGuard(principal app.CorePrincipal) contextpack.CursorGuard {
 	return func(ctx context.Context, binding contextpack.CursorBinding) error {
 		if err := b.checkPackPrincipal(ctx, principal, binding); err != nil {
@@ -32,7 +67,8 @@ func (b *CoreBackend) packGuard(principal app.CorePrincipal) contextpack.CursorG
 }
 
 func (b *CoreBackend) checkPackPrincipal(ctx context.Context, principal app.CorePrincipal, binding contextpack.CursorBinding) error {
-	if binding.PrincipalDigest != principal.Digest || binding.BindingDigest != principal.BindingDigest || binding.OrderVersion != "pack-v1" {
+	if binding.PrincipalDigest != principal.Digest || binding.BindingDigest != principal.BindingDigest ||
+		(binding.OrderVersion != "pack-v1" && binding.OrderVersion != contextpack.ExplorePackOrder) {
 		return ErrAuthority
 	}
 	return b.Authority.samePrincipal(ctx, principal)
@@ -146,7 +182,9 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 	default:
 		return nil, app.ErrCoreUnsupported
 	}
-	graph, err := b.Reader.Index.ReadPublishedGraph(ctx, index.PublishedGraphRequest{Member: member, VectorDigest: observation.Vector.VectorDigest, AuthorizeGeneration: authorizeGeneration, AuthorizePath: authorizePath, Scanner: scanner, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFileBytes: int(maxFile), MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000})
+	graphRequest := index.PublishedGraphRequest{Member: member, VectorDigest: observation.Vector.VectorDigest, AuthorizeGeneration: authorizeGeneration, AuthorizePath: authorizePath, Scanner: scanner, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFileBytes: int(maxFile), MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000}
+	b.setPackGraphAuthority(&graphRequest, principal, observation.Binding.Policy)
+	graph, err := b.Reader.Index.ReadPublishedGraph(ctx, graphRequest)
 	if err != nil {
 		return nil, coreStoreError(err)
 	}
@@ -155,7 +193,7 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 		return err
 	}
 	pathAuth := func(ctx context.Context, member model.ScopeMember, name string) error {
-		return authorizePath(ctx, member.WorktreeID, name, member.PolicyDigest, member.PolicyEpoch)
+		return graphRequest.AuthorizePath(ctx, member.WorktreeID, name, member.PolicyDigest, member.PolicyEpoch)
 	}
 	maxNodes := minInt64(b.limits.MaxGraphNodes, 100000)
 	maxEdges := minInt64(b.limits.MaxGraphEdges, 1000000)
@@ -190,7 +228,11 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 	if err != nil {
 		return nil, app.ErrCoreInput
 	}
-	binding := contextpack.CursorBinding{Purpose: "pack", PrincipalDigest: principal.Digest, BindingDigest: principal.BindingDigest, RequestDigest: digest, OrderVersion: "pack-v1", Scope: observation.Vector}
+	order := "pack-v1"
+	if request.TaskKind == "explore" {
+		order = contextpack.ExplorePackOrder
+	}
+	binding := contextpack.CursorBinding{Purpose: "pack", PrincipalDigest: principal.Digest, BindingDigest: principal.BindingDigest, RequestDigest: digest, OrderVersion: order, Scope: observation.Vector}
 	guard := b.packGuard(principal)
 	validation := app.ValidateCapturedInput{Scope: observation.Vector, MaxInputBytes: 65536, MaxManifestBytes: b.Reader.MaxManifestBytes,
 		CurrentScope: func(ctx context.Context) (model.ScopeVector, error) {
@@ -207,7 +249,7 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 			return graph.Snapshot, nil
 		},
 		AuthorizeSource: func(ctx context.Context, requested model.ScopeMember, ref model.SourceRef) error {
-			return pathAuth(ctx, requested, ref.Path)
+			return authorizePath(ctx, requested.WorktreeID, ref.Path, requested.PolicyDigest, requested.PolicyEpoch)
 		},
 	}
 	if b.verifyWorkspace != nil {
@@ -219,7 +261,9 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 		if requested.WorktreeID != member.WorktreeID || requested.GenerationID != member.GenerationID {
 			return snapshot.File{}, ErrAuthority
 		}
-		return inventory.CaptureFile(ctx, b.Reader.WorktreeRoot, scanner, name, int(maxFile), func(ctx context.Context, path string) error { return pathAuth(ctx, requested, path) })
+		return inventory.CaptureFile(ctx, b.Reader.WorktreeRoot, scanner, name, int(maxFile), func(ctx context.Context, path string) error {
+			return authorizePath(ctx, requested.WorktreeID, path, requested.PolicyDigest, requested.PolicyEpoch)
+		})
 	}
 	pack, token, err := app.NewFreshnessPack(ctx, app.FreshnessPackInput{Slice: slice, Codec: b.Cursor, Binding: binding, Guard: guard, RequestJSON: raw, PrincipalID: principal.ID, Validation: validation, CaptureLive: captureLive, ResolvePosition: resolvePosition, RequestLimit: 65536})
 	if err != nil {

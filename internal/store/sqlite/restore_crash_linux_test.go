@@ -21,7 +21,7 @@ func restoreFixtureScope(t *testing.T) (target, worktree, scope string) {
 	switch os.Getenv("MCE4D_RESTORE_FIXTURE_TARGET") {
 	case "catalog":
 		return "catalog", "", "catalog"
-	case "worktree":
+	case "worktree", "rebuild":
 		return "worktree", ownerWorktree, ownerWorktree
 	default:
 		t.Fatal("missing synthetic restore target")
@@ -62,18 +62,24 @@ func TestProtectedRestoreCreateBackupFixture(t *testing.T) {
 
 func TestProtectedRestoreCrashFixture(t *testing.T) {
 	ctx, root := profileCatalogFixture(t, false)
-	_, _, scope := restoreFixtureScope(t)
+	_, worktree, scope := restoreFixtureScope(t)
 	point := os.Getenv("MCE4D_RESTORE_FIXTURE_BOUNDARY")
 	if point == "" {
 		t.Fatal("missing synthetic stop boundary")
 	}
-	_, err := restoreProtectedStore(ctx, root, filepath.Join(restoreFixtureOutput(root, scope), "backup.json"), true, time.Second, func(current string) {
+	stop := func(current string) {
 		if current == point {
 			fmt.Println("RESTORE_FIXTURE_CONTROLLER_SIGKILL", current)
 			_ = unix.Kill(unix.Getpid(), unix.SIGKILL)
 			select {}
 		}
-	})
+	}
+	var err error
+	if os.Getenv("MCE4D_RESTORE_FIXTURE_TARGET") == "rebuild" {
+		_, err = rebuildProtectedIndex(ctx, root, worktree, true, time.Second, stop)
+	} else {
+		_, err = restoreProtectedStore(ctx, root, filepath.Join(restoreFixtureOutput(root, scope), "backup.json"), true, time.Second, stop)
+	}
 	t.Fatalf("restore did not reach %s: %v", point, err)
 }
 
@@ -106,7 +112,12 @@ func TestProtectedRestoreFinishFixture(t *testing.T) {
 		t.Fatal("recovery did not require confirmation")
 	}
 	out, err := RecoverProtectedStore(ctx, root, target, worktree, true, time.Second)
-	if err != nil || out.OperationID != before.OperationID || out.Outcome != "restored" || len(out.CompletedSteps) != len(maintenanceSteps(target)) {
+	steps := len(maintenanceSteps(target))
+	rebuilding := os.Getenv("MCE4D_RESTORE_FIXTURE_TARGET") == "rebuild"
+	if rebuilding {
+		steps = 4
+	}
+	if err != nil || out.OperationID != before.OperationID || out.Outcome != "restored" || len(out.CompletedSteps) != steps {
 		t.Fatalf("restore %+v: %v", out, err)
 	}
 	r, err := paths.OpenRoot(root)
@@ -128,7 +139,10 @@ func TestProtectedRestoreFinishFixture(t *testing.T) {
 	if err != nil || !present || j.Phase != "VERIFIED" {
 		t.Fatalf("final journal: %v", err)
 	}
-	for i, step := range layout.exchanges(target) {
+	if rebuilding && (j.IndexRebuild == nil || layout.checkPreservedRecords(ctx, &j) != nil) {
+		t.Fatal("rebuild did not preserve records")
+	}
+	for i, step := range layout.exchanges(j) {
 		swapped, err := layout.restorePairState(ctx, step, j.Files[i])
 		if err != nil || !swapped {
 			t.Fatalf("rollback pair %s: %v", step.step, err)
@@ -169,7 +183,13 @@ func TestProtectedRestoreServingFixture(t *testing.T) {
 	if err != nil || !present || j.Phase != "VERIFIED" {
 		t.Fatalf("recovered journal: %v", err)
 	}
-	for i, store := range o.stores {
+	if j.IndexRebuild != nil {
+		if _, err := o.authenticatedImage(ctx, o.stores[1]); err != nil || o.manifest.RecordsIncarnation != j.IndexRebuild.RecordsIncarnation {
+			t.Fatalf("preserved records proof: %v", err)
+		}
+	}
+	for i := range j.NewStores {
+		store := o.stores[i]
 		image, err := o.authenticatedImage(ctx, store)
 		if err != nil || fmt.Sprintf("%x", image.SHA256) != j.NewStores[i].LogicalSHA256 {
 			t.Fatalf("new WAL receipt: %v", err)

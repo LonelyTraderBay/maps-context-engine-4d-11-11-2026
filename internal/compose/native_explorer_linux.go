@@ -41,7 +41,7 @@ func openNativeExplorer(ctx context.Context, installation, selected, worktree, p
 		BearerTTL:    time.Duration(native.effective.Explorer.BearerTtlSeconds) * time.Second}
 	profileConfig := native.scope.binding.Profile
 	if _, approved := nativeRenameExecutable(native.scope.binding.Policy, "go"); approved &&
-		profileConfig.AnalysisMode == "typed_when_available" && !profileConfig.TestsEnabled && !profileConfig.CgoEnabled {
+		profileConfig != nil && profileConfig.AnalysisMode == "typed_when_available" && !profileConfig.TestsEnabled && !profileConfig.CgoEnabled {
 		reader.staticFlow = native.scope.projectStaticFlow
 		options.StaticFlow = true
 	}

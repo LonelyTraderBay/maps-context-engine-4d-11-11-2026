@@ -221,7 +221,7 @@ func openProtectedWorktree(ctx context.Context, rootPath, worktree string, autho
 	if err != nil {
 		return nil, err
 	}
-	o.quota = &cacheBudget{owner: o, gate: quotaRoot, limit: cacheBytes}
+	o.quota = &cacheBudget{authorize: o.check, root: o.domain.root, worktree: worktree, gate: quotaRoot, limit: cacheBytes}
 	o.stores[0].quota = o.quota
 	if recoverPending {
 		for _, store := range o.stores {

@@ -27,6 +27,7 @@ func main() {
 			return cli.ProbeDefaultReadOnlyConfig(ctx, configPath, cpus)
 		}}
 	configureNativeDependencies(&deps)
+	configureBenchmark(&deps)
 	code := cli.Run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, deps)
 	cancel()
 	os.Exit(code)

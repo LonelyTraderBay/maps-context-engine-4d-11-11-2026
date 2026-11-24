@@ -11,6 +11,10 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 )
 
+// ExplorePackOrder gives verified outgoing calls from the selected symbol
+// precedence in newly materialized explore packs.
+const ExplorePackOrder = "pack-v2"
+
 // PagedPack is a bounded, process-local materialization. Losing it requires a
 // new pack; callers must never resolve a continuation against a newer snapshot.
 // The application owner must bound the number and lifetime of such instances.
@@ -90,7 +94,17 @@ func NewPagedPack(ctx context.Context, slice *TaskSlice, codec *CursorCodec, bin
 	}
 	ordered := append([]TaskEvidence{}, report.Items...)
 	ordered = append(ordered, TaskEvidence{ID: planID, Kind: "validation_obligation", RequiredForReview: true, Why: "validation_plan", Plane: "annotation", Trust: "derived_data", SourceRefs: []model.SourceRef{}, Content: &planText})
-	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].RequiredForReview && !ordered[j].RequiredForReview })
+	preferCalls := binding.OrderVersion == ExplorePackOrder && report.TaskKind == "explore"
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if preferCalls {
+			a := isTargetDirectCall(ordered[i], report.Target.SymbolID)
+			b := isTargetDirectCall(ordered[j], report.Target.SymbolID)
+			if a != b {
+				return a
+			}
+		}
+		return ordered[i].RequiredForReview && !ordered[j].RequiredForReview
+	})
 	unique := make([]TaskEvidence, 0, len(ordered))
 	seen := make(map[string]string, len(ordered))
 	for _, item := range ordered {
@@ -117,6 +131,13 @@ func NewPagedPack(ctx context.Context, slice *TaskSlice, codec *CursorCodec, bin
 		return nil, "", err
 	}
 	return p, p.token, nil
+}
+
+func isTargetDirectCall(item TaskEvidence, target string) bool {
+	ref := item.Reference
+	return item.Kind == "reference_catalog" && ref != nil && ref.Classification == "static" &&
+		ref.Relation.Kind == "CALLS_DIRECT" && ref.Relation.EvidenceKind == "type_resolved" &&
+		ref.Relation.SourceSymbolID == target && ref.Relation.TargetSymbolID != nil
 }
 
 func (p *PagedPack) authorize(ctx context.Context, binding CursorBinding) error {
@@ -199,8 +220,11 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 	if !cursorHash(principalDigest) || principalDigest != p.binding.PrincipalDigest {
 		return PackPage{}, ErrAuthority
 	}
-	authorize := func(ctx context.Context, binding CursorBinding) error {
-		if err := p.authorize(ctx, binding); err != nil {
+	authorizeBinding := func(ctx context.Context, binding CursorBinding) error {
+		if p.guard == nil {
+			return ErrAuthority
+		}
+		if err := p.guard(ctx, binding); err != nil {
 			return err
 		}
 		if !first {
@@ -208,7 +232,7 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 		}
 		return nil
 	}
-	packClaims, err := p.codec.Verify(ctx, packToken, p.binding, authorize)
+	packClaims, err := p.codec.Verify(ctx, packToken, p.binding, authorizeBinding)
 	if err != nil {
 		return PackPage{}, err
 	}
@@ -217,11 +241,14 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 	cursorBinding := p.binding
 	cursorBinding.Purpose = "list"
 	if !first {
-		cursorClaims, err = p.codec.Verify(ctx, cursor, cursorBinding, authorize)
+		cursorClaims, err = p.codec.Verify(ctx, cursor, cursorBinding, authorizeBinding)
 		if err != nil {
 			return PackPage{}, err
 		}
 		previous = cursorClaims.Position
+	}
+	if err := p.slice.authorize(ctx); err != nil {
+		return PackPage{}, err
 	}
 	if len(previous.LastKey) != 0 || previous.NextItem > int64(len(p.items)) || previous.NextCoverageGap > int64(len(p.coverage.Gaps)) || previous.NextWarningGap > int64(len(p.report.Gaps)) || previous.NextItem == int64(len(p.items)) && previous.NextByteOffset != 0 {
 		return PackPage{}, ErrCursorInvalid
@@ -345,7 +372,9 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 		if wholeErr == nil {
 			trial := append(append([]model.EvidenceItem{}, items...), candidate)
 			page, finalPosition, err = render(trial, nextPosition, trialCV, trialWV, in.MaxOutputBytes)
-			for errors.Is(err, errOverBudget) && item.RequiredForReview && (trialCV > 0 || trialWV > 0) {
+			preferCall := first && p.binding.OrderVersion == ExplorePackOrder && p.report.TaskKind == "explore" &&
+				isTargetDirectCall(item, p.report.Target.SymbolID)
+			for errors.Is(err, errOverBudget) && (item.RequiredForReview || preferCall) && (trialCV > 0 || trialWV > 0) {
 				if trialWV > 0 {
 					trialWV--
 				} else {
@@ -437,34 +466,43 @@ func (p *PagedPack) page(ctx context.Context, packToken, cursor, principalDigest
 	if err = model.ValidateDeliveredBytes(best.Response.Budget, best.Blocks); err != nil {
 		return PackPage{}, ErrInput
 	}
-	if err = p.codec.Recheck(ctx, packClaims, authorize); err != nil {
-		return PackPage{}, err
-	}
+	claims := []SignedCursor{packClaims}
 	if !first {
-		if err = p.codec.Recheck(ctx, cursorClaims, authorize); err != nil {
-			return PackPage{}, err
-		}
+		claims = append(claims, cursorClaims)
 	}
 	if next := best.Response.Pagination.NextCursor; next != nil {
-		if _, err = p.codec.Verify(ctx, *next, cursorBinding, authorize); err != nil {
+		verified, err := p.codec.AuthenticateBound(ctx, *next, cursorBinding)
+		if err != nil {
 			return PackPage{}, err
 		}
+		claims = append(claims, verified)
+	}
+	recheckPage := func() error {
+		// The tokens name the same immutable selection. Check its live scope,
+		// facts and paths once at this boundary, then recheck each token.
+		if err := p.slice.authorize(ctx); err != nil {
+			return err
+		}
+		for _, token := range claims {
+			if err := p.codec.Recheck(ctx, token, authorizeBinding); err != nil {
+				return err
+			}
+		}
+		for _, token := range claims {
+			if err := p.codec.checkTime(token); err != nil {
+				return err
+			}
+		}
+		return ctx.Err()
+	}
+	if err = recheckPage(); err != nil {
+		return PackPage{}, err
 	}
 	if err = verifyBudgetHost(ctx, in); err != nil {
 		return PackPage{}, err
 	}
-	if err = p.codec.Recheck(ctx, packClaims, authorize); err != nil {
+	if err = recheckPage(); err != nil {
 		return PackPage{}, err
-	}
-	if !first {
-		if err = p.codec.Recheck(ctx, cursorClaims, authorize); err != nil {
-			return PackPage{}, err
-		}
-	}
-	if next := best.Response.Pagination.NextCursor; next != nil {
-		if _, err = p.codec.Verify(ctx, *next, cursorBinding, authorize); err != nil {
-			return PackPage{}, err
-		}
 	}
 	return best, nil
 }

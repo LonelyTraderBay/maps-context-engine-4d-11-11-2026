@@ -30,3 +30,32 @@ func TestStoreRestoreRequiresConfirmedExactSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreRebuildIndexRequiresConfirmedWorktreeAndFourSteps(t *testing.T) {
+	const worktree = "33333333-3333-4333-8333-333333333333"
+	calls := 0
+	deps := Dependencies{CPUs: 1, StoreRebuildIndex: func(_ context.Context, got string, wait time.Duration) (StoreRestoreReport, error) {
+		calls++
+		if got != worktree || wait != 50*time.Millisecond {
+			t.Fatalf("unexpected rebuild selection %s %s", got, wait)
+		}
+		return StoreRestoreReport{
+			OperationID: "44444444-4444-4444-8444-444444444444", Target: "worktree", WorktreeID: got, Outcome: "restored",
+			CompletedSteps: []string{"index_main", "index_journal", "index_head", "worktree_manifest"},
+		}, nil
+	}}
+	for _, args := range [][]string{
+		{"store", "rebuild-index", "--worktree-id", "bad", "--confirm", "--wait-ms", "50"},
+		{"store", "rebuild-index", "--worktree-id", worktree, "--wait-ms", "50"},
+		{"store", "rebuild-index", "--worktree-id", worktree, "--confirm", "--wait-ms", "050"},
+	} {
+		if code := Run(context.Background(), args, io.NopCloser(strings.NewReader("")), io.Discard, io.Discard, deps); code != 2 || calls != 0 {
+			t.Fatalf("%v: exit %d, controller calls %d", args, code, calls)
+		}
+	}
+	args := []string{"store", "rebuild-index", "--worktree-id", worktree, "--confirm", "--wait-ms", "50"}
+	var out bytes.Buffer
+	if code := Run(context.Background(), args, io.NopCloser(strings.NewReader("")), &out, io.Discard, deps); code != 0 || calls != 1 || !strings.Contains(out.String(), "worktree_manifest") || strings.Contains(out.String(), "records_main") {
+		t.Fatalf("exit %d, controller calls %d, output %s", code, calls, out.String())
+	}
+}
