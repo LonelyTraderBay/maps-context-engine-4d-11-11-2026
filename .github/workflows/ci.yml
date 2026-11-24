@@ -96,37 +96,7 @@ jobs:
         env:
           CGO_ENABLED: '0'
           GOPROXY: 'off'
-        run: |
-          $bundle = Join-Path $env:RUNNER_TEMP 'mce-restore-bin'
-          $scratch = Join-Path $env:RUNNER_TEMP 'mce-restore-tmp'
-          New-Item -ItemType Directory -Path $bundle, $scratch | Out-Null
-          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'mce4d.exe') -Destination $bundle
-          go build -trimpath -o (Join-Path $bundle 'state-profile.exe') ./tools/state_profile
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          # Go may use GOTMPDIR for the test process. Keep the AppContainer worker path short.
-          $env:GOTMPDIR = $scratch
-          $env:TEMP = $scratch
-          $env:TMP = $scratch
-          $env:MCE4D_WIN_PACKAGE_FIXTURE = $bundle
-          $fixture = '^TestWindowsPackagedProfileRoleVerification$'
-          $result = go test -v -count=1 -timeout=4m -run $fixture ./tests/integration
-          $testExit = $LASTEXITCODE
-          $result | Write-Output
-          if ($testExit -ne 0) { exit $testExit }
-          foreach ($scope in 'worktree', 'catalog') {
-            if (-not ($result -match "packaged $scope restore succeeded on its first invocation after SQLite inspection")) {
-              throw "First restore evidence missing for $scope"
-            }
-          }
-          @(
-            '### T035/T037 - Windows first restore regression'
-            "- Tested commit $env:GITHUB_SHA"
-            "- Runner $env:RUNNER_OS $env:RUNNER_ARCH"
-            "- Toolchain $(go version)"
-            "- Test command go test -v -count=1 -timeout=4m -run $fixture ./tests/integration"
-            '- The isolated worktree and catalog passed every restore step on the first invocation and reported VERIFIED.'
-          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+        run: .\tests\integration\run_windows_restore_ci.ps1
       - name: Check specification and contract registry
         env:
           GOPROXY: 'off'
