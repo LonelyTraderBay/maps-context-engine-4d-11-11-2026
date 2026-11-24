@@ -1,0 +1,2201 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-25",
+  "source": "Original live Windows native Maps and Codex A/C run",
+  "platform": "windows/amd64",
+  "go_version": "go version go1.27.4 windows/amd64",
+  "model": "gpt-6.2-sol",
+  "repeats": 1,
+  "seed": 53038,
+  "engine_sha256": "896c1159054e41a65685523139cf930f27321fea0dfab4104c52ddc4593e2c53",
+  "measured_host_adapter_sha256": {
+    "main.py": "b0bab4b3170921d5d3b1c6e454641cbf0052f918b5e0a0da376c216143761a9a",
+    "edit_evidence.py": "37daebb564061a2dc3dda4761975b0d42f9e209ed21dfe93d1c78720048957ab"
+  },
+  "engine_plan_sha256": "3632ff1f316f2ab39ca5de0d08238e70689a05572b0fc414783d5bea81e8b381",
+  "fixture_lock_sha256": "154e84f725d224989ebb40b6a604882d2c628ed3ffd23af99b06ddfa23c0de9a",
+  "captured_excerpts_sha256": "94436b29bdbdcfbd06b3c817bc497b24ba1db32768e32c2539e2601f8858e181",
+  "references": {
+    "M01": true,
+    "M02": true,
+    "M03": true,
+    "M04": true,
+    "M05": true,
+    "M06": true,
+    "M07": true,
+    "M08": true,
+    "M09": true,
+    "M10": true,
+    "U01": true,
+    "U02": true,
+    "U03": true,
+    "U04": true,
+    "U05": true,
+    "U06": true,
+    "U07": true,
+    "U08": true,
+    "U09": true,
+    "U10": true,
+    "H01": true,
+    "H02": true,
+    "H03": true,
+    "H04": true,
+    "H05": true,
+    "H06": true,
+    "H07": true,
+    "H08": true,
+    "H09": true,
+    "H10": true
+  },
+  "negative_controls": {
+    "M01": {
+      "expected_assertion_failed": true
+    },
+    "M02": {
+      "expected_assertion_failed": true
+    },
+    "M03": {
+      "expected_assertion_failed": true
+    },
+    "M05": {
+      "expected_assertion_failed": true
+    },
+    "M06": {
+      "expected_assertion_failed": true
+    },
+    "M08": {
+      "expected_assertion_failed": true
+    },
+    "U02": {
+      "expected_assertion_failed": true
+    },
+    "U03": {
+      "expected_assertion_failed": true
+    },
+    "U05": {
+      "expected_assertion_failed": true
+    },
+    "U06": {
+      "expected_assertion_failed": true
+    },
+    "U07": {
+      "expected_assertion_failed": true
+    },
+    "U08": {
+      "expected_assertion_failed": true
+    },
+    "U09": {
+      "expected_assertion_failed": true
+    },
+    "H01": {
+      "expected_assertion_failed": true
+    },
+    "H02": {
+      "expected_assertion_failed": true
+    },
+    "H03": {
+      "expected_assertion_failed": true
+    },
+    "H04": {
+      "expected_assertion_failed": true
+    },
+    "H05": {
+      "expected_assertion_failed": true
+    },
+    "H06": {
+      "expected_assertion_failed": true
+    },
+    "H07": {
+      "expected_assertion_failed": true
+    },
+    "H08": {
+      "expected_assertion_failed": true
+    },
+    "H09": {
+      "expected_assertion_failed": true
+    },
+    "H10": {
+      "expected_assertion_failed": true
+    }
+  },
+  "measurements": [
+    {
+      "case": "M01",
+      "repo": "maps",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 117484,
+        "cached_input_tokens": 110592,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 250,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 14821,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/identity_json.go"
+      ],
+      "expected": [
+        "internal/model/identity_json.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M01",
+      "repo": "maps",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28354,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 112,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8222,
+      "discovery": {
+        "ok": true,
+        "excerpts": 6,
+        "input_tokens": 0,
+        "ms": 749
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/identity_json.go"
+      ],
+      "expected": [
+        "internal/model/identity_json.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M02",
+      "repo": "maps",
+      "arm": "A",
+      "category": "contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 147162,
+        "cached_input_tokens": 133760,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 331,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 16303,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "search_source",
+        "search_source",
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/identity_json.go"
+      ],
+      "expected": [
+        "internal/model/identity_json.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M02",
+      "repo": "maps",
+      "arm": "C",
+      "category": "contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 86894,
+        "cached_input_tokens": 78720,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 205,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 13047,
+      "discovery": {
+        "ok": true,
+        "excerpts": 4,
+        "input_tokens": 0,
+        "ms": 754
+      },
+      "mcp_calls": [
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/identity_json.go"
+      ],
+      "expected": [
+        "internal/model/identity_json.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M03",
+      "repo": "maps",
+      "arm": "A",
+      "category": "contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 113174,
+        "cached_input_tokens": 105216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 262,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 16487,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/source_ref.go"
+      ],
+      "expected": [
+        "internal/model/source_ref.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M03",
+      "repo": "maps",
+      "arm": "C",
+      "category": "contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 26893,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 109,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7630,
+      "discovery": {
+        "ok": true,
+        "excerpts": 1,
+        "edit_evidence_kind": "message",
+        "input_tokens": 0,
+        "ms": 790
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/source_ref.go"
+      ],
+      "expected": [
+        "internal/model/source_ref.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M04",
+      "repo": "maps",
+      "arm": "A",
+      "category": "local rename + dirty",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 114075,
+        "cached_input_tokens": 105728,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 247,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 16401,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/source_ref.go"
+      ],
+      "expected": [
+        "internal/model/source_ref.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M04",
+      "repo": "maps",
+      "arm": "C",
+      "category": "local rename + dirty",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28517,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 125,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 9702,
+      "discovery": {
+        "ok": true,
+        "excerpts": 6,
+        "input_tokens": 0,
+        "ms": 750
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/source_ref.go"
+      ],
+      "expected": [
+        "internal/model/source_ref.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M05",
+      "repo": "maps",
+      "arm": "A",
+      "category": "contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 113267,
+        "cached_input_tokens": 105216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 285,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 16997,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/delivery_budget.go"
+      ],
+      "expected": [
+        "internal/model/delivery_budget.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M05",
+      "repo": "maps",
+      "arm": "C",
+      "category": "contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28391,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 144,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 10647,
+      "discovery": {
+        "ok": true,
+        "excerpts": 5,
+        "input_tokens": 0,
+        "ms": 761
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/delivery_budget.go"
+      ],
+      "expected": [
+        "internal/model/delivery_budget.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M06",
+      "repo": "maps",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 80518,
+        "cached_input_tokens": 76928,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 159,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 10810,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/contextpack/cursor.go"
+      ],
+      "expected": [
+        "internal/contextpack/cursor.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M06",
+      "repo": "maps",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28307,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 54,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7909,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 751
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/contextpack/cursor.go"
+      ],
+      "expected": [
+        "internal/contextpack/cursor.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M07",
+      "repo": "maps",
+      "arm": "A",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 136584,
+        "cached_input_tokens": 130688,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 351,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 17229,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source",
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/contextpack/cursor.go"
+      ],
+      "expected": [
+        "internal/contextpack/cursor.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M07",
+      "repo": "maps",
+      "arm": "C",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28239,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 174,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 10898,
+      "discovery": {
+        "ok": true,
+        "excerpts": 6,
+        "input_tokens": 0,
+        "ms": 761
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/contextpack/cursor.go"
+      ],
+      "expected": [
+        "internal/contextpack/cursor.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M08",
+      "repo": "maps",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 85267,
+        "cached_input_tokens": 76928,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 251,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 14111,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/rename_result_digest.go"
+      ],
+      "expected": [
+        "internal/model/rename_result_digest.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M08",
+      "repo": "maps",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28392,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 169,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 11887,
+      "discovery": {
+        "ok": true,
+        "excerpts": 5,
+        "input_tokens": 0,
+        "ms": 750
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/rename_result_digest.go"
+      ],
+      "expected": [
+        "internal/model/rename_result_digest.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M09",
+      "repo": "maps",
+      "arm": "A",
+      "category": "field change + fanout",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 145294,
+        "cached_input_tokens": 137856,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 507,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 21812,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "search_source",
+        "search_source",
+        "search_source",
+        "read_source",
+        "read_source",
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/core_data.go",
+        "internal/model/s18_fanout_fixture.go"
+      ],
+      "expected": [
+        "internal/model/core_data.go",
+        "internal/model/s18_fanout_fixture.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M09",
+      "repo": "maps",
+      "arm": "C",
+      "category": "field change + fanout",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27226,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 280,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 11055,
+      "discovery": {
+        "ok": true,
+        "excerpts": 1,
+        "edit_evidence_kind": "field_text_matches",
+        "input_tokens": 0,
+        "ms": 799
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/model/core_data.go",
+        "internal/model/s18_fanout_fixture.go"
+      ],
+      "expected": [
+        "internal/model/core_data.go",
+        "internal/model/s18_fanout_fixture.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M10",
+      "repo": "maps",
+      "arm": "A",
+      "category": "interface contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 142213,
+        "cached_input_tokens": 136064,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 487,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 22317,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source",
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/search/locate_keyset.go",
+        "internal/search/search.go",
+        "internal/search/semantic/index.go"
+      ],
+      "expected": [
+        "internal/search/locate_keyset.go",
+        "internal/search/search.go",
+        "internal/search/semantic/index.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "M10",
+      "repo": "maps",
+      "arm": "C",
+      "category": "interface contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27998,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 271,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 10307,
+      "discovery": {
+        "ok": true,
+        "excerpts": 1,
+        "edit_evidence_kind": "interface_text_matches",
+        "input_tokens": 0,
+        "ms": 784
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "internal/search/locate_keyset.go",
+        "internal/search/search.go",
+        "internal/search/semantic/index.go"
+      ],
+      "expected": [
+        "internal/search/locate_keyset.go",
+        "internal/search/search.go",
+        "internal/search/semantic/index.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U01",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 112744,
+        "cached_input_tokens": 105216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 245,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 13476,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "version4.go"
+      ],
+      "expected": [
+        "version4.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U01",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27939,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 119,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8982,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 411
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "version4.go"
+      ],
+      "expected": [
+        "version4.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U02",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 83704,
+        "cached_input_tokens": 80000,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 186,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 13227,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "version7.go"
+      ],
+      "expected": [
+        "version7.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U02",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28034,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 143,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8869,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 401
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "version7.go"
+      ],
+      "expected": [
+        "version7.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U03",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "parse contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 113215,
+        "cached_input_tokens": 108544,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 254,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 14210,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "uuid.go"
+      ],
+      "expected": [
+        "uuid.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U03",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "parse contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28847,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 126,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8477,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 395
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "uuid.go"
+      ],
+      "expected": [
+        "uuid.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U04",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 141409,
+        "cached_input_tokens": 137088,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 279,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 18349,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "hash.go"
+      ],
+      "expected": [
+        "hash.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U04",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27596,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 114,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8621,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 407
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "hash.go"
+      ],
+      "expected": [
+        "hash.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U05",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "SQL behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 113041,
+        "cached_input_tokens": 108544,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 220,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 41972,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "sql.go"
+      ],
+      "expected": [
+        "sql.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U05",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "SQL behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27852,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 125,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8928,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 383
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "sql.go"
+      ],
+      "expected": [
+        "sql.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U06",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "JSON behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 112912,
+        "cached_input_tokens": 107264,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 264,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 16098,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "null.go"
+      ],
+      "expected": [
+        "null.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U06",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "JSON behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27548,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 123,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 9150,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 394
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "null.go"
+      ],
+      "expected": [
+        "null.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U07",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 141883,
+        "cached_input_tokens": 137344,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 291,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 20959,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "time.go"
+      ],
+      "expected": [
+        "time.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U07",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28087,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 136,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7886,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 433
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "time.go"
+      ],
+      "expected": [
+        "time.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U08",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "input boundary",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 112707,
+        "cached_input_tokens": 108544,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 216,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 14465,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "node.go"
+      ],
+      "expected": [
+        "node.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U08",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "input boundary",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27884,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 92,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7060,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 498
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "node.go"
+      ],
+      "expected": [
+        "node.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U09",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "error contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 112564,
+        "cached_input_tokens": 105472,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 204,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 14996,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "marshal.go"
+      ],
+      "expected": [
+        "marshal.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U09",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "error contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28586,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 143,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7906,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 420
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "marshal.go"
+      ],
+      "expected": [
+        "marshal.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U10",
+      "repo": "uuid",
+      "arm": "A",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 112615,
+        "cached_input_tokens": 108544,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 227,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 13973,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "dce.go"
+      ],
+      "expected": [
+        "dce.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "U10",
+      "repo": "uuid",
+      "arm": "C",
+      "category": "local rename",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28339,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 105,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7501,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 439
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "dce.go"
+      ],
+      "expected": [
+        "dce.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H01",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 111984,
+        "cached_input_tokens": 104704,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 319,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 15651,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "read_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "bytes.go"
+      ],
+      "expected": [
+        "bytes.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H01",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 88173,
+        "cached_input_tokens": 78464,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 237,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 13939,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 393
+      },
+      "mcp_calls": [
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "bytes.go"
+      ],
+      "expected": [
+        "bytes.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H02",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "error contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 136842,
+        "cached_input_tokens": 131200,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 264,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 15863,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "search_source",
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "bytes.go"
+      ],
+      "expected": [
+        "bytes.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H02",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "error contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28059,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 116,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7544,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 445
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "bytes.go"
+      ],
+      "expected": [
+        "bytes.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H03",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 83563,
+        "cached_input_tokens": 80000,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 154,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 12198,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "ordinals.go"
+      ],
+      "expected": [
+        "ordinals.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H03",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 26789,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 104,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7100,
+      "discovery": {
+        "ok": true,
+        "excerpts": 1,
+        "input_tokens": 0,
+        "ms": 407
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "ordinals.go"
+      ],
+      "expected": [
+        "ordinals.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H04",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "boundary",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 83863,
+        "cached_input_tokens": 80000,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 188,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 12892,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "comma.go"
+      ],
+      "expected": [
+        "comma.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H04",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "boundary",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28574,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 114,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8821,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 397
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "comma.go"
+      ],
+      "expected": [
+        "comma.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H05",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "precision",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 84309,
+        "cached_input_tokens": 80000,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 200,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 13901,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "ftoa.go"
+      ],
+      "expected": [
+        "ftoa.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H05",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "precision",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28083,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 137,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8342,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 437
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "ftoa.go"
+      ],
+      "expected": [
+        "ftoa.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H06",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 107668,
+        "cached_input_tokens": 103680,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 237,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 13896,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "times.go"
+      ],
+      "expected": [
+        "times.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H06",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "behavior",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28402,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 110,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 9912,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 395
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "times.go"
+      ],
+      "expected": [
+        "times.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H07",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "floating boundary",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 107906,
+        "cached_input_tokens": 105472,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 218,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 16295,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "si.go"
+      ],
+      "expected": [
+        "si.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H07",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "floating boundary",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 28118,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 117,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 9175,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 444
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "si.go"
+      ],
+      "expected": [
+        "si.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H08",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "plural contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 114217,
+        "cached_input_tokens": 105216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 213,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 16652,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "english/words.go"
+      ],
+      "expected": [
+        "english/words.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H08",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "plural contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27559,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 105,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 7184,
+      "discovery": {
+        "ok": true,
+        "excerpts": 4,
+        "input_tokens": 0,
+        "ms": 401
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "english/words.go"
+      ],
+      "expected": [
+        "english/words.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H09",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "format contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 113547,
+        "cached_input_tokens": 105216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 227,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 15549,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "read_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "english/words.go"
+      ],
+      "expected": [
+        "english/words.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H09",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "format contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27685,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 181,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 8233,
+      "discovery": {
+        "ok": true,
+        "excerpts": 5,
+        "input_tokens": 0,
+        "ms": 416
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "english/words.go"
+      ],
+      "expected": [
+        "english/words.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H10",
+      "repo": "humanize",
+      "arm": "A",
+      "category": "missing dependency + contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 164644,
+        "cached_input_tokens": 157952,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 292,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 18248,
+      "discovery": null,
+      "mcp_calls": [
+        "search_source",
+        "search_source",
+        "read_source",
+        "search_source"
+      ],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "bigbytes.go"
+      ],
+      "expected": [
+        "bigbytes.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    },
+    {
+      "case": "H10",
+      "repo": "humanize",
+      "arm": "C",
+      "category": "missing dependency + contract",
+      "outcome": "accepted",
+      "usage": {
+        "input_tokens": 27683,
+        "cached_input_tokens": 25216,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 90,
+        "reasoning_output_tokens": 0
+      },
+      "elapsed_ms": 6672,
+      "discovery": {
+        "ok": true,
+        "excerpts": 8,
+        "input_tokens": 0,
+        "ms": 413
+      },
+      "mcp_calls": [],
+      "shell_count": 0,
+      "false_edits": [],
+      "invalid_edits": [],
+      "changed": [
+        "bigbytes.go"
+      ],
+      "expected": [
+        "bigbytes.go"
+      ],
+      "exact": true,
+      "fixture": "pass",
+      "exit": 0,
+      "host_errors": []
+    }
+  ]
+}

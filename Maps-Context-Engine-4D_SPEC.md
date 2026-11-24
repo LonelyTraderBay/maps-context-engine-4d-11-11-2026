@@ -1163,6 +1163,12 @@ Performance targets tham khảo cho medium fixture Go <=1000 files và <=20 MiB 
 
 Chọn corpus trước khi đo: T038 ghi nguồn và quyền cho từng repo/fixture, revision hoặc content digest, ngôn ngữ/profile, số file/bytes, đặc điểm dirty/worktree/dependencies và lý do đại diện; định nghĩa oracle/required references và task trước khi xem kết quả engine. Repo thật và fixture được báo riêng; không đưa source hoặc token/credential vào báo cáo dùng chung. Bộ đo R1 vẫn theo 30 task/3 repo hoặc fixtures ở trên; nếu không đủ quyền, host usage hoặc điều kiện, giữ phần tương ứng NOT_RUN và áp dụng đúng nhãn S20. T039 báo sample/completion/failures và baseline; không biến proxy bytes thành token hay kết quả fixture thành real-repo savings.
 
+### Nghiệm thu sửa mã Go tiếng Việt trên Windows native
+
+Ngày 25/11/2026, lượt A/C dùng index Maps và Codex đã kiểm 30 ca có kiểm soát trên ba bản nguồn Go đã pin gồm Maps, google/uuid và go-humanize. Cả A và C đúng **30/30**, không ghi nhận sửa ngoài phạm vi. C dùng **dưới 85% token của A ở cả 30/30 cặp**, tính cả nạp ngữ cảnh, token cache và lượt tìm hoặc đọc bổ sung. Kết quả vẫn là 30/30 khi cộng token đầu ra. Tỷ lệ đầu vào C/A trung vị **24,89%**, cao nhất **78,74%**. M03 và M09 đều hoàn thành ở C với 0 lượt tìm hoặc đọc bổ sung. Fixture Go do suite tạo, câu hỏi không gợi ý tên hàm và không chạy script repo mẫu.
+
+[Bộ chạy lại Windows native](tools/bench/s18_edit/README.md) khóa nguồn, câu hỏi, fixture và đoạn trích Maps. [Biên nhận lượt đo](tools/bench/s18_edit/fixture/observed-2026-11-25.json) có usage và kết quả từng ca. Runner hỗ trợ replay đoạn trích và lượt live với index tương thích, ghi riêng chế độ đo. Kết quả áp dụng cho một lượt A/C trên mỗi ca của bộ sửa mã này.
+
 ## S19 — Bảng triển khai duy nhất
 
 ### Protocol trạng thái
