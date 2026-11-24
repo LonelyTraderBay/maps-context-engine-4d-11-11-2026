@@ -3,11 +3,14 @@ package integration
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +18,26 @@ import (
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/store/sqlite"
 )
+
+func inspectWindowsRestoreImage(t *testing.T, ctx context.Context, filename string) {
+	t.Helper()
+	uri := url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(filename), RawQuery: "mode=ro&immutable=1"}
+	db, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Release the actual SQLite handle before returning to the restore caller.
+	// On Windows a read-only SQLite connection can still block replacement.
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close SQLite inspection: %v", err)
+		}
+	}()
+	var integrity string
+	if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&integrity); err != nil || integrity != "ok" {
+		t.Fatalf("SQLite image inspection: integrity %q, error %v", integrity, err)
+	}
+}
 
 func testPackagedWindowsRestore(t *testing.T, ctx context.Context, bin, root, worktree, profile string) {
 	t.Helper()
@@ -96,10 +119,14 @@ func testPackagedWindowsRestore(t *testing.T, ctx context.Context, bin, root, wo
 		directory := filepath.Join(root, "control")
 		selection := []string{"--target", target}
 		expectedCount := 2
+		liveImages := []string{"catalog-wal/catalog.sqlite"}
+		steps := []string{"catalog_main", "catalog_journal", "catalog_head", "profile_manifest"}
 		if target == "worktree" {
 			directory = filepath.Join(directory, "worktrees", worktree)
 			selection = append(selection, "--worktree-id", worktree)
 			expectedCount = 3
+			liveImages = []string{"index-wal/index.sqlite", "records-wal/records.sqlite"}
+			steps = []string{"index_main", "records_main", "index_journal", "records_journal", "index_head", "records_head", "worktree_manifest"}
 		}
 		out := filepath.Join(directory, "backups", "disposable")
 		args := append([]string{"store", "backup"}, selection...)
@@ -125,38 +152,24 @@ func testPackagedWindowsRestore(t *testing.T, ctx context.Context, bin, root, wo
 		if err != nil || int64(len(image)) != last.ByteLength {
 			t.Fatalf("invalid SQLite backup: %v", err)
 		}
-		changed := bytes.Clone(image)
-		changed[len(changed)-1] ^= 1
-		if err := os.WriteFile(artifact, changed, 0600); err != nil {
-			t.Fatal(err)
+		for _, name := range liveImages {
+			inspectWindowsRestoreImage(t, ctx, filepath.Join(directory, filepath.FromSlash(name)))
 		}
 		restore := []string{"store", "restore", "--manifest", manifest, "--confirm", "--wait-ms", "4000"}
-		run("mce4d.exe", 3, restore...)
-		if err := os.WriteFile(artifact, image, 0600); err != nil {
-			t.Fatal(err)
-		}
-		if observe() != prior {
-			t.Fatal("rejected backup changed the live scope")
-		}
-		extra := filepath.Join(out, "extra.fixture")
-		if err := os.WriteFile(extra, []byte("unexpected entry"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		run("mce4d.exe", 3, restore...)
-		if err := os.Remove(extra); err != nil {
-			t.Fatal(err)
-		}
 		var restored sqlite.ProtectedRestoreSummary
 		if raw := run("mce4d.exe", 0, restore...); json.Unmarshal(raw, &restored) != nil ||
-			restored.Target != target || restored.Outcome != "restored" || !model.ValidUUID(restored.OperationID) {
-			t.Fatalf("restore report: %s", raw)
+			restored.Target != target || restored.Outcome != "restored" || !model.ValidUUID(restored.OperationID) ||
+			!slices.Equal(restored.CompletedSteps, steps) {
+			t.Fatalf("first restore after SQLite inspection: %s", raw)
 		}
 		recoverArgs := append([]string{"store", "recover"}, selection...)
 		recoverArgs = append(recoverArgs, "--report-only")
 		var recovery sqlite.StoreRecoveryReport
-		if raw := run("mce4d.exe", 0, recoverArgs...); json.Unmarshal(raw, &recovery) != nil ||
-			!recovery.ReportOnly || recovery.Phase != "VERIFIED" || recovery.OperationID != restored.OperationID {
-			t.Fatalf("recovery report: %s", raw)
+		journal := run("mce4d.exe", 0, recoverArgs...)
+		if json.Unmarshal(journal, &recovery) != nil || !recovery.ReportOnly ||
+			recovery.Phase != "VERIFIED" || recovery.OperationID != restored.OperationID ||
+			!slices.Equal(recovery.CompletedSteps, steps) {
+			t.Fatalf("verified journal after first restore: %s", journal)
 		}
 		current = observe()
 		if target == "worktree" && (current.CatalogIncarnation != prior.CatalogIncarnation ||
@@ -170,7 +183,29 @@ func testPackagedWindowsRestore(t *testing.T, ctx context.Context, bin, root, wo
 				t.Fatalf("old %s token survived %s restore: %v", purpose, target, err)
 			}
 		}
-		t.Logf("packaged %s backup and restore verified, bad artifact refused, scoped identities rotated and three synthetic token purposes refused by the production codec", target)
+		t.Logf("packaged %s restore succeeded on its first invocation after SQLite inspection, with every step verified", target)
+
+		changed := bytes.Clone(image)
+		changed[len(changed)-1] ^= 1
+		if err := os.WriteFile(artifact, changed, 0600); err != nil {
+			t.Fatal(err)
+		}
+		run("mce4d.exe", 3, restore...)
+		if err := os.WriteFile(artifact, image, 0600); err != nil {
+			t.Fatal(err)
+		}
+		extra := filepath.Join(out, "extra.fixture")
+		if err := os.WriteFile(extra, []byte("unexpected entry"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		run("mce4d.exe", 3, restore...)
+		if err := os.Remove(extra); err != nil {
+			t.Fatal(err)
+		}
+		if observe() != current || !bytes.Equal(run("mce4d.exe", 0, recoverArgs...), journal) {
+			t.Fatal("rejected backup changed the restored scope or journal")
+		}
+		t.Logf("packaged %s backup refused corrupted and extra artifacts, and restore invalidated three synthetic token purposes", target)
 		if os.Getenv("MCE4D_WIN_RESTORE_CRASH_FIXTURE") == "1" {
 			testWindowsRestoreCrashBoundaries(t, ctx, bin, root, worktree, profile, manifest, target, selection, run)
 			current = observe()
