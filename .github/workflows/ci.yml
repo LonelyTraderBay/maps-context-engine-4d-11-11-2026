@@ -21,6 +21,72 @@ env:
   GOWORK: 'off'
 
 jobs:
+  s18:
+    name: S18 replay (windows-2025)
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Extract pinned Maps module files
+        id: s18-module
+        run: |
+          $sources = Get-Content -Raw -LiteralPath 'tools/bench/s18_edit/fixture/sources.json' | ConvertFrom-Json
+          $archive = Join-Path $env:RUNNER_TEMP 's18-go-mod.zip'
+          $moduleDirectory = Join-Path $env:RUNNER_TEMP 's18-go-mod'
+          git archive --format=zip --output $archive $sources.maps.upstream go.mod go.sum
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -LiteralPath $archive -DestinationPath $moduleDirectory
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "directory=$moduleDirectory"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ steps.s18-module.outputs.directory }}/go.mod
+          cache: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+      - name: Cache pinned Go modules for the fixture
+        env:
+          S18_GO_MODULE: ${{ steps.s18-module.outputs.directory }}
+        run: |
+          $sources = Get-Content -Raw -LiteralPath 'tools/bench/s18_edit/fixture/sources.json' | ConvertFrom-Json
+          Push-Location -LiteralPath $env:S18_GO_MODULE
+          try {
+            go mod download
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            go mod verify
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            go mod download $sources.uuid.module $sources.humanize.module
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+      - name: Replay all 30 prompts and validate isolated Go fixtures
+        env:
+          GOPROXY: 'off'
+        run: |
+          $suiteOutput = Join-Path $env:RUNNER_TEMP 's18-edit'
+          python -B tools/bench/s18_edit/runner.py prepare --output $suiteOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B tools/bench/s18_edit/runner.py replay-check --output $suiteOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B tools/bench/s18_edit/runner.py preflight --output $suiteOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Require all 30 recorded A/C pairs below 85% tokens
+        run: |
+          $reportJson = python -B tools/bench/s18_edit/report.py --recorded
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = ($reportJson -join "`n") | ConvertFrom-Json
+          if ($report.mode -ne 'recorded_live' -or -not $report.passed -or
+              $report.attempted_pairs -ne 30 -or $report.pairs_under_85 -ne 30) {
+            throw 'S18 requires 30 correct recorded A/C pairs below 85% tokens.'
+          }
+          Write-Output ('S18 recorded receipts: {0}/{1} pairs below 85% tokens. Median C/A: {2:P2}. Max C/A: {3:P2}.' -f
+            $report.pairs_under_85, $report.attempted_pairs, $report.median_C_over_A_input, $report.max_C_over_A_input)
+
   go:
     name: Go (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

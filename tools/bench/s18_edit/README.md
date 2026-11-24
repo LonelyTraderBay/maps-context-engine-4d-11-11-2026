@@ -91,6 +91,11 @@ Nếu một truy vấn lỗi trong lượt đo, report giữ ca đó và đánh 
 
 ## Kiểm lại kết quả đã lưu
 
+Job **S18 replay (windows-2025)** trong [CI](../../../.github/workflows/ci.yml)
+tái tạo 30 prompt, kiểm 30 bản sửa tham chiếu và 23 đối chứng, rồi tính lại
+ngưỡng 30/30 cặp từ biên nhận đã lưu. Job này dùng đường kiểm tra cục bộ
+của suite và không mở Codex.
+
 ```powershell
 & $Python -B "$Suite\report.py" --recorded
 ```
