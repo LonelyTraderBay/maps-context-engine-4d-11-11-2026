@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/model"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/paths"
@@ -110,19 +111,19 @@ func TestWindowsPackagedProfileRoleVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;SY)(A;;FA;;;" + account.User.Sid.String() + ")")
+	// An elevated runner may otherwise assign BUILTIN\\Administrators as owner.
+	owner := account.User.Sid.String()
+	sd, err := windows.SecurityDescriptorFromString("O:" + owner + "D:P(A;;FA;;;SY)(A;;FA;;;" + owner + ")")
 	if err != nil {
 		t.Fatal(err)
 	}
-	dacl, _, err := sd.DACL()
+	path, err := windows.UTF16PtrFromString(parent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(parent, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := windows.SetNamedSecurityInfo(parent, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+	attributes := windows.SecurityAttributes{SecurityDescriptor: sd}
+	attributes.Length = uint32(unsafe.Sizeof(attributes))
+	if err := windows.CreateDirectory(path, &attributes); err != nil {
 		t.Fatal(err)
 	}
 
