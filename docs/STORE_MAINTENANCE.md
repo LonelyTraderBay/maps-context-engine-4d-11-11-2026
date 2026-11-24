@@ -52,6 +52,7 @@ mce4d store recover --target worktree --worktree-id <id> [--report-only]
 mce4d store restore --manifest <approved-backup.json-path> --confirm --wait-ms 5000
 mce4d store recover --target catalog --apply --confirm --wait-ms 5000
 mce4d store recover --target worktree --worktree-id <id> --apply --confirm --wait-ms 5000
+mce4d store rebuild-index --worktree-id <id> --confirm --wait-ms 5000
 ```
 
 Output backup phải là thư mục mới ngay dưới `backups/` của catalog hoặc đúng
@@ -99,6 +100,17 @@ xác minh đủ các bước và ghi `VERIFIED`. Khi hash lệch, recovery dừn
 nguyên trạng thái để kiểm tra. Catalog restore ảnh hưởng mọi binding dùng
 catalog. Worktree restore chỉ giữ khóa ghi worktree được chọn. Incarnation mới
 làm mất hiệu lực các token đã cấp cho store cũ. Hai key của profile không được nhập từ backup.
+
+Trên Linux, quản trị viên có thể dùng `store rebuild-index` để thay riêng
+index bằng SQLite được khởi tạo mới. Lệnh cần hai store hiện hành có thể xác
+minh theo head và quyền của profile. Journal ghi bốn bước thay index, authority
+journal, trusted head và worktree manifest. Hồ sơ giữ danh tính và hash tập tệp
+bền vững của records, gồm database, sidecar và authority. Sau khi hoàn thành,
+dùng `mce4d index` cho từng profile của
+worktree để đọc lại nguồn và xuất bản generation. Nếu tiến trình dừng trong
+lúc thay index, đọc `store recover --target worktree --report-only` kèm
+worktree ID, rồi dùng đường `--apply --confirm` hiện có để tiếp tục. Bản
+index trước đó được giữ theo cùng quy tắc lưu của restore.
 
 API driver đã đối chiếu đúng module modernc.org/sqlite v1.62.0 trong go.sum.
 Tham khảo [SQLite Online Backup API](https://www.sqlite.org/backup.html).

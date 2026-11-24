@@ -99,6 +99,18 @@ method and measurement boundaries in each arm.
 python3 -B tools/bench/main.py report --plan plan.json --observations observations.json > report.json
 ~~~
 
+On Linux amd64, the packaged CLI can import the same evidence. Supply one
+JSON file with `schema_version: 1`, `plan` containing the plan object and
+`observations` containing the observations object. Use a new artifact directory
+under an existing parent that is writable only by its owner. The CLI writes `report.json` and prints its path as
+JSON. The offline importer requires the pinned CPython installation described
+in `packages/python-provider/toolchain-pin.json`. It reads only the supplied
+suite and uses the bundled reporter.
+
+~~~sh
+mce4d bench --suite suite.json --output /owned/runs/report-001
+~~~
+
 The report lists all planned runs and counts retries and terminal failures.
 Tokens per accepted task includes input and output from all attempts when
 the cohort is complete and has full usage. A/C savings compare total input

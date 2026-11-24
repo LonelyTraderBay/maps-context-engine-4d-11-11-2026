@@ -65,12 +65,18 @@ requires an explicit installation procedure. No target-controlled binary is used
 
 Launch the runtime under the provisioned engine account with `HOME` pointing to
 the profile's `home`, or `MCE4D_HOME` pointing to its exact state directory.
-`mce4d repo add --root <approved-root>` registers a normal local Git worktree
+`mce4d repo add --root <approved-root>` registers a local Git checkout
 without executing Git/Go or indexing; its initial profile is syntax-only and
 fingerprints the embedded parser/runtime and installed binary. Provision the
 returned worktree ID with `worktree-create`. CLI query selection is explicit:
 `mce4d --worktree-id <id> --profile-id <hash> query status --input-json <file>`.
 MCP keeps its existing binding flags. Selection never grants additional roots.
+
+For a linked worktree, include both the linked checkout and the checkout that
+owns the common `.git` directory among the installation's `--target-root`
+values. Register each checkout with its own `repo add --root` and provision
+each returned worktree ID. Checkouts sharing the common directory use one repo
+ID and keep separate worktree IDs and indexes.
 
 The Linux development runtime wires syntax indexing, foreground watch, retained
 CLI packs and checked-workspace validation. See the specification's S21 for the
@@ -175,7 +181,9 @@ sidecar requires review.
 The controller can explicitly set `MCE4D_WINDOWS_STAGED_ENGINE_PID` and
 `MCE4D_WINDOWS_STAGED_CLIENT_PID` to the two live role process IDs and set
 `MCE4D_HOME` to this profile. In that mode, `mce4d.exe repo add --root
-<approved-target>` registers a normal local Git worktree in the staged catalog.
+<approved-target>` registers a local Git checkout in the staged catalog. For a
+linked worktree, pass both the linked checkout and the owner of the common
+`.git` directory to `prepare` as `--target-root` values.
 It rechecks the role tokens while holding the catalog lease. It appends a
 prepare receipt to the receipt log and independent head before SQL, then
 appends the observed outcome after closing SQLite. A failed mutation can be
@@ -252,8 +260,10 @@ registered worktree. Choose a fresh directory immediately below
 `control\backups` for a catalog or `control\worktrees\<worktree-id>\backups`
 for a worktree. The controller holds the selected scope's exclusive lifecycle
 and writer leases. SQLite creates standalone backup images and the verified
-`backup.json` is published last. Each store uses the staged Windows 1 MiB
-image limit. The backup contains store data and revisions. Cursor and WAL head
+`backup.json` is published last. Catalog and records images are limited to
+1 MiB each. A worktree index image can reach 4 MiB, with the write limit
+bounded by the configured worktree cache budget and its required reserve.
+The backup contains store data and revisions. Cursor and WAL head
 keys stay with the protected installation.
 
 `mce4d.exe store restore --manifest <absolute-backup.json> --confirm
@@ -301,7 +311,7 @@ index when interrupted work changed its files. Recovery requires the
 authenticated PREPARE and its matching protected checkpoint. A short
 unacknowledged receipt tail can be retained with the interrupted files.
 Recovery stages a new index incarnation, keeps records intact, and resumes
-through PREPARED, REPLACING and VERIFYING. It retires up to 8 MiB per
+through PREPARED, REPLACING and VERIFYING. It retires up to 16 MiB per
 owner-bound sidecar under the original protected directory. Missing authority,
 an incomplete independent head or unsafe files still block mutation.
 
@@ -316,6 +326,14 @@ set `PATH` to the distribution's `bin` directory and `PATHEXT` to `.EXE`.
 The native adapter accepts a single local readonly Go module with verified
 standard library imports. External dependency roots, cgo and test variants
 remain outside the supported typed scope.
+
+Windows Go indexing also uses this scratch role with a
+`typed_when_available` profile. For indexing, approve `go.exe` and set the
+index process's `PATH` to the verified distribution's `bin` and `PATHEXT`
+to `.EXE`. The analyzer uses a protected capture and local standard library.
+It needs no gopls server. Explorer and context packs read the published
+call facts, including exact direct calls and separately labeled interface
+and unresolved calls. An unavailable typed closure leaves syntax coverage.
 
 Use the CLI `query rename-preview` and `query validate`, or the MCP tools
 `mce4d_rename_preview` and `mce4d_validate_pack`, with the same worktree and
