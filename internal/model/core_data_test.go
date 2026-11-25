@@ -27,3 +27,21 @@ func TestStatusLocateAndValidateData(t *testing.T) {
 		t.Fatal("accepted validated state after membership change")
 	}
 }
+
+func TestLocatedExcerptRequiresMatchingByteLengthAndLine(t *testing.T) {
+	id := "01234567-89ab-cdef-0123-456789abcdef"
+	h := strings.Repeat("a", 64)
+	ref := fmt.Sprintf(`{"worktree_id":"%s","profile_id":"%s","generation_id":"%s","path":"src/state.ts","content_hash":"%s","range":{"start_byte":0,"end_byte":3}}`, id, h, id, h)
+	raw := fmt.Sprintf(`{"operation":"locate","candidates":[],"excerpts":[{"source_ref":%s,"start_line":3,"content":"có"}]}`, ref)
+	if data, err := DecodeLocateDataJSON([]byte(raw), 16384); err != nil || len(data.Excerpts) != 1 {
+		t.Fatalf("valid UTF-8 excerpt rejected: %v", err)
+	}
+	for _, bad := range []string{
+		strings.Replace(raw, `"start_line":3`, `"start_line":0`, 1),
+		strings.Replace(raw, `"content":"có"`, `"content":"code"`, 1),
+	} {
+		if _, err := DecodeLocateDataJSON([]byte(bad), 16384); err == nil {
+			t.Fatalf("invalid excerpt accepted: %s", bad)
+		}
+	}
+}

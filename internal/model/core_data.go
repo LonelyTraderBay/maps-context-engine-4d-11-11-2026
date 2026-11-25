@@ -27,8 +27,14 @@ type Candidate struct {
 	EvidenceRefs  []EvidenceRef `json:"evidence_refs"`
 }
 type LocateData struct {
-	Operation  string      `json:"operation"`
-	Candidates []Candidate `json:"candidates"`
+	Operation  string           `json:"operation"`
+	Candidates []Candidate      `json:"candidates"`
+	Excerpts   []LocatedExcerpt `json:"excerpts,omitempty"`
+}
+type LocatedExcerpt struct {
+	SourceRef SourceRef `json:"source_ref"`
+	StartLine int64     `json:"start_line"`
+	Content   string    `json:"content"`
 }
 type ValidateData struct {
 	Operation                 string      `json:"operation"`
@@ -144,7 +150,7 @@ func DecodeLocateDataJSON(data []byte, maxBytes int) (LocateData, error) {
 	if _, err := DecodeIdentityJSON(data, maxBytes); err != nil {
 		return r, err
 	}
-	f, err := scopeObject(data, []string{"operation", "candidates"}, nil)
+	f, err := optionalObject(data, maxBytes, "operation", "candidates", "excerpts")
 	if err != nil {
 		return r, err
 	}
@@ -168,6 +174,29 @@ func DecodeLocateDataJSON(data []byte, maxBytes int) (LocateData, error) {
 			return LocateData{}, err
 		}
 		r.Candidates = append(r.Candidates, c)
+	}
+	if raw, exists := f["excerpts"]; exists {
+		var excerpts []json.RawMessage
+		if err := json.Unmarshal(raw, &excerpts); err != nil || len(excerpts) == 0 || len(excerpts) > 32 {
+			return LocateData{}, fmt.Errorf("invalid excerpts")
+		}
+		for _, item := range excerpts {
+			fields, err := scopeObject(item, []string{"source_ref", "start_line", "content"}, nil)
+			if err != nil {
+				return LocateData{}, err
+			}
+			ref, err := DecodeSourceRefJSON(fields["source_ref"], maxBytes)
+			if err != nil {
+				return LocateData{}, err
+			}
+			var x LocatedExcerpt
+			if err := json.Unmarshal(item, &x); err != nil || x.StartLine < 1 || x.StartLine > maxExactInteger ||
+				len(x.Content) == 0 || len(x.Content) > 4096 || int64(len(x.Content)) != ref.Range.EndByte-ref.Range.StartByte {
+				return LocateData{}, fmt.Errorf("invalid located excerpt")
+			}
+			x.SourceRef = ref
+			r.Excerpts = append(r.Excerpts, x)
+		}
 	}
 	return r, nil
 }

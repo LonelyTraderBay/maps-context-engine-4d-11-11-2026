@@ -47,7 +47,7 @@ func (s *Store) ReadGenerationWithCoverage(ctx context.Context, profileID, gener
 		return GenerationObservation{}, model.Coverage{}, ErrInvalidStore
 	}
 	var coverage model.Coverage
-	generation, err := s.readGeneration(ctx, profileID, generationID, authorize, maxManifestBytes, func(tx *sql.Tx, value GenerationObservation) error {
+	generation, err := s.readGeneration(ctx, profileID, generationID, authorize, maxManifestBytes, func(tx *sql.Tx, value GenerationObservation, _ []byte) error {
 		if !matches(value) {
 			return nil
 		}
@@ -62,7 +62,7 @@ func (s *Store) ReadGenerationWithCoverage(ctx context.Context, profileID, gener
 }
 
 func (s *Store) readGeneration(ctx context.Context, profileID, generationID string, authorize GenerationAuthorizer,
-	maxManifestBytes int, readCoverage func(*sql.Tx, GenerationObservation) error) (output GenerationObservation, resultErr error) {
+	maxManifestBytes int, readDetails func(*sql.Tx, GenerationObservation, []byte) error) (output GenerationObservation, resultErr error) {
 	if ctx == nil || !s.readable() || !validHash(profileID) || generationID != "" && !validUUID(generationID) || authorize == nil || maxManifestBytes < 1 || maxManifestBytes > 64*1024*1024 {
 		return GenerationObservation{}, ErrInvalidStore
 	}
@@ -135,8 +135,8 @@ func (s *Store) readGeneration(ctx context.Context, profileID, generationID stri
 	if err := s.verifyGenerationManifest(raw, value, maxManifestBytes); err != nil {
 		return GenerationObservation{}, err
 	}
-	if readCoverage != nil {
-		if err := readCoverage(tx, value); err != nil {
+	if readDetails != nil {
+		if err := readDetails(tx, value, raw); err != nil {
 			return GenerationObservation{}, err
 		}
 	}

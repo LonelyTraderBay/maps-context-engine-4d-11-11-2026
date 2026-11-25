@@ -58,7 +58,7 @@ func NewWithOptions(service *app.CoreService, options Options) (*Server, error) 
 	})
 	descriptions := map[string]string{
 		"mce4d_workspace_status": "Report the registered workspace and published index status.",
-		"mce4d_locate":           "Find a source location or symbol within the authorized scope.",
+		"mce4d_locate":           "Find a source location or symbol within the authorized scope. For Go, mode=evidence returns numbered excerpts. Use match=question for a question without a symbol name, or pass an exact name with an optional path.",
 		"mce4d_context_pack":     "Build a bounded, source-backed context pack for a task.",
 		"mce4d_expand_pack":      "Continue a previously issued context pack.",
 		"mce4d_validate_pack":    "Request validation of a pack or rename result before editing.",

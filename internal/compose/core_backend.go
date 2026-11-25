@@ -241,6 +241,9 @@ func (b *CoreBackend) Locate(ctx context.Context, principal app.CorePrincipal, r
 	if request.Mode == "topic" {
 		return b.locateTopic(ctx, principal, request, options, observation, binding, guard, base)
 	}
+	if request.Mode == "evidence" {
+		return b.locateGoEvidence(ctx, principal, request, options, observation, base)
+	}
 	// If the actual wire envelope is too large, retry the same pinned keyset
 	// with a smaller limit. No page bytes or cursor are released until it fits.
 	for limit := request.Limit; limit >= 1; limit-- {

@@ -15,6 +15,7 @@ type Request struct {
 	Query                   string
 	Kinds                   []string // exact symbol kinds; empty means all kinds
 	Package                 string   // exact Go import path; empty means all packages
+	Path                    string   // exact repository-relative file for a symbol query
 	Qualified               bool
 	Position                *model.PositionSelector
 	Limit                   int

@@ -77,6 +77,8 @@ func (a *BoundCoreAuthority) AuthorizeRequest(ctx context.Context, p app.CorePri
 		scope = value.Scope
 		if value.Position != nil {
 			inputPath = value.Position.Path
+		} else if value.Path != nil {
+			inputPath = *value.Path
 		}
 	case model.PackRequest:
 		if name != "mce4d_context_pack" {
@@ -280,6 +282,15 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 			}
 		}
 	case model.LocateData:
+		query, ok := request.(model.LocateRequest)
+		if !ok || len(data.Excerpts) > 0 && query.Mode != "evidence" {
+			return ErrAuthority
+		}
+		for _, excerpt := range data.Excerpts {
+			if err := checkRef(excerpt.SourceRef); err != nil {
+				return err
+			}
+		}
 		for _, item := range data.Candidates {
 			if err := checkGraph(item.Ref); err != nil {
 				return err

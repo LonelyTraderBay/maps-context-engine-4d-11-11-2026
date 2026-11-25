@@ -132,6 +132,29 @@ func testPackagedWindowsIndex(t *testing.T, ctx context.Context, bin, installati
 	if !bytes.Contains(locate, []byte("PublishMarker")) || !bytes.Contains(locate, []byte("marker.go")) {
 		t.Fatalf("published Go syntax missing: %s", locate)
 	}
+	for _, request := range []string{
+		`{"mode":"evidence","query":"PublishMarker","path":"marker.go"}`,
+		`{"mode":"evidence","match":"question","query":"Hàm nào trả chuỗi đánh dấu?","path":"marker.go"}`,
+	} {
+		raw := cli(6, request, append(append([]string(nil), bind...), "locate", "--input-json", "-")...)
+		var response struct {
+			Scope model.ScopeVector `json:"scope"`
+			Data  json.RawMessage   `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &response); err != nil || len(response.Scope.Members) != 1 ||
+			response.Scope.Members[0] != status.Scope.Members[0] {
+			t.Fatalf("Go evidence must bind to the indexed scope: %s, %v", raw, err)
+		}
+		data, err := model.DecodeLocateDataJSON(response.Data, 32768)
+		if err != nil || len(data.Excerpts) != 1 {
+			t.Fatalf("expected one verified Go declaration: %s, %v", response.Data, err)
+		}
+		excerpt := data.Excerpts[0]
+		if excerpt.SourceRef.Path != "marker.go" || excerpt.StartLine != 2 ||
+			excerpt.Content != strings.SplitN(source, "\n", 2)[1] {
+			t.Fatalf("Go locate evidence lost its source bytes or physical line: %+v", excerpt)
+		}
+	}
 	for _, term := range []string{"bluefixtureterm", "allowedfixtureterm", "untrackedfixtureterm", "shouldnotappear",
 		"infofixtureterm", "globalfixtureterm", "blockedparentfixtureterm", "nestedignorefixtureterm", "fixtureprivateboundary"} {
 		var found struct {

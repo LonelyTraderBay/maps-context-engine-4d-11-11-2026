@@ -95,8 +95,12 @@ func LocateKeysetPage(ctx context.Context, reader Reader, codec *contextpack.Cur
 	base.Query, base.Position, base.Qualified = "", nil, false
 	base.Kinds = append([]string(nil), decoded.Kinds...)
 	base.Package = ""
+	base.Path = ""
 	if decoded.Package != nil {
 		base.Package = *decoded.Package
+	}
+	if decoded.Path != nil {
+		base.Path = *decoded.Path
 	}
 	if decoded.Position != nil {
 		base.Mode, base.Position = "position", decoded.Position
@@ -106,6 +110,9 @@ func LocateKeysetPage(ctx context.Context, reader Reader, codec *contextpack.Cur
 		base.Mode, base.Query = "file", *decoded.Query
 	} else {
 		base.Mode, base.Query = "prefix", *decoded.Query
+		if base.Path != "" {
+			base.Mode = "exact"
+		}
 	}
 	result, err := reader.Search(ctx, base)
 	if err != nil {

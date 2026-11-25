@@ -20,10 +20,12 @@ type StatusRequest struct {
 type LocateRequest struct {
 	Scope    *ScopeRequest     `json:"scope,omitempty"`
 	Mode     string            `json:"mode"`
+	Match    string            `json:"match,omitempty"`
 	Query    *string           `json:"query,omitempty"`
 	Position *PositionSelector `json:"position,omitempty"`
 	Kinds    []string          `json:"kinds,omitempty"`
 	Package  *string           `json:"package,omitempty"`
+	Path     *string           `json:"path,omitempty"`
 	Limit    int64             `json:"limit"`
 	Cursor   *string           `json:"cursor,omitempty"`
 }
@@ -84,7 +86,7 @@ func DecodeStatusRequestJSON(data []byte, maxBytes int) (StatusRequest, error) {
 }
 func DecodeLocateRequestJSON(data []byte, maxBytes int) (LocateRequest, error) {
 	var r LocateRequest
-	fields, err := optionalObject(data, maxBytes, "scope", "mode", "query", "position", "kinds", "package", "limit", "cursor")
+	fields, err := optionalObject(data, maxBytes, "scope", "mode", "match", "query", "position", "kinds", "package", "path", "limit", "cursor")
 	if err != nil {
 		return r, err
 	}
@@ -119,7 +121,7 @@ func DecodeLocateRequestJSON(data []byte, maxBytes int) (LocateRequest, error) {
 		body.Limit = 20
 	}
 	switch body.Mode {
-	case "symbol", "file", "module", "topic", "text":
+	case "symbol", "file", "module", "topic", "text", "evidence":
 	default:
 		return LocateRequest{}, fmt.Errorf("invalid locate mode")
 	}
@@ -128,6 +130,15 @@ func DecodeLocateRequestJSON(data []byte, maxBytes int) (LocateRequest, error) {
 	}
 	if (body.Query == nil) == (body.Position == nil) || (body.Query != nil && !lengthOK(*body.Query, 512)) || (body.Package != nil && !lengthOK(*body.Package, 512)) || (body.Cursor != nil && !lengthOK(*body.Cursor, 32768)) || body.Limit < 1 || body.Limit > 100 || len(body.Kinds) > 16 {
 		return LocateRequest{}, fmt.Errorf("invalid locate request")
+	}
+	if body.Path != nil && (body.Mode != "symbol" && body.Mode != "evidence" || body.Position != nil || !validSourcePath(*body.Path)) {
+		return LocateRequest{}, fmt.Errorf("invalid symbol path filter")
+	}
+	if body.Mode == "evidence" && (body.Query == nil || body.Cursor != nil) {
+		return LocateRequest{}, fmt.Errorf("evidence lookup requires a query and starts a new read")
+	}
+	if _, hasMatch := fields["match"]; hasMatch && (body.Mode != "evidence" || body.Match != "question") {
+		return LocateRequest{}, fmt.Errorf("invalid evidence match")
 	}
 	for _, kind := range body.Kinds {
 		if !validID(kind) {

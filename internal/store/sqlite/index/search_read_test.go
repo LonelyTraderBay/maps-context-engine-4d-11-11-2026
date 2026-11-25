@@ -147,6 +147,18 @@ func TestSearchSymbolsAmbiguityPositionAndPrefix(t *testing.T) {
 	}
 }
 
+func TestSearchSymbolPathDisambiguatesIdenticalNames(t *testing.T) {
+	store, _, request := searchFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request.Mode, request.Query, request.Path = "exact", "Same", "b/b.go"
+	result, err := store.Search(ctx, request)
+	if err != nil || result.Ambiguous || len(result.Symbols) != 1 ||
+		result.Symbols[0].Source == nil || result.Symbols[0].Source.Path != request.Path {
+		t.Fatalf("file-scoped search: %+v %v", result, err)
+	}
+}
+
 func TestSearchPositionRetainsOverlappingRealSymbols(t *testing.T) {
 	filename, key := "b/b.go", "pkg1"
 	extra := model.SymbolFact{SymbolID: "symbol1-alternate", Path: &filename, PackageKey: &key, Kind: "function", Name: "Same", QualifiedName: "pkg1.Same", ScopeKey: key, Range: &model.ByteRange{StartByte: 15, EndByte: 19}, Signature: "func Same()"}

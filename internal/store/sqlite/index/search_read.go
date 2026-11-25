@@ -71,6 +71,14 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 			return output, err
 		}
 	}
+	if request.Path != "" {
+		if (request.Mode != "exact" && request.Mode != "prefix") || policy.CheckPath(request.Path) != nil {
+			return output, ErrInvalidSearch
+		}
+		if err := request.Scanner.CheckContent([]byte(request.Path)); err != nil {
+			return output, err
+		}
+	}
 	request.Kinds = append([]string(nil), request.Kinds...)
 	for _, kind := range request.Kinds {
 		if !utf8.ValidString(kind) || len(kind) > 768 || utf8.RuneCountInString(kind) < 1 || utf8.RuneCountInString(kind) > 192 {
@@ -388,6 +396,10 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 		// so a filter cannot silently turn an ambiguous match into a unique one.
 		where += " AND EXISTS (SELECT 1 FROM packages p WHERE p.generation_id=s.generation_id AND p.package_key=s.package_key AND p.import_path=?)"
 		args = append(args, request.Package)
+	}
+	if request.Path != "" {
+		where += " AND s.path=?"
+		args = append(args, request.Path)
 	}
 	if request.Keyset {
 		order = "s.symbol_id COLLATE BINARY"
