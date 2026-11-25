@@ -1,4 +1,5 @@
-/artifacts/
+/artifacts/*
+!/artifacts/go.mod
 /mce4d
 /mce4d.exe
 /node_modules/
