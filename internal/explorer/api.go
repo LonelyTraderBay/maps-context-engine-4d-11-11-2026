@@ -293,8 +293,13 @@ func (s *Server) exchange(ctx context.Context, w http.ResponseWriter, request mo
 	if s.supportsObservedFlow() {
 		capabilities = append(capabilities, "observed_flow")
 	}
+	var expiresAt *string
+	if !end.IsZero() {
+		timestamp := end.Format(time.RFC3339Nano)
+		expiresAt = &timestamp
+	}
 	response.Data = model.BootstrapData{Operation: "bootstrap", Bearer: bearer,
-		ExpiresAt: end.Format(time.RFC3339Nano), Capabilities: capabilities}
+		ExpiresAt: expiresAt, Capabilities: capabilities}
 	body, err := encode(response)
 	if err != nil {
 		s.auth.revoke()

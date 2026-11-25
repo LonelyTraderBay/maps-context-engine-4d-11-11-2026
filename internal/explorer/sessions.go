@@ -125,7 +125,10 @@ func (s *PreviewSessions) attach(ctx context.Context, actor [32]byte, bearerEnd 
 	if err != nil {
 		return previewReply{}, ErrPreviewDenied
 	}
-	remaining := min(30*time.Minute, expires.Sub(attached), bearerEnd.Sub(attached))
+	remaining := min(30*time.Minute, expires.Sub(attached))
+	if !bearerEnd.IsZero() {
+		remaining = min(remaining, bearerEnd.Sub(attached))
+	}
 	if remaining <= 0 {
 		return previewReply{}, ErrPreviewExpired
 	}

@@ -11,7 +11,7 @@ type BootstrapRequest struct {
 type BootstrapData struct {
 	Operation    string   `json:"operation"`
 	Bearer       string   `json:"bearer"`
-	ExpiresAt    string   `json:"expires_at"`
+	ExpiresAt    *string  `json:"expires_at"`
 	Capabilities []string `json:"capabilities"`
 }
 
@@ -38,7 +38,8 @@ func DecodeBootstrapDataJSON(data []byte, maxBytes int) (BootstrapData, error) {
 	if _, err := DecodeIdentityJSON(data, maxBytes); err != nil {
 		return r, err
 	}
-	if _, err := scopeObject(data, []string{"operation", "bearer", "expires_at", "capabilities"}, nil); err != nil {
+	if _, err := scopeObject(data, []string{"operation", "bearer", "expires_at", "capabilities"},
+		map[string]bool{"expires_at": true}); err != nil {
 		return r, err
 	}
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -47,8 +48,10 @@ func DecodeBootstrapDataJSON(data []byte, maxBytes int) (BootstrapData, error) {
 	if r.Operation != "bootstrap" || !boundedString(r.Bearer, 64) || r.Capabilities == nil || len(r.Capabilities) > 64 {
 		return BootstrapData{}, fmt.Errorf("invalid bootstrap data")
 	}
-	if _, err := utcTimestamp(r.ExpiresAt); err != nil {
-		return BootstrapData{}, fmt.Errorf("invalid expiry")
+	if r.ExpiresAt != nil {
+		if _, err := utcTimestamp(*r.ExpiresAt); err != nil {
+			return BootstrapData{}, fmt.Errorf("invalid expiry")
+		}
 	}
 	for _, c := range r.Capabilities {
 		if !validID(c) {

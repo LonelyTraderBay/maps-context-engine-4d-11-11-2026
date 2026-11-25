@@ -2,6 +2,8 @@
 
 The foreground CLI binds a single authorized worktree/profile and gives the local operator an ephemeral IPv4 loopback origin and a one-time bootstrap code. The code belongs in the form body sent to `POST /api/explorer/v1/session/bootstrap`. It expires in 60 seconds. Use the returned bearer in the `Authorization: Bearer …` header and keep it in browser memory. Reload or expiry requires a fresh foreground session.
 
+For personal use, append `--session-until-exit` to `mce4d explorer --worktree-id <id> --profile-id <id>`. The authenticated tab stays connected while the foreground process and source authorization remain active. When the response has no timed authorization deadline, `expires_at` is `null`. The default browser session is limited to 30 minutes. Any attached preview keeps its own expiry.
+
 The HTTP server requires the bound Host and exact Origin. Same-origin browser GET requests may use Fetch Metadata when Origin is absent. Each POST also requires `X-MCE4D-Intent: explorer` and JSON. The adapter delivers scope and source only after rechecking the current bound store and policy. The response body uses the S43 envelope. The bearer has no cookie or URL transport.
 
 | Operation | Behavior |

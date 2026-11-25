@@ -18,6 +18,10 @@ func runExplorer(ctx context.Context, args []string, selected string, stdout, st
 		_, _ = fmt.Fprintln(stderr, "mce4d: "+message)
 		return code
 	}
+	untilExit := len(args) > 0 && args[len(args)-1] == "--session-until-exit"
+	if untilExit {
+		args = args[:len(args)-1]
+	}
 	if (len(args) != 4 && len(args) != 6) || args[0] != "--worktree-id" || !model.ValidUUID(args[1]) ||
 		args[2] != "--profile-id" || !model.ValidDigest(args[3]) ||
 		len(args) == 6 && (args[4] != "--listen" || args[5] != explorer.ListenAddr) {
@@ -40,6 +44,7 @@ func runExplorer(ctx context.Context, args []string, selected string, stdout, st
 		return diagnostic("Explorer binding owner did not supply a release function", 5)
 	}
 	options.Assets = deps.ExplorerAssets
+	options.SessionUntilExit = untilExit
 	server, code, err := explorer.Listen(ctx, options)
 	if err != nil {
 		if release() != nil {

@@ -90,9 +90,9 @@ export function createExplorerClient() {
       const response = await exchange('POST /session/bootstrap', { code }, signal);
       const data = response.data;
       if (!data || !/^[A-Za-z0-9_-]{43}$/.test(data.bearer)) throw new Error('Bearer Explorer không hợp lệ.');
-      const expires = Date.parse(data.expires_at);
-      const remaining = Math.min(30 * 60_000, expires - Date.now());
-      if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Phiên Explorer đã hết hạn.');
+      const expires = data.expires_at === null ? Infinity : Date.parse(data.expires_at);
+      const remaining = expires - Date.now();
+      if (Number.isNaN(remaining) || remaining <= 0) throw new Error('Phiên Explorer đã hết hạn.');
       signal.throwIfAborted();
       session = { bearer: data.bearer, expires, deadline: performance.now() + remaining,
         preview: data.capabilities.includes('preview_attach'), records: data.capabilities.includes('mapping_propose'),

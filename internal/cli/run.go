@@ -60,7 +60,7 @@ Usage:
   mce4d [--runtime-config <approved-local-file>] config show|validate|set --input-json <file-or-dash>
   mce4d query status|locate --input-json <file-or-dash>
   mce4d mcp --worktree-id <id> --profile-id <id>
-  mce4d explorer --worktree-id <id> --profile-id <id> --listen 127.0.0.1:0
+  mce4d explorer --worktree-id <id> --profile-id <id> [--listen 127.0.0.1:0] [--session-until-exit]
   mce4d profile set --worktree-id <id> --input-json <file-or-dash>
   mce4d repo add --root <approved-absolute-path>
   mce4d policy set --input-json <file-or-dash>

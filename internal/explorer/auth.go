@@ -37,6 +37,7 @@ type credentials struct {
 	expired     bool
 	cutoff      time.Time
 	ttl         time.Duration
+	untilExit   bool
 	codeTime    lifetime
 	bearerTime  lifetime
 	lastAttempt [attemptLimit]time.Time
@@ -59,7 +60,7 @@ func tokenHash(token string) ([32]byte, bool) {
 	return sha256.Sum256([]byte(token)), err == nil && len(raw) == 32
 }
 
-func newCredentials(now, cutoff time.Time, ttl time.Duration) (*credentials, string, error) {
+func newCredentials(now, cutoff time.Time, ttl time.Duration, untilExit bool) (*credentials, string, error) {
 	if ttl <= 0 || ttl > bearerTTL {
 		ttl = bearerTTL
 	}
@@ -68,7 +69,8 @@ func newCredentials(now, cutoff time.Time, ttl time.Duration) (*credentials, str
 		return nil, "", err
 	}
 	digest, _ := tokenHash(code)
-	return &credentials{bootstrap: digest, hasCode: true, cutoff: cutoff, ttl: ttl, codeTime: lifetime{now, now.Add(bootstrapTTL)}}, code, nil
+	return &credentials{bootstrap: digest, hasCode: true, cutoff: cutoff, ttl: ttl, untilExit: untilExit,
+		codeTime: lifetime{now, now.Add(bootstrapTTL)}}, code, nil
 }
 
 func (c *credentials) countAttempt(now time.Time) bool {
@@ -102,9 +104,12 @@ func (c *credentials) exchange(code string, now time.Time) (string, time.Time, s
 	if err != nil {
 		return "", time.Time{}, "INTERNAL_ERROR"
 	}
-	end := now.Add(c.ttl)
-	if !c.cutoff.IsZero() && c.cutoff.Before(end) {
-		end = c.cutoff
+	end := c.cutoff
+	if !c.untilExit {
+		timedEnd := now.Add(c.ttl)
+		if end.IsZero() || timedEnd.Before(end) {
+			end = timedEnd
+		}
 	}
 	c.bearer, _ = tokenHash(bearer)
 	c.hasBearer, c.hasCode = true, false
@@ -142,7 +147,7 @@ func (c *credentials) authenticate(token string, now time.Time) string {
 	if !valid || !c.hasBearer || subtle.ConstantTimeCompare(digest[:], c.bearer[:]) != 1 {
 		return "AUTH_INVALID"
 	}
-	if c.expired || !c.bearerTime.live(now) {
+	if c.expired || !c.bearerTime.end.IsZero() && !c.bearerTime.live(now) {
 		c.expired = true
 		return "AUTH_EXPIRED"
 	}

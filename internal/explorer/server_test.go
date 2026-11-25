@@ -153,7 +153,7 @@ func TestExplorerExactOriginAndReadRoutes(t *testing.T) {
 
 func TestExplorerCredentialsBoundedAndSingleUse(t *testing.T) {
 	issued := time.Now()
-	creds, code, err := newCredentials(issued, issued.Add(3*time.Second), 30*time.Minute)
+	creds, code, err := newCredentials(issued, issued.Add(3*time.Second), 30*time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,12 +186,59 @@ func TestExplorerCredentialsBoundedAndSingleUse(t *testing.T) {
 	if creds.countAttempt(issued.Add(59*time.Second)) || !creds.countAttempt(issued.Add(time.Minute)) {
 		t.Fatal("invalid attempt window")
 	}
-	stale, expiredCode, err := newCredentials(issued, time.Time{}, bearerTTL)
+	stale, expiredCode, err := newCredentials(issued, time.Time{}, bearerTTL, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, denial := stale.exchange(expiredCode, issued.Add(bootstrapTTL)); denial != "AUTH_EXPIRED" {
 		t.Fatal("expired bootstrap accepted")
+	}
+}
+
+func TestExplorerSessionUntilExitPreservesAuthority(t *testing.T) {
+	owner := &fixtureReader{}
+	owner.check.Store(true)
+	s, code, err := Listen(context.Background(), Options{Reader: owner, QueryTimeout: time.Second, BearerTTL: time.Second,
+		SessionUntilExit: true, Assets: fstest.MapFS{"index.html": {Data: []byte(homeDocument)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	now := s.auth.codeTime.start
+	s.now = func() time.Time { return now }
+	session := bootstrapBearer(t, s, code)
+	if session.ExpiresAt != nil {
+		t.Fatal("process session returned a timed expiry")
+	}
+	if out := respond(s, request(s, "POST", APIPath+"/session/bootstrap", `{"code":"`+code+`"}`, "")); out.Code != 401 {
+		t.Fatalf("one-time code reused: %d", out.Code)
+	}
+	poll := request(s, "GET", APIPath+"/workspace", "", session.Bearer)
+	now = now.Add(24 * time.Hour)
+	if out := respond(s, poll); out.Code != 200 {
+		t.Fatalf("process session expired: %d", out.Code)
+	}
+	owner.check.Store(false)
+	if out := respond(s, poll); out.Code != 403 {
+		t.Fatalf("revoked source permission was accepted: %d", out.Code)
+	}
+	owner.check.Store(true)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if s.auth.authenticate(session.Bearer, now) != "AUTH_INVALID" {
+		t.Fatal("closed server retained its bearer")
+	}
+
+	cutoff := now.Add(time.Hour)
+	limited, code, err := newCredentials(now, cutoff, time.Second, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer, end, reason := limited.exchange(code, now)
+	if reason != "" || !end.Equal(cutoff) || limited.authenticate(bearer, now.Add(time.Minute)) != "" ||
+		limited.authenticate(bearer, cutoff) != "AUTH_EXPIRED" {
+		t.Fatal("process session did not honor source authorization deadline")
 	}
 }
 

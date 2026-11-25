@@ -51,6 +51,7 @@ type Options struct {
 	Assets            fs.FS
 	QueryTimeout      time.Duration
 	BearerTTL         time.Duration
+	SessionUntilExit  bool
 	AuthorizationEnds time.Time
 }
 
@@ -93,7 +94,7 @@ func Listen(ctx context.Context, options Options) (*Server, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	auth, code, err := newCredentials(time.Now(), options.AuthorizationEnds, options.BearerTTL)
+	auth, code, err := newCredentials(time.Now(), options.AuthorizationEnds, options.BearerTTL, options.SessionUntilExit)
 	if err != nil {
 		return nil, "", errors.Join(err, listener.Close())
 	}
