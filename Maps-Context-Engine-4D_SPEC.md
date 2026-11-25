@@ -1175,6 +1175,8 @@ Ngày 25/11/2026, [lượt CI của commit `153719e`](https://github.com/LonelyT
 
 Ngày 25/11/2026, bản Windows native tại commit `9e6dd28` mở thành công index Maps cũ dung lượng **12,96 MiB** (13.586.432 byte) và đọc đúng generation đã ghim. Truy vấn live tái tạo **30/30 prompt S18 khớp từng byte** với bộ đã lưu, gồm 10 ca mỗi repo Maps, google/uuid và go-humanize. SHA-256 của ba ảnh SQLite index và các WAL head độc lập đều khớp trước và sau truy vấn. [CI của commit `9e6dd28`](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45539987450) hoàn tất **5/5 job PASS**. Lượt kiểm live chỉ tạo prompt từ bằng chứng đã truy vấn, không gọi Codex hay chạy script repo mẫu.
 
+Ngày 25/11/2026, CI của commit `d890d87` hoàn tất **5/5 job PASS**. Job S18 Windows tạo ba worktree từ nguồn đã ghim trong fixture cô lập, mở lại index Maps **trên 4 MiB** và truy vấn qua CLI để tái tạo **30/30 prompt live khớp từng byte** với bộ đã lưu. Hash của các ảnh SQLite index và WAL head độc lập khớp trước và sau truy vấn. Job không gọi Codex hay chạy script repo mẫu. [Lượt CI của `d890d87`](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45542162476) · [Job S18 Windows](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45542162476/job/138963018428)
+
 ## S19 — Bảng triển khai duy nhất
 
 ### Protocol trạng thái
