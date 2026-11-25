@@ -23,8 +23,10 @@ import (
 )
 
 const (
-	windowsManifestLimit   = 1 << 20
-	windowsGoSyntaxVersion = "2"
+	windowsManifestLimit    = 1 << 20
+	windowsTSSourceLimit    = 20 << 20
+	windowsIndexMaxDuration = 10 * time.Minute
+	windowsGoSyntaxVersion  = "2"
 )
 
 var errWindowsSnapshotChanged = errors.New("Windows index snapshot changed during reconciliation")
@@ -33,7 +35,7 @@ func windowsCaptureChanged(err error) bool {
 	return err == errWindowsSnapshotChanged || err == inventory.ErrWalkChanged || err == inventory.ErrCaptureChanged
 }
 
-// RunWindowsIndex publishes Go facts from an authorized Windows Git capture.
+// RunWindowsIndex publishes provider facts from an authorized Windows Git capture.
 // Typed analysis uses the approved offline toolchain against protected scratch.
 func RunWindowsIndex(ctx context.Context, installation, selected, worktree, profile string, cpus int, full, watch bool,
 	progress func(NativeIndexProgress) error) error {
@@ -65,12 +67,17 @@ func RunWindowsIndex(ctx context.Context, installation, selected, worktree, prof
 }
 
 func runWindowsIndexOnce(ctx context.Context, installation, worktree, profile string, cpus int, full, watch bool) (_ NativeIndexProgress, _ time.Duration, _ bool, resultErr error) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	started := time.Now()
+	ctx, cancel := context.WithDeadline(ctx, started.Add(windowsIndexMaxDuration))
 	defer cancel()
 	var poll time.Duration
 	var deferred bool
 	var typed *windowsTypedGo
+	var cancelIndex context.CancelFunc
 	defer func() {
+		if cancelIndex != nil {
+			cancelIndex()
+		}
 		if typed != nil {
 			resultErr = errors.Join(resultErr, typed.proof.Close())
 		}
@@ -94,13 +101,24 @@ func runWindowsIndexOnce(ctx context.Context, installation, worktree, profile st
 			(binding.Profile.Goos != "windows" || len(binding.Profile.DependencyRoots) != 0) {
 			return plan, app.ErrCoreUnsupported
 		}
+		timeout := 60 * time.Second
+		if _, ok := binding.AddonProfile.(*model.TSProfile); ok {
+			configured, err := nativeMilliseconds(effective.Core.IndexTimeoutMs)
+			if err != nil {
+				return plan, err
+			}
+			timeout = min(configured, windowsIndexMaxDuration)
+		}
+		plan.Deadline = started.Add(timeout)
+		indexCtx, stop := context.WithDeadline(ctx, plan.Deadline)
+		cancelIndex = stop
 		c, err := newWindowsIndexCapture(scope, effective.Core)
 		if err != nil {
 			return plan, err
 		}
-		frozen, err := c.capture(ctx)
+		frozen, err := c.capture(indexCtx)
 		if watch && c.scope.Binding.AddonProfile != nil && windowsCaptureChanged(err) {
-			frozen, err = c.capture(ctx)
+			frozen, err = c.capture(indexCtx)
 		}
 		if err != nil {
 			return plan, err
@@ -108,7 +126,7 @@ func runWindowsIndexOnce(ctx context.Context, installation, worktree, profile st
 		var facts windowsFactStage
 		var generation string
 		if c.powershell != nil {
-			facts, err = c.analyzePowerShell(ctx, installation, frozen)
+			facts, err = c.analyzePowerShell(indexCtx, installation, frozen)
 			if err != nil {
 				return plan, err
 			}
@@ -117,13 +135,13 @@ func runWindowsIndexOnce(ctx context.Context, installation, worktree, profile st
 			if err != nil {
 				return plan, err
 			}
-			facts, err = c.analyzeAddon(ctx, installation, frozen, generation, effective.Core.MaxWorktreeCacheBytes)
+			facts, err = c.analyzeAddon(indexCtx, installation, frozen, generation, effective.Core.MaxWorktreeCacheBytes)
 			if err != nil {
 				return plan, err
 			}
 		}
 		if binding.Profile != nil && binding.Profile.AnalysisMode == "typed_when_available" {
-			typed, err = c.analyzeTypedGo(ctx, frozen, effective.Core.MaxWorktreeCacheBytes)
+			typed, err = c.analyzeTypedGo(indexCtx, frozen, effective.Core.MaxWorktreeCacheBytes)
 			if watch && windowsCaptureChanged(err) {
 				deferred = true
 				return plan, errWindowsSnapshotChanged
@@ -136,7 +154,7 @@ func runWindowsIndexOnce(ctx context.Context, installation, worktree, profile st
 			// Recheck the capture before writing a receipt. If a save
 			// arrived during this scan, reconcile it on the next poll.
 			plan.Reuse = func(store *index.Store) (NativeIndexProgress, bool, error) {
-				err := c.revalidate(ctx, frozen)
+				err := c.revalidate(indexCtx, frozen)
 				if watch && windowsCaptureChanged(err) {
 					deferred = true
 					return NativeIndexProgress{}, true, nil
@@ -144,13 +162,13 @@ func runWindowsIndexOnce(ctx context.Context, installation, worktree, profile st
 				if err != nil {
 					return NativeIndexProgress{}, false, err
 				}
-				current, err := c.indexProgress(ctx, store, frozen, false)
+				current, err := c.indexProgress(indexCtx, store, frozen, false)
 				return current, current.Unchanged, err
 			}
 		}
 		plan.CacheLimit = effective.Core.MaxWorktreeCacheBytes
 		plan.Publish = func(store *index.Store, writer *runtime.Writer, job string) (NativeIndexProgress, error) {
-			return c.publish(ctx, store, writer, job, frozen, full, generation, facts, typed)
+			return c.publish(indexCtx, store, writer, job, frozen, full, generation, facts, typed)
 		}
 		return plan, nil
 	})
@@ -213,8 +231,12 @@ func newWindowsIndexCapture(scope sqlite.WindowsIndexScope, limits model.CoreRun
 	if ps != nil {
 		maxFile = min(maxFile, powershellprovider.MaxSourceBytes)
 	}
+	maxSource := int64(windowsManifestLimit)
+	if addon != nil && addon.id == tsprovider.ProviderID {
+		maxSource = windowsTSSourceLimit
+	}
 	return windowsIndexCapture{scope: scope, scanner: scanner, maxEntries: int(min(limits.MaxIndexedFiles, 100000)),
-		maxFile: int(maxFile), maxBytes: min(policy.MaxSourceBytes, limits.MaxSourceBytesPerSnapshot, windowsManifestLimit), powershell: ps, addon: addon}, nil
+		maxFile: int(maxFile), maxBytes: min(policy.MaxSourceBytes, limits.MaxSourceBytesPerSnapshot, maxSource), powershell: ps, addon: addon}, nil
 }
 
 func (c windowsIndexCapture) capturePath(name string) bool {
@@ -260,7 +282,10 @@ func (c windowsIndexCapture) inventory(ctx context.Context) (inventory.FileMap, 
 		AuthorizePath: func(ctx context.Context, name string, directory bool) (bool, error) {
 			return policy.CheckConfiguredPath(name, b.Policy.DeniedGlobs) == nil, ctx.Err()
 		},
-		Exclude: func(name string, directory bool) bool { return !directory && !c.capturePath(name) },
+		Exclude: func(name string, directory bool) bool {
+			// Git rules are inventory inputs even when the provider cannot analyze them.
+			return !directory && !strings.EqualFold(filepath.Base(name), ".gitignore") && !c.capturePath(name)
+		},
 	})
 }
 

@@ -41,6 +41,7 @@ type WindowsIndexPublish[T any] func(*index.Store, *runtime.Writer, string) (T, 
 
 type WindowsIndexPlan[T any] struct {
 	CacheLimit int64
+	Deadline   time.Time
 	// Reuse checks the authenticated checkpoint before opening a WAL mutation.
 	Reuse   func(*index.Store) (T, bool, error)
 	Publish WindowsIndexPublish[T]
@@ -137,9 +138,11 @@ func RunWindowsIndexMutation[T any](ctx context.Context, installation, worktree,
 		if err != nil {
 			return out, err
 		}
-		if plan.Publish == nil {
+		if plan.Publish == nil || plan.Deadline.IsZero() {
 			return out, ErrProfileInput
 		}
+		ctx, cancel := context.WithDeadline(ctx, plan.Deadline)
+		defer cancel()
 		// Keep the existing reserve for a 1 MiB index. Larger indexes
 		// also need space for their preimage, WAL/SHM and receipt writes.
 		// Leave at least half the cache budget for existing files when

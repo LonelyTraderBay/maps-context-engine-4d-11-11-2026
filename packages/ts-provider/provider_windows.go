@@ -89,7 +89,7 @@ func AnalyzeWindows(ctx context.Context, tool, capture *paths.Root, script strin
 	compiler := filepath.Join(home, "compiler")
 	return providers.RunWindowsProvider(ctx, capture, job, native.WindowsJobChild{
 		Executable: filepath.Join(home, "node.exe"), Directory: home,
-		Arguments: []string{"--permission", "--max-old-space-size=256", "--allow-fs-read=" + script,
+		Arguments: []string{"--permission", "--max-old-space-size=512", "--allow-fs-read=" + script,
 			"--allow-fs-read=" + job.Start.SnapshotRoot, "--allow-fs-read=" + compiler, script},
 		Environment: []string{"MCE4D_COMPILER_ROOT=" + compiler, "TZ=UTC"},
 	}, sink)

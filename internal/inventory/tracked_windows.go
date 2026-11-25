@@ -86,6 +86,11 @@ func windowsTrackedRepositoryConfig(raw []byte) (ignoreCase, valid bool) {
 			switch key {
 			case "url", "pushurl", "fetch", "remote", "merge", "rebase":
 				continue
+			case "tagopt":
+				if value == "--no-tags" || value == "--tags" {
+					continue
+				}
+				return false, false
 			default:
 				return false, false
 			}

@@ -24,6 +24,10 @@ Trên WSL2, `mce4d watch --worktree-id <id> --profile-id <id>` theo dõi tập n
 
 Trên Windows amd64, controller đặt `node.exe`, `LICENSE`, tarball, manifest và cây compiler đã pin dưới `control/typescript/` của protected profile. Cây runtime dùng ACL controller và SYSTEM. Policy duyệt đúng đường dẫn và SHA-256 `node.exe` của mục `node_windows` trong pin. `WindowsProfile` tạo vật liệu TSProfile cho `profile set`. CLI `index` và `watch` nhận hai ID như trên. Worker dùng Job giới hạn một tiến trình, vùng đọc giới hạn bằng Node permissions, và thư mục capture riêng. CLI và MCP đọc generation Windows đã xác thực. [Node.js 24.22.3](https://nodejs.org/en/blog/release/v24.22.3)
 
+Với repo thiếu `tsconfig`, có thể tạo cấu hình nhập riêng trên checkout cục bộ đã duyệt. Chỉ định các đường dẫn tương đối trong `files` hoặc `include`, chọn đường dẫn cấu hình đó trong `tsconfig_paths` và dùng `analysis_mode: syntax` khi chưa có closure kiểu đã xác minh. `.gitignore` vẫn được đọc để kiểm kê phạm vi.
+
+Windows giới hạn phần nguồn đã capture cho TS/JS ở 20 MiB và manifest ở 1 MiB. Policy hoặc cấu hình runtime có thể đặt ngưỡng thấp hơn. Mỗi lượt index TS/JS dùng `index_timeout_ms` với trần 10 phút. Worker có trần 100.000 facts, luồng kết quả 64 MiB và Job giữ trần bộ nhớ tiến trình 768 MiB. Khi nâng worker, đăng ký profile với digest của worker trong binary mới để lập chỉ mục lại.
+
 Worker dùng JSONC, `extends` cục bộ, `include/exclude`, project references và declaration đã capture. C055 kiểm alias/re-export, hai symbol cùng tên, lexical scopes, binding đến declaration của project reference và byte range UTF-8. Thiếu binding, JS `any`, dynamic import hoặc compiler diagnostics cho trạng thái partial và gap. Project plugins, config ngoài snapshot và type acquisition bị từ chối. Phạm vi fixture dương dùng `strict`, ESNext/Bundler, ES2022, JSX preserve và allowJs/checkJs.
 
 ## Kiểm thử discovery

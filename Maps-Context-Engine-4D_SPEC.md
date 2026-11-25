@@ -871,6 +871,8 @@ Phạm vi mục này là runtime engine và owned index. Build/test/benchmark/ge
 
 Các giá trị là default đề xuất phải kiểm tra T033/T039, không benchmark đã đạt. Limits chỉ tăng qua RuntimeConfig trong hard caps schema/capability đã kiểm chứng; vượt hard cap cần revision/fixtures, không bypass bằng flag. Thay đổi default cần đo và update ADR. `GOMEMLIMIT` nếu dùng là soft Go heap limit, không phải hard RSS limit của toàn cây process. Không hứa giới hạn RAM cứng khi chưa có OS enforcement.
 
+Windows native TS/JS dùng hard cap 20 MiB mã nguồn đã capture và 1 MiB manifest. Lượt index áp dụng `index_timeout_ms` với trần 10 phút. Trần ảnh SQLite của một worktree là 256 MiB và hạn ghi thực tế còn phụ thuộc quota cùng dự trữ của worktree. Đường đọc, backup và restore dùng cùng trần ảnh. Query vẫn dùng ngân sách riêng của S15.
+
 ### Failure handling
 
 | Sự cố | Bắt buộc |

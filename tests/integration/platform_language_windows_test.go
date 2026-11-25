@@ -44,6 +44,7 @@ func testPackagedWindowsTypeScript(t *testing.T, ctx context.Context, bin, insta
 	base := windowsLanguageSource{"base.ts", "BaseTS", "export function BaseTS() { return 12; }\n"}
 	canary := filepath.Join(target, "repo-executed")
 	initial := map[string]string{
+		".gitignore":     "node_modules/\ndist/\n",
 		"tsconfig.json":  `{"compilerOptions":{"strict":true,"target":"es2022","lib":["es2022"],"types":[],"allowJs":true,"checkJs":true},"include":["*.ts","*.js"]}`,
 		base.path:        base.body,
 		"side-effect.js": "require('node:fs').writeFileSync(" + fmt.Sprintf("%q", canary) + ", 'canary');\r\n",
