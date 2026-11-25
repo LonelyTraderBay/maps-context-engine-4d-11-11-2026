@@ -34,11 +34,15 @@ def go_evidence_json(excerpts):
     return "[" + ",".join(sections) + "]"
 
 
-def prepare_prompt(question, maps, worktree_id, profile_id, *, env=None, source_view=None):
+def question_request(question):
     query = " ".join(question.split())[:512].rstrip()
     if not query:
         raise ValueError("A nonempty question is required.")
-    request = {"mode": "evidence", "match": "question", "query": query}
+    return {"mode": "evidence", "match": "question", "query": query}
+
+
+def prepare_prompt(question, maps, worktree_id, profile_id, *, env=None, source_view=None):
+    request = question_request(question)
     result = subprocess.run(
         [str(maps), "--worktree-id", worktree_id, "--profile-id", profile_id,
          "query", "locate", "--input-json", "-"],

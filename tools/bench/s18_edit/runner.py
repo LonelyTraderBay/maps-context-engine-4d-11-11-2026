@@ -9,7 +9,7 @@ HERE=Path(__file__).resolve().parent
 WS=HERE.parents[2]
 FIXTURE=HERE/"fixture"
 sys.path.insert(0,str(WS/"tools"/"codex_context"))
-from main import go_edit_prompt, go_evidence_json, prepare_go_edit_evidence, prepare_prompt
+from main import go_edit_prompt, go_evidence_json, prepare_go_edit_evidence, prepare_prompt, question_request
 
 SOURCES=json.loads((FIXTURE/"sources.json").read_bytes())
 CAPTURED=json.loads((FIXTURE/"maps-evidence.json").read_bytes())
@@ -338,12 +338,46 @@ def get_packet(case, question):
     scope=BINDINGS[case["repo"]]
     _,packet=prepare_prompt(question,MAPS,scope["worktree"],scope["profile"],
         env=dict(ENV,MCE4D_HOME=scope["profile_home"],MCE4D_WINDOWS_ROLE_IPC="1",GOMAXPROCS="4"))
-    member=packet["scope"]["members"][0]
-    if member["generation_id"]!=scope["generation"]:
-        raise RuntimeError("Maps returned a different generation from the live binding")
+    check_live_scope(packet,scope)
+    return packet
+
+
+def check_live_scope(packet, scope):
+    members=(packet.get("scope") or {}).get("members",[])
+    expected=(scope["worktree"],scope["profile"],scope["generation"])
+    if packet.get("error") or len(members)!=1:
+        raise RuntimeError("Maps did not return one authorized snapshot")
+    def identity(ref):
+        return ref["worktree_id"],ref["profile_id"],ref["generation_id"]
+    if identity(members[0])!=expected:
+        raise RuntimeError("Maps returned a different scope from the live binding")
     if not any(gap.get("code")=="GO_QUESTION_CANDIDATES" for gap in packet["coverage"]["gaps"]):
         raise RuntimeError("Maps build does not provide Go question excerpts")
-    return packet
+    for excerpt in (packet.get("data") or {}).get("excerpts",[]):
+        if identity(excerpt["source_ref"])!=expected:
+            raise RuntimeError("Maps returned a Go excerpt from a different scope")
+
+
+def check_live_capture(capture):
+    expected=read(FIXTURE/"prompt-hashes.json")
+    scopes=capture["scopes"]
+    results=capture["results"]
+    if capture["maps_index_bytes"]<=4<<20:
+        raise RuntimeError("The live Maps fixture did not exercise an index above 4 MiB")
+    if set(scopes)!=set(SOURCES) or set(results)!={case["id"] for case in CASES}:
+        raise RuntimeError("Live capture must contain all 30 cases from the three prepared repositories")
+    actual={}
+    for case in CASES:
+        case_id=case["id"]
+        packet=results[case_id]
+        check_live_scope(packet,scopes[case["repo"]])
+        source=BASE[case["repo"]]
+        prompt,count=make_prompt(question_for(case),packet,seeded(case,source),source)
+        actual[case_id]={"sha256":sha(prompt.encode()),"sections":count}
+        if not count or actual[case_id]!=expected[case_id]:
+            raise RuntimeError(f"Live C prompt differs from the accepted run: {case_id}")
+    dump(ROOT/"live-prompt-check.json",{"maps_index_bytes":capture["maps_index_bytes"],"prompts":actual})
+    print(f"Opened Maps index: {capture['maps_index_bytes']} bytes (> 4 MiB); {len(actual)}/30 live C prompts match byte for byte")
 
 
 def replay_check():
@@ -363,11 +397,12 @@ def replay_check():
 def main():
     global ROOT,CODEX,MAPS,BINDINGS
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command",choices=("prepare","preflight","replay-check","run"))
+    parser.add_argument("command",choices=("prepare","preflight","replay-check","live-check","run"))
     parser.add_argument("--output",type=Path,required=True)
     parser.add_argument("--codex",type=Path)
     parser.add_argument("--maps",type=Path)
     parser.add_argument("--bindings",type=Path)
+    parser.add_argument("--capture",type=Path,help="CLI responses written by the packaged Windows fixture")
     parser.add_argument("--jobs",type=int,default=7,choices=range(1,17),metavar="1–16")
     args=parser.parse_args()
     if sys.platform!="win32" or platform.machine().lower() not in ("amd64","x86_64"):
@@ -386,9 +421,18 @@ def main():
         for repo,files in BASE.items():
             for path,raw in files.items():
                 put(ROOT/"source"/repo/path,raw)
+        dump(ROOT/"live-requests.json",[
+            {"case":case["id"],"repo":case["repo"],"input":question_request(question_for(case))}
+            for case in CASES
+        ])
         return 0
     if args.command=="replay-check":
         replay_check()
+        return 0
+    if args.command=="live-check":
+        if not args.capture:
+            parser.error("live-check needs --capture from the packaged Windows fixture")
+        check_live_capture(read(args.capture))
         return 0
     prepare_base()
     if args.command=="preflight":

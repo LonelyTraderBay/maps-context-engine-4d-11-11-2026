@@ -155,6 +155,12 @@ func TestWindowsPackagedProfileRoleVerification(t *testing.T) {
 	}
 	args := []string{"prepare", "--root", root, "--target-root", target, "--engine-sid", engine.sid.String(), "--client-sid", client.sid.String(),
 		"--target-root", secondTarget, "--git-ignore", ignore}
+	s18Bundle := os.Getenv("MCE4D_WIN_S18_BUNDLE")
+	var thirdTarget string
+	if s18Bundle != "" {
+		thirdTarget = t.TempDir()
+		args = append(args, "--target-root", thirdTarget)
+	}
 	if os.Getenv("MCE4D_WIN_RENAME_PUBLIC") != "" {
 		lspRole := newAppContainer(t, "ProfileRename")
 		args = append(args, "--lsp-sid", lspRole.sid.String())
@@ -298,6 +304,12 @@ func TestWindowsPackagedProfileRoleVerification(t *testing.T) {
 			t.Fatalf("protected registration exited %d, expected %d: %s", code, want, stderr.String())
 		}
 		return out
+	}
+	if s18Bundle != "" {
+		testPackagedWindowsS18(t, ctx, root, s18Bundle, [3]string{target, secondTarget, thirdTarget},
+			func(dest string) []byte { return register(0, "0", "0", dest, true) },
+			func(worktree string) { run(0, "worktree-create", "--root", root, "--worktree-id", worktree) })
+		return
 	}
 	tsMaterial, pyMaterial := os.Getenv("MCE4D_WIN_TS_FIXTURE"), os.Getenv("MCE4D_WIN_PYTHON_FIXTURE")
 	if tsMaterial != "" || pyMaterial != "" {

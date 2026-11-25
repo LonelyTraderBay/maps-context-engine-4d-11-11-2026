@@ -92,9 +92,12 @@ Nếu một truy vấn lỗi trong lượt đo, report giữ ca đó và đánh 
 ## Kiểm lại kết quả đã lưu
 
 Job **S18 replay (windows-2025)** trong [CI](../../../.github/workflows/ci.yml)
-tái tạo 30 prompt, kiểm 30 bản sửa tham chiếu và 23 đối chứng, rồi tính lại
-ngưỡng 30/30 cặp từ biên nhận đã lưu. Job này dùng đường kiểm tra cục bộ
-của suite và không mở Codex.
+tái tạo 30 prompt từ gói đã lưu, kiểm 30 bản sửa tham chiếu và 23 đối chứng.
+Job cũng tạo ba worktree và index trong profile cô lập của tài khoản Windows
+thường, mở lại ảnh index Maps lớn hơn 4 MiB rồi truy vấn 30 prompt live. Bước
+live đối chiếu từng prompt với hash đã lưu và kiểm ảnh SQLite cùng WAL head
+khớp trước và sau truy vấn. Ngưỡng 30/30 cặp dưới 85% lấy từ biên nhận đã lưu.
+Job không gọi Codex hay chạy script repo mẫu.
 
 ```powershell
 & $Python -B "$Suite\report.py" --recorded

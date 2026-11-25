@@ -48,10 +48,12 @@ jobs:
         with:
           python-version: '3.12.10'
           architecture: x64
-      - name: Cache pinned Go modules for the fixture
+      - name: Cache Go modules for Maps and the pinned fixtures
         env:
           S18_GO_MODULE: ${{ steps.s18-module.outputs.directory }}
         run: |
+          go mod download
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $sources = Get-Content -Raw -LiteralPath 'tools/bench/s18_edit/fixture/sources.json' | ConvertFrom-Json
           Push-Location -LiteralPath $env:S18_GO_MODULE
           try {
@@ -75,6 +77,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B tools/bench/s18_edit/runner.py preflight --output $suiteOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Open index above 4 MiB and verify 30 live prompts
+        timeout-minutes: 8
+        env:
+          CGO_ENABLED: '0'
+          GOPROXY: 'off'
+        run: |
+          $binary = Join-Path $env:RUNNER_TEMP 'mce4d.exe'
+          go build -trimpath -o $binary ./cmd/mce4d
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\tests\integration\run_windows_restore_ci.ps1 -S18Output (Join-Path $env:RUNNER_TEMP 's18-edit')
       - name: Require all 30 recorded A/C pairs below 85% tokens
         run: |
           $reportJson = python -B tools/bench/s18_edit/report.py --recorded

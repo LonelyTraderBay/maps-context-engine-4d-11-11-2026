@@ -1,13 +1,19 @@
 # This launcher provisions a disposable local account on the hosted Windows VM.
+param([string]$S18Output = '')
+
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     throw 'Run this launcher on a GitHub-hosted Windows runner'
 }
 
-$bundle = Join-Path $env:RUNNER_TEMP 'mce-restore-bin'
+$bundle = Join-Path $env:RUNNER_TEMP ($S18Output ? 'mce-s18-live-bin' : 'mce-restore-bin')
 $logs = Join-Path $bundle 'logs'
 New-Item -ItemType Directory -Path $bundle, $logs | Out-Null
 Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'mce4d.exe') -Destination $bundle
+if ($S18Output) {
+    Copy-Item -LiteralPath (Join-Path $S18Output 'source') -Destination (Join-Path $bundle 's18-source') -Recurse
+    Copy-Item -LiteralPath (Join-Path $S18Output 'live-requests.json') -Destination $bundle
+}
 go build -trimpath -o (Join-Path $bundle 'state-profile.exe') ./tools/state_profile
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 go test -c -trimpath -o (Join-Path $bundle 'integration.test.exe') ./tests/integration
@@ -33,6 +39,9 @@ try {
     $env:TEMP = $scratch
     $env:TMP = $scratch
     $env:MCE4D_WIN_PACKAGE_FIXTURE = $PSScriptRoot
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'live-requests.json')) {
+        $env:MCE4D_WIN_S18_BUNDLE = $PSScriptRoot
+    }
     & (Join-Path $PSScriptRoot 'integration.test.exe') '-test.v' '-test.run=^TestWindowsPackagedProfileRoleVerification$' '-test.timeout=4m' *> $log
     exit $LASTEXITCODE
 } catch {
@@ -65,6 +74,20 @@ try {
     if ($process.ExitCode -ne 0) { throw "Packaged fixture exited $($process.ExitCode)" }
 } finally {
     Remove-LocalUser -SID $user.SID
+}
+
+if ($S18Output) {
+    python -B tools/bench/s18_edit/runner.py live-check --output $S18Output --capture (Join-Path $logs 's18-live.json')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $live = Get-Content -Raw -LiteralPath (Join-Path $S18Output 'live-prompt-check.json') | ConvertFrom-Json
+    @(
+        '### S18 - Windows live prompts'
+        ''
+        "- Tested commit $env:GITHUB_SHA"
+        "- Opened a published Maps index of $($live.maps_index_bytes) bytes (> 4 MiB)."
+        '- All 30 live C prompts matched the recorded prompt hashes.'
+    ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+    return
 }
 
 foreach ($scope in 'worktree', 'catalog') {
