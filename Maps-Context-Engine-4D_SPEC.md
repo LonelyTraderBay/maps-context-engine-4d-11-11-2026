@@ -1191,6 +1191,8 @@ Ngày 25/11/2026, bản Windows native tại commit `9e6dd28` mở thành công 
 
 Ngày 25/11/2026, CI của commit `d890d87` hoàn tất **5/5 job PASS**. Job S18 Windows tạo ba worktree từ nguồn đã ghim trong fixture cô lập, mở lại index Maps **trên 4 MiB** và truy vấn qua CLI để tái tạo **30/30 prompt live khớp từng byte** với bộ đã lưu. Hash của các ảnh SQLite index và WAL head độc lập khớp trước và sau truy vấn. Job không gọi Codex hay chạy script repo mẫu. [Lượt CI của `d890d87`](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45542162476) · [Job S18 Windows](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45542162476/job/138963018428)
 
+Ngày 25/11/2026, CI của commit `cb07092` hoàn tất **5/5 job PASS**. Go và Explorer đều đạt trên Ubuntu 24.04 và Windows 2025. Job S18 Windows mở lại index Maps **trên 4 MiB** trong fixture cô lập và tái tạo **30/30 prompt live khớp từng byte** với bộ đã lưu. Job cũng xác nhận **30/30 cặp A/C dùng dưới 85% token** theo biên nhận đã lưu. Quy trình dùng dữ liệu đã ghim để kiểm và tái tạo prompt, không gọi Codex hay chạy script repo mẫu. [Lượt CI của `cb07092`](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45546834667) · [Job S18 Windows](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45546834667/job/138978371237)
+
 ## S19 — Bảng triển khai duy nhất
 
 ### Protocol trạng thái
@@ -2569,6 +2571,8 @@ Evidence thực thi giữ phân biệt từng kiểm và phạm vi; kiểm boots
 
 | E1029 | T035 | [Bước restore trong GitHub Actions](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45344157174/job/138274576239#step:12:1), `artifacts/acceptance/windows-first-restore-ci/run-45344157174/acceptance-receipt.json` SHA-256 `b0325c34b7d48f79d5c05aab1d5cf70c15df7f3a72c31fa02ceedae6a0d9bfdc` | Commit `43b50b2cf90ee07f7bc4a3436e4cdc42dfa2834f`, runner `windows-2025` amd64, Go 1.27.4, tài khoản thường tạm thời và SQLite cô lập | Catalog và worktree đều restore thành công ngay lần đầu sau khi đóng kết nối kiểm tra SQLite. Đủ bước thay thế, journal `VERIFIED`, biên nhận WAL xác minh được và incarnation đổi đúng phạm vi. Fixture giữ kiểm tra từ chối với backup hỏng. Cả 4 job Go/Explorer kết thúc thành công. | PASS | Ca hồi quy restore lần đầu và fixture C171 hiện có. Không bao gồm ma trận crash C172, kho dữ liệu thật hay WSL2. Hai lượt hosted dừng ở khâu cấp profile và xác minh AppContainer được lưu trong biên nhận. | 2026-11-24 06:59 UTC |
 
+| E1030 | T083 | `artifacts/acceptance/windows-ts-js-watch-cb07092/windows-ts-browser.log` SHA-256 `da4d1997d3d738113f3b2a518a2b3a1d9e5d31fbfe6143627939ea3c87837793` | Commit `cb07092e462d63395b92c7bb996dc8f0fa608256`, Windows amd64 NTFS, Chromium đã pin, Node 24.22.3, TypeScript 5.9.3, SQLite protected profile | GU0/C082. `TestWindowsPackagedProfileRoleVerification` với fixture TS/JS xác nhận cùng tab Explorer tự cập nhật đồ thị và mã nguồn trên bốn generation, gồm index ban đầu rồi Watch thêm, sửa và xóa `.ts`/`.js`. CLI/MCP khớp từng generation. Khi xóa, Explorer bỏ ký hiệu và nguồn đã chọn. Lượt idle giữ nguyên WAL head. Hash nguồn và metadata Git khớp sau khi hoàn nguyên, scratch trống và canary vắng. | PASS | Một worktree fixture `typed_when_available` với SQLite thật và driver trình duyệt. Provider chỉ đọc dữ liệu capture. Log lưu cục bộ. | 2026-11-25 04:27 UTC |
+
 Evidence ID dùng tiền tố E và số thập phân có tối thiểu ba chữ số. Sau E999 tiếp tục E1000.
 
 Format result: PASS, FAIL, NOT_RUN. NOT_RUN phải có lý do trong record. Hash tree dùng khi chưa commit; không bịa commit SHA. Absolute local paths chỉ trong private evidence khi cần, không publish; log sanitized. File artifact không tồn tại thì không tạo pointer giả. DONE task MUST trỏ >=1 evidence record PASS bao phủ test scope; gate reviewer kiểm tra không chỉ string “PASS”.
@@ -3881,8 +3885,8 @@ resume:
   blocking_user_decision: null
   discovery_gaps: [K001, K002, K003, K007, K008, K009, K010, K011, K013, K014, K015, K016, K017, K018]
   known_limits: [K005, K006, K012]
-  last_evidence_id: E1029
-  last_checked_at_utc: 2026-11-24T06:59:40Z
+  last_evidence_id: E1030
+  last_checked_at_utc: 2026-11-25T04:27:57Z
 ```
 
 MUST cập nhật resume chỉ sau khi tracker/evidence nhất quán; là summary derived, không nguồn thay thế task rows. Không lưu chain-of-thought vào tài liệu. Chỉ lưu quyết định, bằng chứng, lỗi tái hiện được và hành động tiếp theo.
