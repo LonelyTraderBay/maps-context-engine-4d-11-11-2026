@@ -1173,6 +1173,8 @@ Ngày 25/11/2026, lượt A/C dùng index Maps và Codex đã kiểm 30 ca có k
 
 Ngày 25/11/2026, [lượt CI của commit `153719e`](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45459181473) hoàn tất **5/5 job PASS**. Go và Explorer đều đạt trên Ubuntu 24.04 và Windows 2025. [Job S18 replay trên Windows 2025](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45459181473/job/138676732981) tái tạo khớp byte 30 prompt C, kiểm qua 30 bản sửa tham chiếu và xác nhận 23 đối chứng bị bác bỏ như dự kiến. Job tính lại từ biên nhận đã lưu và xác nhận **30/30 cặp A/C sửa đúng và dùng dưới 85% token**, kể cả khi cộng token đầu ra. Job dùng fixture Go do suite tạo, không gọi Codex hay chạy script repo mẫu.
 
+Ngày 25/11/2026, bản Windows native tại commit `9e6dd28` mở thành công index Maps cũ dung lượng **12,96 MiB** (13.586.432 byte) và đọc đúng generation đã ghim. Truy vấn live tái tạo **30/30 prompt S18 khớp từng byte** với bộ đã lưu, gồm 10 ca mỗi repo Maps, google/uuid và go-humanize. SHA-256 của ba ảnh SQLite index và các WAL head độc lập đều khớp trước và sau truy vấn. [CI của commit `9e6dd28`](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45539987450) hoàn tất **5/5 job PASS**. Lượt kiểm live chỉ tạo prompt từ bằng chứng đã truy vấn, không gọi Codex hay chạy script repo mẫu.
+
 ## S19 — Bảng triển khai duy nhất
 
 ### Protocol trạng thái
