@@ -151,7 +151,8 @@ type windowsMaintenanceStore struct {
 	head, data windowsMaintenanceFiles
 }
 
-const windowsIndexImageMaxBytes = 4 << 20
+// Bound reads and recovery of the same index image the writer can commit.
+const windowsIndexImageMaxBytes = 256 << 20
 
 func windowsStoreImageLimit(name string) int64 {
 	if name == "index.sqlite" {

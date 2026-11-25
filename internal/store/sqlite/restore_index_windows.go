@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const windowsIndexSidecarMaxBytes = 16 << 20
+const windowsIndexSidecarMaxBytes = 2 * windowsIndexImageMaxBytes
 
 // Called only by confirmed recovery under the exclusive worktree and writer
 // leases. The interrupted live SQLite files are evidence to retain, never the

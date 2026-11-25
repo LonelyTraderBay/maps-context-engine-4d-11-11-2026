@@ -261,8 +261,10 @@ registered worktree. Choose a fresh directory immediately below
 for a worktree. The controller holds the selected scope's exclusive lifecycle
 and writer leases. SQLite creates standalone backup images and the verified
 `backup.json` is published last. Catalog and records images are limited to
-1 MiB each. A worktree index image can reach 4 MiB, with the write limit
-bounded by the configured worktree cache budget and its required reserve.
+1 MiB each. A worktree index image can reach 256 MiB. The effective write
+limit also depends on the configured worktree cache budget. With the default
+2 GiB cache budget and the required reserve, the effective cap is 128 MiB.
+Use a build that supports the larger image to read or restore it.
 The backup contains store data and revisions. Cursor and WAL head
 keys stay with the protected installation.
 
@@ -311,7 +313,7 @@ index when interrupted work changed its files. Recovery requires the
 authenticated PREPARE and its matching protected checkpoint. A short
 unacknowledged receipt tail can be retained with the interrupted files.
 Recovery stages a new index incarnation, keeps records intact, and resumes
-through PREPARED, REPLACING and VERIFYING. It retires up to 16 MiB per
+through PREPARED, REPLACING and VERIFYING. It retires up to 512 MiB per
 owner-bound sidecar under the original protected directory. Missing authority,
 an incomplete independent head or unsafe files still block mutation.
 
