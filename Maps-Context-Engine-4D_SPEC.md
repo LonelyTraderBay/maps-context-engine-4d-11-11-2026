@@ -1169,6 +1169,8 @@ Ngày 25/11/2026, lượt A/C dùng index Maps và Codex đã kiểm 30 ca có k
 
 [Bộ chạy lại Windows native](tools/bench/s18_edit/README.md) khóa nguồn, câu hỏi, fixture và đoạn trích Maps. [Biên nhận lượt đo](tools/bench/s18_edit/fixture/observed-2026-11-25.json) có usage và kết quả từng ca. Runner hỗ trợ replay đoạn trích và lượt live với index tương thích, ghi riêng chế độ đo. Kết quả áp dụng cho một lượt A/C trên mỗi ca của bộ sửa mã này.
 
+Ngày 25/11/2026, [lượt CI của commit `153719e`](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45459181473) hoàn tất **5/5 job PASS**. Go và Explorer đều đạt trên Ubuntu 24.04 và Windows 2025. [Job S18 replay trên Windows 2025](https://github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/actions/runs/45459181473/job/138676732981) tái tạo khớp byte 30 prompt C, kiểm qua 30 bản sửa tham chiếu và xác nhận 23 đối chứng bị bác bỏ như dự kiến. Job tính lại từ biên nhận đã lưu và xác nhận **30/30 cặp A/C sửa đúng và dùng dưới 85% token**, kể cả khi cộng token đầu ra. Job dùng fixture Go do suite tạo, không gọi Codex hay chạy script repo mẫu.
+
 ## S19 — Bảng triển khai duy nhất
 
 ### Protocol trạng thái
