@@ -3,6 +3,8 @@ import type { ExplorerClient } from '../api/client.ts';
 import { readPinnedSource, sourceKey } from '../api/source.ts';
 import type { GraphEdge, GraphNode, ScopeVector, SourceRef } from '../index.ts';
 import { nodeTitle } from './GraphPane.tsx';
+import { edgeRelationLabel, relationLabel } from './map.ts';
+import type { DisplayEdge } from './map.ts';
 import type { DetailView } from './selection.ts';
 import type { PreviewSelection } from '../features/preview/pairing.ts';
 
@@ -16,6 +18,8 @@ type Props = {
   client: ExplorerClient;
   scope: ScopeVector | null;
   node: GraphNode | null;
+  edge?: DisplayEdge | undefined;
+  edgeEndpoints?: string[] | undefined;
   sourceIndex: number;
   detail: DetailView;
   edges: GraphEdge[];
@@ -27,9 +31,17 @@ type Props = {
   mappingSource?: SourceRef;
 };
 
-export function SourcePane({ client, scope, node, sourceIndex, detail, edges, onRange, onDetail, onSessionError,
+export function SourcePane({ client, scope, node, edge, edgeEndpoints, sourceIndex, detail, edges, onRange, onDetail, onSessionError,
   preview, mappingSource, preparedSource }: Props) {
-  const ref = mappingSource ?? preview?.match.source_refs[0] ?? node?.source_refs[sourceIndex];
+  const refs = edge ? edge.evidence_refs.flatMap(evidence => evidence.source_refs) : node?.source_refs ?? [];
+  const access = edge?.evidence_refs.flatMap((evidence, index) =>
+    evidence.source_refs.map(() => edge.accessKinds?.[index])) ?? [];
+  const ref = edge ? refs[sourceIndex] : mappingSource ?? preview?.match.source_refs[0] ?? refs[sourceIndex];
+  const contiguous = refs.length > 1 && refs.slice(1).every((range, index) => {
+    const previous = refs[index];
+    return previous?.path === range.path && previous.content_hash === range.content_hash &&
+      previous.range.end_byte === range.range.start_byte;
+  });
   const key = ref && scope ? scope.vector_digest + sourceKey(ref) : null;
   const [state, setState] = useState<SourceState | null>(null);
   const current = key && preparedSource !== null ? { key, content: preparedSource } : state?.key === key ? state : null;
@@ -54,28 +66,35 @@ export function SourcePane({ client, scope, node, sourceIndex, detail, edges, on
 
   return <section className="pane source-pane" id="source-pane" aria-labelledby="source-heading">
     <header className="pane-heading">
-      <h2 id="source-heading">Kiểm tra ký hiệu</h2>
+      <h2 id="source-heading">{edge ? 'Bằng chứng quan hệ' : 'Kiểm tra ký hiệu'}</h2>
       <div className="segmented" aria-label="Nội dung khung phải">
         <button type="button" aria-pressed={detail === 'source'} onClick={() => onDetail('source')}>Mã nguồn</button>
         <button type="button" aria-pressed={detail === 'details'} onClick={() => onDetail('details')}>Chi tiết</button>
       </div>
     </header>
-    {!node && <div className="empty">
+    {!node && !edge && <div className="empty">
       <strong>Chưa chọn ký hiệu</strong>
       <p>Chọn một nút trong đồ thị hoặc danh sách để đọc bằng chứng.</p>
     </div>}
-    {node && <div className="inspector">
+    {(node || edge) && <div className="inspector">
       <div className="inspector-heading">
-        <span className="kind-label">{node.kind}</span>
-        <h3>{nodeTitle(node)}</h3>
+        <span className="kind-label">{edge ? 'Vị trí trong mã nguồn' : node?.kind}</span>
+        <h3>{edge ? edgeRelationLabel(edge) : node && nodeTitle(node)}</h3>
+        {edgeEndpoints && <p className="edge-endpoints">{edgeEndpoints.join(' → ')}</p>}
       </div>
       {preview && <p className="notice">Bằng chứng build · {preview.ancestorFallback ? 'Ranh giới tổ tiên' : 'Anchor khớp'}
         {' · '}{preview.moreInstances ? 'Ít nhất ' : ''}{preview.instancesRead} instance đã thấy.</p>}
       {detail === 'source' && <>
-        {node.source_refs.length > 1 && <div className="ref-list" aria-label="Vùng mã nguồn">
-          {node.source_refs.map((range, index) => <button type="button" key={sourceKey(range) + index}
+        {contiguous ? <div className="ref-list" aria-label="Đoạn mã nguồn">
+          <button type="button" className="quiet-button" disabled={sourceIndex === 0}
+            onClick={() => onRange(sourceIndex - 1)}>Đoạn trước</button>
+          <span aria-live="polite">Đoạn {sourceIndex + 1}/{refs.length}</span>
+          <button type="button" className="quiet-button" disabled={sourceIndex + 1 === refs.length}
+            onClick={() => onRange(sourceIndex + 1)}>Đoạn sau</button>
+        </div> : refs.length > 1 && <div className="ref-list" aria-label="Vùng mã nguồn">
+          {refs.map((range, index) => <button type="button" key={sourceKey(range) + index}
             className="quiet-button" aria-pressed={sourceIndex === index} onClick={() => onRange(index)}>
-            {range.path} · {range.range.start_byte}
+            {access[index] ? relationLabel(access[index]) + ' · ' : ''}{range.path} · {range.range.start_byte}
           </button>)}
         </div>}
         {!ref ? <p className="notice">Index chưa có vùng nguồn cho ký hiệu này.</p> :
@@ -95,6 +114,12 @@ export function SourcePane({ client, scope, node, sourceIndex, detail, edges, on
           </div>}
       </>}
       {detail === 'details' && <div className="detail-content">
+        {edge ? <dl className="metadata">
+          <div><dt>Loại quan hệ</dt><dd>{edgeRelationLabel(edge)}</dd></div>
+          <div><dt>Trạng thái phân giải</dt><dd>{edge.resolution_status}</dd></div>
+          <div><dt>Nguồn bằng chứng</dt><dd>{edge.evidence_refs.map(item => item.kind).join(', ')}</dd></div>
+          <div><dt>Vùng mã nguồn</dt><dd>{refs.length}</dd></div>
+        </dl> : node && <>
         <dl className="metadata">
           <div><dt>Loại tham chiếu</dt><dd>{node.ref.kind}</dd></div>
           <div><dt>Bằng chứng</dt><dd>{node.plane === 'observed_static' ? 'Phân tích tĩnh' : node.plane}</dd></div>
@@ -106,6 +131,7 @@ export function SourcePane({ client, scope, node, sourceIndex, detail, edges, on
             <span>{edge.relation_kind}</span><span>{edge.resolution_status}</span>
           </li>)}
         </ul>}
+        </>}
       </div>}
     </div>}
   </section>;

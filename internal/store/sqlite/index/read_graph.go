@@ -34,10 +34,18 @@ type PublishedGraphRequest struct {
 	MaxFactBytes          int
 	MaxFacts              int
 	MaxSymbols            int // zero uses only MaxFacts
+	Focus                 *PublishedGraphFocus
 }
 
-// PublishedGraph contains the complete bounded provider catalog for exactly
-// one published generation. Diagnostics must be retained by the consumer.
+// PublishedGraphFocus bounds the catalog to a symbol neighborhood and any
+// explicit rule files. The generation binding and full manifest are retained.
+type PublishedGraphFocus struct {
+	SymbolID  string
+	RulePaths []string
+}
+
+// PublishedGraph contains a bounded provider catalog for one published
+// generation. Without Focus it includes the complete catalog and diagnostics.
 // The fields are caller-owned copies; VerifyFacts detects catalog mutation.
 type PublishedGraph struct {
 	Snapshot    *snapshot.Snapshot
@@ -131,7 +139,8 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 		r.AuthorizeGeneration == nil || r.AuthorizePath == nil || r.Scanner == nil || !validHash(r.VectorDigest) ||
 		r.MaxManifestBytes < 1024 || r.MaxManifestBytes > 64*1024*1024 || r.MaxFileBytes < 1 || r.MaxFileBytes > 64*1024*1024 ||
 		r.MaxSourceBytes < 1 || r.MaxSourceBytes > 512*1024*1024 || r.MaxFactBytes < 1024 || r.MaxFactBytes > 16*1024*1024 || r.MaxFacts < 1 || r.MaxFacts > 100000 ||
-		r.MaxSymbols < 0 || r.MaxSymbols > r.MaxFacts {
+		r.MaxSymbols < 0 || r.MaxSymbols > r.MaxFacts ||
+		r.Focus != nil && (r.Focus.SymbolID == "" || len(r.Focus.SymbolID) > 512 || len(r.Focus.RulePaths) > 128) {
 		return nil, ErrInvalidStore
 	}
 	if _, ok := ctx.Deadline(); !ok {
@@ -152,6 +161,7 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 	}
 	graph := &PublishedGraph{store: s, request: r, Packages: []model.PackageFact{}, Symbols: []model.SymbolFact{}, Relations: []model.RelationFact{}, Diagnostics: []model.DiagnosticFact{}}
 	var manifest model.CaptureManifest
+	var entries []model.ManifestFile
 	var files []snapshot.File
 	err = s.graphTransaction(ctx, r, func(tx *sql.Tx, h graphHeader) error {
 		var raw []byte
@@ -170,16 +180,28 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 			return ErrCaptureMismatch
 		}
 		graph.state = h.state
-		if err := readGraphFacts(ctx, tx, r, graph); err != nil {
-			return err
+		entries = manifest.Files
+		if r.Focus == nil {
+			if err := readGraphFacts(ctx, tx, r, graph); err != nil {
+				return err
+			}
+		} else {
+			entries, err = readFocusedGraph(ctx, tx, r, graph, entries)
+			if err != nil {
+				return err
+			}
 		}
-		files, err = readGraphSources(ctx, tx, r, manifest.Files)
+		files, err = readGraphSources(ctx, tx, r, entries)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	graph.Snapshot, err = snapshot.Freeze(manifest, files, r.MaxManifestBytes, r.MaxSourceBytes)
+	freeze := snapshot.Freeze
+	if r.Focus != nil {
+		freeze = snapshot.FreezeSubset
+	}
+	graph.Snapshot, err = freeze(manifest, files, r.MaxManifestBytes, r.MaxSourceBytes)
 	if err != nil {
 		return nil, ErrCaptureMismatch
 	}
@@ -190,7 +212,7 @@ func (s *Store) ReadPublishedGraph(ctx context.Context, r PublishedGraphRequest)
 	if err != nil {
 		return nil, err
 	}
-	for _, entry := range manifest.Files {
+	for _, entry := range entries {
 		if err := r.authorizeManifestEntry(ctx, entry); err != nil {
 			return nil, err
 		}

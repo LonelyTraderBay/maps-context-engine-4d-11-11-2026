@@ -18,6 +18,8 @@ import (
 const packFactLimit = 8 * 1024 * 1024
 const packSourceLimit int64 = 8 * 1024 * 1024
 
+type focusedPackBuildKey struct{}
+
 func (b *CoreBackend) setPackGraphAuthority(request *index.PublishedGraphRequest, principal app.CorePrincipal, config model.PolicyConfig) {
 	member := request.Member
 	checkScopePath := func(worktree, digest string, epoch int64) error {
@@ -184,12 +186,53 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 	}
 	graphRequest := index.PublishedGraphRequest{Member: member, VectorDigest: observation.Vector.VectorDigest, AuthorizeGeneration: authorizeGeneration, AuthorizePath: authorizePath, Scanner: scanner, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFileBytes: int(maxFile), MaxSourceBytes: maxSource, MaxFactBytes: packFactLimit, MaxFacts: 100000}
 	b.setPackGraphAuthority(&graphRequest, principal, observation.Binding.Policy)
+	_, tsProfile := observation.Binding.AddonProfile.(*model.TSProfile)
+	focused := tsProfile && request.TaskKind == "explore" && request.FreshnessMode == "analysis_snapshot" && options.DeliveryMode != "cli"
+	recheckScope := func(ctx context.Context, scope model.ScopeVector) (ScopeObservation, error) {
+		return b.Reader.Recheck(ctx, principal, scope)
+	}
+	focusedWindows := false
+	if focused {
+		graphRequest.Focus = &index.PublishedGraphFocus{SymbolID: target.SymbolID, RulePaths: observation.Binding.Policy.TrustedRulePaths}
+		if check := b.Reader.observationAccess; check != nil {
+			// The initial scope resolution and the delivery/retention guards
+			// verify the full authority and receipts. Inside those boundaries,
+			// each borrowed Windows image authenticates itself, so observation
+			// callbacks need only recheck the live binding and leases.
+			reader := *b.Reader
+			reader.Access = check
+			focusedWindows = true
+			verified := &observation
+			ctx = context.WithValue(ctx, focusedPackBuildKey{}, verified)
+			recheckScope = func(ctx context.Context, scope model.ScopeVector) (ScopeObservation, error) {
+				if ctx.Value(focusedPackBuildKey{}) != verified {
+					return reader.Recheck(ctx, principal, scope)
+				}
+				if model.ComparePinnedScope(observation.Vector, scope, 32768) != nil {
+					return ScopeObservation{}, ErrScopeChanged
+				}
+				if err := check(ctx, principal, member.WorktreeID, member.ProfileID); err != nil {
+					return ScopeObservation{}, err
+				}
+				return observation, nil
+			}
+			graphRequest.AuthorizeGeneration = func(ctx context.Context, worktree, profile, digest string, epoch int64) error {
+				if worktree != member.WorktreeID || profile != member.ProfileID || digest != member.PolicyDigest || epoch != member.PolicyEpoch {
+					return ErrScopeChanged
+				}
+				return check(ctx, principal, worktree, profile)
+			}
+		}
+	}
 	graph, err := b.Reader.Index.ReadPublishedGraph(ctx, graphRequest)
 	if err != nil {
+		if focused && errors.Is(err, index.ErrPublishedFileUnavailable) {
+			return nil, contextpack.ErrTarget
+		}
 		return nil, coreStoreError(err)
 	}
 	scopeAuth := func(ctx context.Context, scope model.ScopeVector, _ model.ScopeMember) error {
-		_, err := b.Reader.Recheck(ctx, principal, scope)
+		_, err := recheckScope(ctx, scope)
 		return err
 	}
 	pathAuth := func(ctx context.Context, member model.ScopeMember, name string) error {
@@ -198,7 +241,10 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 	maxNodes := minInt64(b.limits.MaxGraphNodes, 100000)
 	maxEdges := minInt64(b.limits.MaxGraphEdges, 1000000)
 	maxDepth := minInt64(b.limits.MaxGraphDepth, 8)
-	selection, err := contextpack.Select(ctx, contextpack.Input{Scope: observation.Vector, Target: target, Snapshot: graph.Snapshot, Packages: graph.Packages, Symbols: graph.Symbols, Relations: graph.Relations, Coverage: graph.Coverage, Scanner: scanner, AuthorizeScope: scopeAuth, AuthorizePath: pathAuth, VerifyFacts: graph.VerifyFacts, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFactBytes: packFactLimit, MaxSourceBytes: maxSource, MaxFacts: 100000, MaxNodes: int(maxNodes), MaxEdges: int(maxEdges), MaxDepth: int(maxDepth), MaxOutputBytes: packFactLimit})
+	if focused {
+		maxDepth = minInt64(maxDepth, index.FocusedContextDepth)
+	}
+	selection, err := contextpack.Select(ctx, contextpack.Input{Scope: observation.Vector, Target: target, Snapshot: graph.Snapshot, Packages: graph.Packages, Symbols: graph.Symbols, Relations: graph.Relations, Coverage: graph.Coverage, Scanner: scanner, AuthorizeScope: scopeAuth, AuthorizePath: pathAuth, VerifyFacts: graph.VerifyFacts, MaxManifestBytes: b.Reader.MaxManifestBytes, MaxFactBytes: packFactLimit, MaxSourceBytes: maxSource, MaxFacts: 100000, MaxNodes: int(maxNodes), MaxEdges: int(maxEdges), MaxDepth: int(maxDepth), MaxOutputBytes: packFactLimit, Focused: focused})
 	if err != nil {
 		return nil, coreStoreError(err)
 	}
@@ -215,7 +261,8 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 		intent = *request.Intent
 	}
 	slice, err := contextpack.BuildTaskSlice(ctx, contextpack.SliceInput{Selection: selection, Policy: observation.Binding.Policy, TaskKind: request.TaskKind, Intent: intent, Constraints: request.Constraints, RuleAnchors: rules, VerifyNoApprovedRecords: func(ctx context.Context, scope model.ScopeVector) (bool, error) {
-		return b.Reader.NoApprovedRecords(ctx, principal, scope)
+		current, err := recheckScope(ctx, scope)
+		return err == nil && current.Records.ApprovedHeads == 0, err
 	}, MaxBytes: packFactLimit})
 	if err != nil {
 		return nil, coreStoreError(err)
@@ -234,6 +281,16 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 	}
 	binding := contextpack.CursorBinding{Purpose: "pack", PrincipalDigest: principal.Digest, BindingDigest: principal.BindingDigest, RequestDigest: digest, OrderVersion: order, Scope: observation.Vector}
 	guard := b.packGuard(principal)
+	if focusedWindows {
+		guard = func(ctx context.Context, claims contextpack.CursorBinding) error {
+			if claims.PrincipalDigest != principal.Digest || claims.BindingDigest != principal.BindingDigest ||
+				claims.OrderVersion != order {
+				return ErrAuthority
+			}
+			_, err := recheckScope(ctx, claims.Scope)
+			return coreStoreError(err)
+		}
+	}
 	validation := app.ValidateCapturedInput{Scope: observation.Vector, MaxInputBytes: 65536, MaxManifestBytes: b.Reader.MaxManifestBytes,
 		CurrentScope: func(ctx context.Context) (model.ScopeVector, error) {
 			current, err := b.Reader.Recheck(ctx, principal, observation.Vector)
@@ -252,7 +309,7 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 			return authorizePath(ctx, requested.WorktreeID, ref.Path, requested.PolicyDigest, requested.PolicyEpoch)
 		},
 	}
-	if b.verifyWorkspace != nil {
+	if b.verifyWorkspace != nil && !focused {
 		validation.VerifyWorkspace = func(ctx context.Context, member model.ScopeMember, snap *snapshot.Snapshot) (app.WorkspaceObservation, error) {
 			return b.verifyWorkspace(ctx, principal, member, snap)
 		}
@@ -319,6 +376,13 @@ func (b *CoreBackend) ContextPack(ctx context.Context, principal app.CorePrincip
 	if err := b.recheckPackCache(ctx, pack, token, principal, guard); err != nil {
 		b.packCache.Discard(pack)
 		return nil, err
+	}
+	if focusedWindows {
+		// Reauthenticate the controller's receipts before releasing the page.
+		if err := b.packGuard(principal)(ctx, binding); err != nil {
+			b.packCache.Discard(pack)
+			return nil, coreStoreError(err)
+		}
 	}
 	return page.Blocks, nil
 }

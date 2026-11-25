@@ -26,3 +26,7 @@ For the T081 contract smoke test, set `MCE4D_CHROME_PATH` and `MCE4D_CHROME_SHA2
 - The HTTP adapter owns the transport byte limit, authentication, request context and store checks. The browser consumes plain validated DTOs. Browser bridge peers exchange S43 JSON text and check source window, exact origin, direction and active session before applying messages. A digest or decoded DTO alone confers no permission.
 
 The right pane shows the selected source range and its static evidence in GU0. The preview and flow capabilities follow their assigned gates. Run `npm run test:production-strip -w @mce4d/explorer` to compare production client and SSR bundles and verify the synthetic source remains unchanged.
+
+Choose **Tìm luồng** to find a captured route or a symbol by name prefix. The left pane shows a bounded static neighborhood with labeled arrows. Pick a node for its declaration, or pick an arrow for the source of that relationship. **Mở thêm từ nút chọn** extends the current view. Change **Hướng** to find upstream callers and references. React route, render, event binding and supported branch evidence require a typed TS/JS capture.
+
+Choose **Xem ảnh hưởng** on a symbol to inspect incoming relationships. The legend distinguishes the selected arrow, incoming uses and outgoing dependencies. Typed TS/JS captures record resolved variable reads and writes. The inspector keeps the separate source sites behind a grouped variable arrow.

@@ -264,6 +264,8 @@ func BuildTaskSlice(ctx context.Context, in SliceInput) (*TaskSlice, error) {
 		why := "related_source"
 		if selected.Priority == 0 {
 			rank, required, why = 0, true, "target_source"
+		} else if s.focused && in.TaskKind == "explore" && selected.Priority == 1 {
+			rank, why = 1, "related_source"
 		} else if in.TaskKind != "explore" && in.TaskKind != "plan" {
 			rank, required = 2, true
 		}

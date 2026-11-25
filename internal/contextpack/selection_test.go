@@ -87,6 +87,23 @@ func fixture(t *testing.T) (context.Context, Input) {
 		}, MaxManifestBytes: 65536, MaxFactBytes: 4 * 1024 * 1024, MaxSourceBytes: 1024 * 1024, MaxFacts: 10000, MaxNodes: 100, MaxEdges: 100, MaxDepth: 8, MaxOutputBytes: 4 * 1024 * 1024}
 }
 
+func TestFocusedSelectionStartsAtTargetDeclaration(t *testing.T) {
+	ctx, in := fixture(t)
+	in.Focused = true
+	selection, err := Select(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := selection.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasGap(report, "FOCUSED_CONTEXT") || len(report.Sources) == 0 ||
+		report.Sources[0].Source.Range != *in.Symbols[0].Range {
+		t.Fatalf("focused report must start at the declaration and show bounded coverage: %+v", report)
+	}
+}
+
 func TestSelectExactTargetEvidenceAndDeterminism(t *testing.T) {
 	ctx, in := fixture(t)
 	selection, err := Select(ctx, in)

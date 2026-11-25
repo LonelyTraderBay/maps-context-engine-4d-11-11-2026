@@ -4,6 +4,7 @@ import { compareID, hardEdges, hardNodes, nodeHeight, nodeWidth } from './viewpo
 export type LayoutInput = {
   nodes: readonly string[];
   edges: readonly (readonly [id: string, from: string, to: string])[];
+  vertical?: boolean;
 };
 export type LayoutPosition = { id: string; x: number; y: number };
 export type LayoutResult = { positions: LayoutPosition[] } | { error: true };
@@ -17,7 +18,8 @@ export function layout(input: LayoutInput): LayoutPosition[] {
   }
   const drawing = new dagre.graphlib.Graph({ multigraph: true })
     .setDefaultEdgeLabel(() => ({}))
-    .setGraph({ rankdir: 'LR', ranker: 'tight-tree', nodesep: 26, ranksep: 96, marginx: 18, marginy: 18 });
+    .setGraph({ rankdir: input.vertical ? 'TB' : 'LR', ranker: 'tight-tree',
+      nodesep: 26, ranksep: input.vertical ? 54 : 96, marginx: 18, marginy: 18 });
   const nodes = input.nodes.toSorted(compareID);
   for (const id of nodes) drawing.setNode(id, { width: nodeWidth, height: nodeHeight });
   for (const [id, from, to] of input.edges.toSorted((a, b) => compareID(a[0], b[0]))) {

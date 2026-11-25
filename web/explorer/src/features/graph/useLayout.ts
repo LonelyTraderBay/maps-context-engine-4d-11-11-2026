@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { GraphSlice } from '../../shell/map.ts';
+import type { GraphEdge } from '../../index.ts';
 import type { LayoutInput, LayoutResult } from './layout.ts';
 
-export function useLayout(graph: GraphSlice, scope: string | null, enabled: boolean): LayoutResult | null {
+export function useLayout(graph: GraphSlice, scope: string | null, enabled: boolean, vertical = false,
+  edges: GraphEdge[] = graph.edges): LayoutResult | null {
   // Topology is sufficient for the drawing. Labels, selection and hover do
   // not affect positions. Keep the memo key separate from domain graph IDs.
   const topology = useMemo(() => {
     const ids = new Set(graph.nodes.map(node => node.node_id));
     return JSON.stringify({
+      vertical,
       nodes: [...ids].sort(),
-      edges: graph.edges.filter(edge => ids.has(edge.from_node_id) && ids.has(edge.to_node_id))
+      edges: edges.filter(edge => ids.has(edge.from_node_id) && ids.has(edge.to_node_id))
         .map(edge => [edge.edge_id, edge.from_node_id, edge.to_node_id]).sort(),
     });
-  }, [graph.nodes, graph.edges]);
+  }, [graph.nodes, edges, vertical]);
   const key = scope === null ? null : scope + ':' + topology;
   const [settled, setSettled] = useState<{ key: string; result: LayoutResult } | null>(null);
   const current = settled?.key === key ? settled?.result : null;

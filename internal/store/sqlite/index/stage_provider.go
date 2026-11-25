@@ -509,8 +509,12 @@ func validateProviderBatchWithKnown(ctx context.Context, worktree string, captur
 
 func validRelationEvidence(item model.RelationFact) bool {
 	switch item.Kind {
-	case "CALLS_DIRECT", "CALLS_INTERFACE":
+	case "CALLS_DIRECT", "CALLS_INTERFACE", "ROUTE_COMPONENT", "RENDERS_COMPONENT", "BINDS_EVENT":
 		if item.EvidenceKind != "type_resolved" {
+			return false
+		}
+	case "RENDERS_JSX", "CHECKS_CONDITION", "BRANCH_TRUE", "BRANCH_FALSE":
+		if item.EvidenceKind != "syntax_exact" {
 			return false
 		}
 	case "MAY_DISPATCH_TO":

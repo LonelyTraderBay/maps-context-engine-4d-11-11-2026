@@ -20,6 +20,7 @@ type StatusRequest struct {
 type LocateRequest struct {
 	Scope    *ScopeRequest     `json:"scope,omitempty"`
 	Mode     string            `json:"mode"`
+	Focus    string            `json:"focus,omitempty"`
 	Match    string            `json:"match,omitempty"`
 	Query    *string           `json:"query,omitempty"`
 	Position *PositionSelector `json:"position,omitempty"`
@@ -86,7 +87,7 @@ func DecodeStatusRequestJSON(data []byte, maxBytes int) (StatusRequest, error) {
 }
 func DecodeLocateRequestJSON(data []byte, maxBytes int) (LocateRequest, error) {
 	var r LocateRequest
-	fields, err := optionalObject(data, maxBytes, "scope", "mode", "match", "query", "position", "kinds", "package", "path", "limit", "cursor")
+	fields, err := optionalObject(data, maxBytes, "scope", "mode", "focus", "match", "query", "position", "kinds", "package", "path", "limit", "cursor")
 	if err != nil {
 		return r, err
 	}
@@ -135,7 +136,10 @@ func DecodeLocateRequestJSON(data []byte, maxBytes int) (LocateRequest, error) {
 		return LocateRequest{}, fmt.Errorf("invalid symbol path filter")
 	}
 	if body.Mode == "evidence" && (body.Query == nil || body.Cursor != nil) {
-		return LocateRequest{}, fmt.Errorf("evidence lookup requires a query and starts a new read")
+		return LocateRequest{}, fmt.Errorf("evidence lookup requires a symbol name and starts a new read")
+	}
+	if _, hasFocus := fields["focus"]; hasFocus && (body.Mode != "evidence" || body.Focus != "route") {
+		return LocateRequest{}, fmt.Errorf("invalid evidence focus")
 	}
 	if _, hasMatch := fields["match"]; hasMatch && (body.Mode != "evidence" || body.Match != "question") {
 		return LocateRequest{}, fmt.Errorf("invalid evidence match")

@@ -242,11 +242,12 @@ func (b *CoreBackend) Locate(ctx context.Context, principal app.CorePrincipal, r
 		return b.locateTopic(ctx, principal, request, options, observation, binding, guard, base)
 	}
 	if request.Mode == "evidence" {
-		return b.locateGoEvidence(ctx, principal, request, options, observation, base)
+		return b.locateEvidence(ctx, principal, request, options, observation, base)
 	}
-	// If the actual wire envelope is too large, retry the same pinned keyset
-	// with a smaller limit. No page bytes or cursor are released until it fits.
-	for limit := request.Limit; limit >= 1; limit-- {
+	// Reduce the page geometrically so a broad lookup cannot exhaust its
+	// deadline retrying one result at a time. The pinned cursor resumes
+	// after the last item actually returned.
+	for limit := request.Limit; limit >= 1; limit /= 2 {
 		pageRequest := request
 		pageRequest.Limit = limit
 		page, e := search.LocateKeysetPage(ctx, b.Reader.Index, b.Cursor, binding, guard, principal.ID, pageRequest, base)

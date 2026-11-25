@@ -30,6 +30,16 @@ type Identity struct {
 // copies it before returning. The caller must establish membership, security,
 // policy, freshness and dependency closure separately.
 func Freeze(input model.CaptureManifest, captured []File, maxManifestBytes int, maxSourceBytes int64) (*Snapshot, error) {
+	return freeze(input, captured, maxManifestBytes, maxSourceBytes, false)
+}
+
+// FreezeSubset verifies the original manifest and only the supplied blobs.
+// File reports false for other paths. Use it for bounded snapshot reads.
+func FreezeSubset(input model.CaptureManifest, captured []File, maxManifestBytes int, maxSourceBytes int64) (*Snapshot, error) {
+	return freeze(input, captured, maxManifestBytes, maxSourceBytes, true)
+}
+
+func freeze(input model.CaptureManifest, captured []File, maxManifestBytes int, maxSourceBytes int64, subset bool) (*Snapshot, error) {
 	if maxSourceBytes <= 0 {
 		return nil, ErrSourceLimit
 	}
@@ -76,6 +86,9 @@ func Freeze(input model.CaptureManifest, captured []File, maxManifestBytes int, 
 			if present {
 				return nil, ErrManifestMismatch
 			}
+			continue
+		}
+		if subset && !present {
 			continue
 		}
 		if !present || item.ContentHash == nil || item.ByteLength == nil || *item.ContentHash != source.hash || *item.ByteLength != int64(len(source.source)) {

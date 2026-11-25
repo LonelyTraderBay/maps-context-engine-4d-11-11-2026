@@ -58,8 +58,8 @@ func NewWithOptions(service *app.CoreService, options Options) (*Server, error) 
 	})
 	descriptions := map[string]string{
 		"mce4d_workspace_status": "Report the registered workspace and published index status.",
-		"mce4d_locate":           "Find a source location or symbol within the authorized scope. For Go, mode=evidence returns numbered excerpts. Use match=question for a question without a symbol name, or pass an exact name with an optional path.",
-		"mce4d_context_pack":     "Build a bounded, source-backed context pack for a task.",
+		"mce4d_locate":           "Find indexed symbols. Use mode=evidence with an exact name to get numbered excerpts. Set focus=route when you only need a route and its wrapper; omit focus to trace downstream behavior. Optional path disambiguates. Cite source_ref.path, start_line plus line index, and exact content.",
+		"mce4d_context_pack":     "Get source-backed context for one symbol. For code navigation, set view to symbol, task_kind to explore, and selector to {kind: ref, ref: <candidate.ref from locate>, service_id: null}. Use the default output budget, or set max_output_bytes to 24576.",
 		"mce4d_expand_pack":      "Continue a previously issued context pack.",
 		"mce4d_validate_pack":    "Request validation of a pack or rename result before editing.",
 		"mce4d_rename_preview":   "Request a rename preview without applying edits.",

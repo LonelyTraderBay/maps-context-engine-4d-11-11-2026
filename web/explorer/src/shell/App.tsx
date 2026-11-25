@@ -2,10 +2,13 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useReducer, useRef, us
 import type { CSSProperties, FormEvent } from 'react';
 import { createExplorerClient, ExplorerRequestError } from '../api/client.ts';
 import { sourceKey } from '../api/source.ts';
-import type { GraphNode, ScopeVector, StatusData } from '../index.ts';
+import type { FileRef, GraphNode, ScopeVector, StatusData } from '../index.ts';
 import { verifyScopeDigest } from '../index.ts';
 import { GraphPane } from './GraphPane.tsx';
-import { emptyGraph, hardNodes, loadGraph } from './map.ts';
+import { DirectoryPane } from './DirectoryPane.tsx';
+import { FlowRootSearch } from './FlowRootSearch.tsx';
+import { emptyGraph, extendNeighborhood, groupVariableEdges, hardNodes, loadGraph, loadNeighborhood } from './map.ts';
+import type { DirectoryEntry, DisplayEdge, RelationDirection, RelationFilter } from './map.ts';
 import { selectionReducer, initialSelection, retainGraphChoice } from './selection.ts';
 import type { SelectionAction } from './selection.ts';
 import { explain, SourcePane } from './SourcePane.tsx';
@@ -38,6 +41,12 @@ export function App() {
   const [workspace, setWorkspace] = useState<StatusData | null>(null);
   const [scope, setScope] = useState<ScopeVector | null>(null);
   const [graph, setGraph] = useState(emptyGraph);
+  const [browsing, setBrowsing] = useState(false);
+  const [directory, setDirectory] = useState('');
+  const [fileFocus, setFileFocus] = useState<FileRef | null>(null);
+  const [findingFlow, setFindingFlow] = useState(false);
+  const [neighborhood, setNeighborhood] = useState<{ root: GraphNode; direction: RelationDirection; filter: RelationFilter } | null>(null);
+  const [edgeChoice, setEdgeChoice] = useState<{ edge: DisplayEdge; source: number; traceNode: string | null } | null>(null);
   const [width, setWidth] = useState(45);
   const [preview, setPreview] = useState(false);
   const [flow, setFlow] = useState<{ scope: string; root: GraphNode } | null>(null);
@@ -61,6 +70,7 @@ export function App() {
     selectionOrder.current++;
     setPreparedSource(null);
     setPreparedFlow(null);
+    setEdgeChoice(null);
     dispatch(action);
   }
 
@@ -83,6 +93,12 @@ export function App() {
     setWorkspace(null);
     setScope(null);
     setGraph(emptyGraph);
+    setBrowsing(false);
+    setDirectory('');
+    setFileFocus(null);
+    setFindingFlow(false);
+    setNeighborhood(null);
+    setEdgeChoice(null);
     setPreparedSource(null);
     setPreparedFlow(null);
     dispatch({ type: 'scope', digest: null });
@@ -124,6 +140,7 @@ export function App() {
         { ...current, nodes: [...current.nodes, node] });
     }
     setError(null);
+    setEdgeChoice(null);
     setPreparedFlow(null);
     setPreparedSource(content === null ? null : { selectionID: value.selectionID, content });
     dispatch({ type: 'preview', node: node.node_id, value });
@@ -164,6 +181,7 @@ export function App() {
         { ...current, nodes: [...current.nodes, value.node] });
     }
     setError(null);
+    setEdgeChoice(null);
     setPreparedSource(null);
     setPreparedFlow({ key: scope.vector_digest + sourceKey(value.source), content: value.content });
     dispatch({ type: 'choose', node: value.node.node_id });
@@ -176,6 +194,7 @@ export function App() {
     setPreparedFlow(null);
     setFlow(null);
     setPreviewBookmark(null);
+    setEdgeChoice(null);
   }
 
   async function observeWorkspace(job: AbortController) {
@@ -195,10 +214,15 @@ export function App() {
     setScope(next);
     dispatch({ type: 'scope', digest: next?.vector_digest ?? null });
     setGraph(emptyGraph);
+    setFileFocus(null);
+    setNeighborhood(null);
+    setFindingFlow(false);
+    setBrowsing(false);
     if (next && status.index_state === 'published') {
       const page = await loadGraph(client, next, job.signal, emptyGraph, setGraph);
       job.signal.throwIfAborted();
       setGraph(page);
+      setBrowsing(page.coverage?.gaps.some(gap => gap.code === 'GRAPH_PROJECTION_LIMIT') ?? false);
     }
     graphReady.current = true;
   }
@@ -247,7 +271,7 @@ export function App() {
     if (!scope || !graph.cursor || busy) return;
     const job = begin();
     try {
-      const page = await loadGraph(client, scope, job.signal, graph);
+      const page = await loadGraph(client, scope, job.signal, graph, undefined, fileFocus ?? undefined);
       job.signal.throwIfAborted();
       setGraph(page);
     } catch (reason) {
@@ -257,8 +281,106 @@ export function App() {
     }
   }
 
+  async function focusFile(entry: DirectoryEntry) {
+    const member = scope?.members[0];
+    if (!scope || !member || !entry.content_hash || busy) return;
+    const file: FileRef = { kind: 'file', path: entry.path, content_hash: entry.content_hash,
+      worktree_id: member.worktree_id, profile_id: member.profile_id, generation_id: member.generation_id };
+    const job = begin();
+    try {
+      const page = await loadGraph(client, scope, job.signal, emptyGraph, undefined, file);
+      const root = page.nodes.find(node => node.ref.kind === 'file' && node.ref.path === file.path);
+      if (!root) throw new Error('Đồ thị không chứa tệp đã chọn.');
+      job.signal.throwIfAborted();
+      discardScopeSelections();
+      setPreview(false);
+      setGraph(page);
+      setFileFocus(file);
+      setNeighborhood(null);
+      setBrowsing(false);
+      dispatch({ type: 'clear' });
+      dispatch({ type: 'choose', node: root.node_id });
+      dispatch({ type: 'detail', value: 'source' });
+    } catch (reason) {
+      failed(job, reason);
+    } finally {
+      finish(job);
+    }
+  }
+
+  async function showOverview() {
+    if (!scope || busy) return;
+    if (!fileFocus && !neighborhood) {
+      setBrowsing(false);
+      return;
+    }
+    const job = begin();
+    try {
+      const page = await loadGraph(client, scope, job.signal);
+      job.signal.throwIfAborted();
+      discardScopeSelections();
+      setGraph(page);
+      setFileFocus(null);
+      setNeighborhood(null);
+      setBrowsing(false);
+      dispatch({ type: 'clear' });
+    } catch (reason) {
+      failed(job, reason);
+    } finally {
+      finish(job);
+    }
+  }
+
   const chosen = selection.history[selection.position];
+  const traceNode = edgeChoice ? edgeChoice.traceNode : chosen?.node ?? null;
   const node = graph.nodes.find(item => item.node_id === chosen?.node) ?? null;
+  const displayEdges = useMemo(() => groupVariableEdges(graph.edges), [graph.edges]);
+
+  async function openNeighborhood(root: GraphNode, direction: RelationDirection, filter: RelationFilter,
+    expand = false) {
+    if (!scope || busy || root.ref.kind !== 'symbol') return;
+    const job = begin();
+    try {
+      const depth = !expand && root.kind === 'route' ? 4 : 2;
+      const page = await loadNeighborhood(client, scope, root.ref, direction, filter, depth, job.signal);
+      if (!page.nodes.some(item => item.node_id === root.node_id)) throw new Error('Không tìm thấy điểm bắt đầu trong snapshot.');
+      const next = expand ? extendNeighborhood(graph, page) : page;
+      job.signal.throwIfAborted();
+      discardScopeSelections();
+      setPreview(false);
+      setGraph(next);
+      setFileFocus(null);
+      setFindingFlow(false);
+      setBrowsing(false);
+      setNeighborhood(expand && neighborhood ? neighborhood : { root, direction, filter });
+      if (!expand) dispatch({ type: 'clear' });
+      dispatch({ type: 'choose', node: root.node_id });
+      dispatch({ type: 'detail', value: 'source' });
+    } catch (reason) {
+      failed(job, reason);
+    } finally {
+      finish(job);
+    }
+  }
+
+  function chooseGraphNode(id: string) {
+    manualSelection({ type: 'choose', node: id });
+    if (neighborhood) {
+      dispatch({ type: 'detail', value: 'source' });
+      dispatch({ type: 'pane', value: 'right' });
+    }
+  }
+
+  function chooseGraphEdge(id: string) {
+    const edge = displayEdges.find(item => item.edge_id === id);
+    if (!edge?.evidence_refs.some(evidence => evidence.source_refs.length > 0)) return;
+    manualSelection({ type: 'choose', node: edge.from_node_id });
+    setEdgeChoice({ edge, source: 0, traceNode });
+    setPreview(false);
+    setFlow(null);
+    dispatch({ type: 'detail', value: 'source' });
+    dispatch({ type: 'pane', value: 'right' });
+  }
 
   const pollWorkspace = useEffectEvent(async () => {
     if (work.current || document.hidden) return;
@@ -280,6 +402,10 @@ export function App() {
       setWorkspace(status);
       setScope(next);
       setGraph(page);
+      setFileFocus(null);
+      setNeighborhood(null);
+      setFindingFlow(false);
+      setBrowsing(Boolean(next && (browsing || fileFocus || page.coverage?.gaps.some(gap => gap.code === 'GRAPH_PROJECTION_LIMIT'))));
       setError(null);
       pollError.current = null;
       dispatch({ type: 'scope', digest: next?.vector_digest ?? null, ...(retain ? { retain } : {}) });
@@ -314,9 +440,11 @@ export function App() {
   const flowSource = selectedSource && scope && preparedFlow?.key === scope.vector_digest + sourceKey(selectedSource)
     ? preparedFlow.content : null;
   const contextLocator = node && scope ? selectionLocator(node.ref, scope, selectedSource) : null;
+  const edgeEndpoints = edgeChoice ? [edgeChoice.edge.from_node_id, edgeChoice.edge.to_node_id]
+    .map(id => graph.nodes.find(item => item.node_id === id)?.label || id) : undefined;
   const relations = useMemo(() => node ? graph.edges.filter(edge =>
     edge.from_node_id === node.node_id || edge.to_node_id === node.node_id) : [], [graph.edges, node]);
-  const statusText = !connected ? 'Ngắt kết nối' : busy && !workspace ? 'Đang tải' :
+  const statusText = !connected ? 'Ngắt kết nối' : busy ? 'Đang tải' :
     workspace?.index_state === 'missing' ? 'Thiếu index' : graph.coverage?.status === 'partial' ? 'Index một phần' :
       workspace?.index_state === 'published' ? 'Đã lập chỉ mục' : 'Đã kết nối';
 
@@ -335,6 +463,12 @@ export function App() {
         <span className={'status-mark' + (graph.coverage?.status === 'partial' ? ' status-mark--partial' :
           connected ? ' status-mark--online' : '')} role="status">{statusText}</span>
         {connected && <button className="quiet-button" type="button" disabled={busy} onClick={() => void refresh()}>Tải lại</button>}
+        {connected && scope && workspace?.index_state === 'published' &&
+          <button className="quiet-button" type="button" aria-pressed={findingFlow} disabled={busy} onClick={() => {
+            setError(null);
+            setFindingFlow(value => !value);
+            dispatch({ type: 'pane', value: 'graph' });
+          }}>Tìm luồng</button>}
         {connected && scope && client.previewEnabled() &&
           <button className="quiet-button" type="button" onClick={() => {
             if (exactFlow) closeFlow();
@@ -382,9 +516,33 @@ export function App() {
       </div>
       <div className="workspace" data-pane={selection.compactPane}
         style={{ '--graph-share': width + '%' } as CSSProperties}>
-        <GraphPane graph={graph} scope={scope?.vector_digest ?? null} busy={busy} error={error} hasIndex={workspace?.index_state === 'published'}
-          selected={chosen?.node ?? null} onChoose={value => manualSelection({ type: 'choose', node: value })}
-          onMore={() => void more()} />
+        {findingFlow && scope ? <FlowRootSearch key={scope.vector_digest}
+          client={client} scope={scope} busy={busy} graphError={error} onSessionError={sessionError}
+          onClose={() => { setError(null); setFindingFlow(false); }}
+          onOpen={root => void openNeighborhood(root, 'outgoing', 'functional')} />
+        : browsing && scope ? <DirectoryPane key={scope.vector_digest + ':' + directory}
+          client={client} scope={scope} directory={directory} onDirectory={path => { if (!busy) setDirectory(path); }}
+          onFile={entry => void focusFile(entry)} onOverview={() => void showOverview()} busy={busy}
+          graphError={error} onSessionError={sessionError} />
+          : <GraphPane key={neighborhood?.root.node_id ?? fileFocus?.path ?? ''} graph={graph} scope={scope?.vector_digest ?? null} busy={busy}
+            displayEdges={displayEdges}
+            error={error} hasIndex={workspace?.index_state === 'published'} filePath={fileFocus?.path}
+            onBrowse={scope && workspace?.index_state === 'published' ? () => setBrowsing(true) : undefined}
+            selected={chosen?.node ?? null} selectedEdge={edgeChoice?.edge.edge_id ?? null}
+            traceNode={traceNode}
+            onChoose={chooseGraphNode} onChooseEdge={chooseGraphEdge}
+            neighborhood={neighborhood ? {
+              id: neighborhood.root.node_id, label: neighborhood.root.label,
+              direction: neighborhood.direction, filter: neighborhood.filter,
+              change: (direction, filter) => void openNeighborhood(neighborhood.root, direction, filter),
+            } : undefined}
+            onFocus={node?.ref.kind === 'symbol' && !browsing ?
+              () => void openNeighborhood(node, 'outgoing', 'functional') : undefined}
+            onImpact={node?.ref.kind === 'symbol' && !browsing && !edgeChoice ?
+              () => void openNeighborhood(node, 'incoming', 'impact') : undefined}
+            onExpand={neighborhood && node?.ref.kind === 'symbol' ?
+              () => void openNeighborhood(node, neighborhood.direction, neighborhood.filter, true) : undefined}
+            onMore={() => void more()} />}
         <Splitter value={width} onChange={setWidth} />
         <div className="workspace-right">
           {exactFlow && scope && <FlowPanel key={scope.vector_digest + exactFlow.root.node_id}
@@ -400,14 +558,15 @@ export function App() {
               }} />}
           {manualMappings && client.recordsEnabled() &&
             <ManualMappings client={client} scope={scope} node={node} source={selectedSource} onChanged={refresh} onSessionError={sessionError} />}
-          <SourcePane client={client} scope={scope} node={node} sourceIndex={chosen?.source ?? 0}
+          <SourcePane client={client} scope={scope} node={node} edge={edgeChoice?.edge} edgeEndpoints={edgeEndpoints}
+            sourceIndex={edgeChoice?.source ?? chosen?.source ?? 0}
             detail={selection.detail} edges={relations}
-            onRange={index => manualSelection({ type: 'range', index })}
+            onRange={index => edgeChoice ? setEdgeChoice({ ...edgeChoice, source: index }) : manualSelection({ type: 'range', index })}
             onDetail={value => dispatch({ type: 'detail', value })}
             preparedSource={flowSource ?? (preparedSource && preparedSource.selectionID === chosen?.preview?.selectionID ? preparedSource.content : null)}
             onSessionError={sessionError} {...(chosen?.preview ? { preview: chosen.preview } : {})}
             {...(chosen?.mappingSource ? { mappingSource: chosen.mappingSource } : {})} />
-          {node && scope && client.contextEnabled() &&
+          {node && !edgeChoice && scope && client.contextEnabled() &&
             <SelectionContext key={scope.vector_digest + node.node_id + JSON.stringify(selectedSource ?? null)}
               client={client} scope={scope} locator={contextLocator} source={selectedSource} onSessionError={sessionError} />}
         </div>

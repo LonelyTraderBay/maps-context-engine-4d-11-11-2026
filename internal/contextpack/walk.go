@@ -92,7 +92,7 @@ func walk(ctx context.Context, s *Selection, in *Input, c catalog, symbols map[s
 				addGap(&s.report, "EXTERNAL_BOUNDARY", "A relation reaches an external symbol without captured source.")
 			}
 			s.report.References = append(s.report.References, Reference{Relation: r, Source: source(s.member, files[r.SitePath], r.Range), Classification: classification})
-			if !follow(r.Kind) || r.TargetSymbolID == nil {
+			if (!follow(r.Kind) && !(in.Focused && followFocused(r.Kind))) || r.TargetSymbolID == nil {
 				continue
 			}
 			other := r.SourceSymbolID
@@ -174,11 +174,18 @@ func walk(ctx context.Context, s *Selection, in *Input, c catalog, symbols map[s
 	})
 	var ranges []SourceRange
 	file := files[*target.Path]
-	ranges = append(ranges, SourceRange{Source: source(s.member, file, model.ByteRange{StartByte: 0, EndByte: int64(file.Len())}), Priority: 0, Reasons: []string{"target_file"}})
+	targetSpan, reason := model.ByteRange{EndByte: int64(file.Len())}, "target_file"
+	if in.Focused {
+		targetSpan, reason = *target.Range, "target_declaration"
+	}
+	ranges = append(ranges, SourceRange{Source: source(s.member, file, targetSpan), Priority: 0, Reasons: []string{reason}})
 	for id := range visited {
 		sym := symbols[id]
 		s.report.Nodes = append(s.report.Nodes, sym)
 		if sym.Path == nil || sym.Range == nil || id == target.SymbolID {
+			continue
+		}
+		if in.Focused && sym.Range.EndByte-sym.Range.StartByte > 3072 {
 			continue
 		}
 		ranges = append(ranges, SourceRange{Source: source(s.member, files[*sym.Path], *sym.Range), Priority: 3, Reasons: []string{"related_declaration"}})
@@ -191,13 +198,37 @@ func walk(ctx context.Context, s *Selection, in *Input, c catalog, symbols map[s
 		}
 		ranges = append(ranges, SourceRange{Source: r.Source, Priority: priority, Reasons: []string{reason}})
 	}
-	s.report.Sources = mergeRanges(ranges)
+	if in.Focused {
+		// Preserve the selected declaration even if an enclosing relation site
+		// spans much more source.
+		related := ranges[:1]
+		for _, candidate := range ranges[1:] {
+			span := candidate.Source.Range
+			if span.EndByte-span.StartByte > 3072 ||
+				candidate.Source.Path == *target.Path && targetSpan.StartByte <= span.StartByte && span.EndByte <= targetSpan.EndByte {
+				continue
+			}
+			related = append(related, candidate)
+		}
+		s.report.Sources = append(related[:1:1], mergeRanges(related[1:])...)
+	} else {
+		s.report.Sources = mergeRanges(ranges)
+	}
 	witness, err := cycleWitness(ctx, s.report.References)
 	if err != nil {
 		return err
 	}
 	s.report.CycleWitness = witness
 	return nil
+}
+
+func followFocused(kind string) bool {
+	switch kind {
+	case "ROUTE_COMPONENT", "RENDERS_COMPONENT", "RENDERS_JSX", "BINDS_EVENT", "CHECKS_CONDITION", "BRANCH_TRUE", "BRANCH_FALSE":
+		return true
+	default:
+		return false
+	}
 }
 
 func mergeRanges(ranges []SourceRange) []SourceRange {

@@ -20,7 +20,7 @@ var (
 	ErrTarget    = errors.New("context selection target unavailable")
 )
 
-// Input supplies one complete fact catalog for one member of a verified vector.
+// Input supplies a complete or explicitly focused catalog for one member of a verified vector.
 // VerifyFacts must establish that the exact digest belongs to the published
 // generation; neither a digest nor this package provides authorization.
 type Input struct {
@@ -44,6 +44,7 @@ type Input struct {
 	MaxEdges         int
 	MaxDepth         int
 	MaxOutputBytes   int
+	Focused          bool // Bounded exploration with the target declaration first.
 }
 
 // Reference retains the original site and evidence; candidate dispatch is
@@ -99,6 +100,7 @@ type Selection struct {
 	verify    func(context.Context, model.ScopeMember, string) error
 	paths     []string
 	maxOutput int
+	focused   bool
 }
 
 // Check revalidates the pinned fact set and source authority without walking

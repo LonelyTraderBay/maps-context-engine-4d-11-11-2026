@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/app"
 	"github.com/LonelyTraderBay/maps-context-engine-4d-11-11-2026/internal/contextpack"
@@ -76,6 +77,12 @@ func (g *explorerGraphs) put(id string, entry explorerGraph, now time.Time) erro
 }
 
 func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, request model.GraphQueryRequest, options app.CoreCallOptions) ([][]byte, error) {
+	if request.Directory != nil {
+		return e.readDirectory(ctx, p, request, options)
+	}
+	if request.Neighborhood != "" || request.SymbolQuery != "" {
+		return e.readRelationshipGraph(ctx, p, request, options)
+	}
 	nodeLimit := e.limits.GraphDefaultNodes
 	edgeLimit := e.limits.GraphDefaultEdges
 	if request.NodeLimit != nil {
@@ -85,6 +92,9 @@ func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, req
 		edgeLimit = *request.EdgeLimit
 	}
 	depth := min(int64(2), e.core.limits.MaxGraphDepth)
+	if request.LocalFile {
+		depth = 1
+	}
 	if request.Depth != nil {
 		depth = *request.Depth
 	}
@@ -231,6 +241,9 @@ func (e *ExplorerReader) readGraph(ctx context.Context, p app.CorePrincipal, req
 
 func (e *ExplorerReader) projectGraph(ctx context.Context, p app.CorePrincipal, observed ScopeObservation,
 	request model.GraphQueryRequest, binding contextpack.CursorBinding, guard contextpack.CursorGuard) (explorerGraph, error) {
+	if request.LocalFile {
+		return e.projectLocalFile(ctx, p, observed, request, binding, guard)
+	}
 	input, maxSource, err := e.publishedRead(p, observed)
 	if err != nil {
 		return explorerGraph{}, err
@@ -278,6 +291,108 @@ func (e *ExplorerReader) projectGraph(ctx context.Context, p app.CorePrincipal, 
 		return explorerGraph{}, err
 	}
 	return explorerGraph{pager: pager, scope: observed.Vector, coverage: graph.Coverage, expires: time.Now().Add(e.graphs.ttl)}, nil
+}
+
+func (e *ExplorerReader) projectLocalFile(ctx context.Context, principal app.CorePrincipal, observed ScopeObservation,
+	request model.GraphQueryRequest, binding contextpack.CursorBinding, guard contextpack.CursorGuard) (explorerGraph, error) {
+	root := request.Root.(*model.RefSelector)
+	ref := root.Ref.(*model.FileRef)
+	member, err := model.MatchPinnedMember(observed.Vector, ref, root.ServiceID)
+	if err != nil {
+		return explorerGraph{}, ErrAuthority
+	}
+	input, _, err := e.publishedRead(principal, observed)
+	if err != nil {
+		return explorerGraph{}, err
+	}
+	maxNodes := min(int(e.core.limits.MaxGraphNodes), 129)
+	maxEdges := min(int(e.core.limits.MaxGraphEdges), 300)
+	if maxNodes < 2 || maxEdges < 1 {
+		return explorerGraph{}, app.ErrCoreLimit
+	}
+	input.Path = ref.Path
+	local, err := e.core.Reader.Index.ReadPublishedFileSymbols(ctx, index.PublishedFileSymbolsRequest{
+		File: input, MaxSymbols: maxNodes - 1, MaxFactsBytes: 1 << 20, MaxRelations: maxEdges,
+	})
+	if err != nil {
+		return explorerGraph{}, err
+	}
+	if local.File.IndexIncarnation != member.IndexIncarnation || local.File.SnapshotDigest != member.SnapshotDigest ||
+		local.File.PolicyDigest != member.PolicyDigest || local.File.PolicyEpoch != member.PolicyEpoch {
+		return explorerGraph{}, ErrScopeChanged
+	}
+	if ref.ContentHash == nil || *ref.ContentHash != local.File.ContentHash {
+		return explorerGraph{}, app.ErrValidationPrecondition
+	}
+	fileNode, err := explorerFileNode(ref, int64(len(local.File.Bytes)))
+	if err != nil {
+		return explorerGraph{}, err
+	}
+	references := make([]contextpack.Reference, 0, len(local.Relations))
+	for _, relation := range local.Relations {
+		source := fileNode.SourceRefs[0]
+		source.Range = relation.Range
+		references = append(references, contextpack.Reference{Relation: relation, Source: source})
+	}
+	nodes, edges, err := overview.ProjectFileFacts(ctx, observed.Vector, ref.GraphIdentity, ref.Path, local.File.ContentHash,
+		local.Symbols, references, maxNodes-1, maxEdges)
+	if err != nil {
+		return explorerGraph{}, err
+	}
+	aliases := map[string]bool{}
+	nodes = slices.DeleteFunc(nodes, func(node model.GraphNode) bool {
+		if node.Kind != "file" {
+			return false
+		}
+		aliases[node.NodeID] = true
+		return true
+	})
+	for i := range edges {
+		if aliases[edges[i].FromNodeID] {
+			edges[i].FromNodeID = fileNode.NodeID
+		}
+		if aliases[edges[i].ToNodeID] {
+			edges[i].ToNodeID = fileNode.NodeID
+		}
+	}
+	gaps := []model.Gap{{Code: "FILE_LOCAL_SCOPE", Reason: "Chỉ hiển thị quan hệ đã ghi giữa các ký hiệu trong tệp.", SourceRefs: []model.SourceRef{}}}
+	if local.Truncated {
+		gaps = append(gaps, model.Gap{Code: "FILE_GRAPH_LIMIT", Reason: "Tệp có thêm ký hiệu hoặc cạnh ngoài giới hạn của bản đồ này.", SourceRefs: []model.SourceRef{}})
+	}
+	budget := min(observed.Binding.Policy.MaxOutputBytes, e.core.limits.MaxOutputBytes, 131072)
+	if splitNodeSource(&fileNode, local.File.Bytes, int(budget)) {
+		gaps = append(gaps, model.Gap{Code: "FILE_SOURCE_PREVIEW", Reason: "Mã nguồn tệp lớn được xem theo các đoạn đầu. Chọn ký hiệu để đọc vùng tương ứng.", SourceRefs: []model.SourceRef{}})
+	}
+	nodes = append(nodes, fileNode)
+	pager, err := search.NewGraphPager(ctx, e.codec, binding, guard, input.Scanner, nodes, edges, true, maxNodes, maxEdges, maxProjectionBytes)
+	if err != nil {
+		return explorerGraph{}, err
+	}
+	pager.PrioritizeNode(fileNode.NodeID)
+	coverage := model.Coverage{Status: "partial", Capabilities: []model.Capability{}, ScopeDescription: "Local graph for one captured file.", Gaps: gaps}
+	return explorerGraph{pager: pager, scope: observed.Vector, coverage: coverage, expires: time.Now().Add(e.graphs.ttl)}, nil
+}
+
+func splitNodeSource(node *model.GraphNode, source []byte, budget int) bool {
+	// Reserve room for scope and JSON escaping. A source request reads one slice.
+	size := max(4, min(8192, (budget-4096)/6))
+	template := node.SourceRefs[0]
+	start, limit := int(template.Range.StartByte), int(template.Range.EndByte)
+	if limit-start <= size {
+		return false
+	}
+	node.SourceRefs = nil
+	for start < limit && len(node.SourceRefs) < 16 {
+		end := min(start+size, limit)
+		for end < limit && !utf8.RuneStart(source[end]) {
+			end--
+		}
+		ref := template
+		ref.Range = model.ByteRange{StartByte: int64(start), EndByte: int64(end)}
+		node.SourceRefs = append(node.SourceRefs, ref)
+		start = end
+	}
+	return start < limit
 }
 
 // readFileNode serves an exact depth-zero FileRef from captured bytes. A

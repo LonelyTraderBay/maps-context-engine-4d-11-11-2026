@@ -139,6 +139,35 @@ func NewProjectedGraph(ctx context.Context, input contextpack.Input, codec *cont
 func ProjectFacts(ctx context.Context, captured *snapshot.Snapshot, scope model.ScopeVector, serviceID *string, identity model.GraphIdentity,
 	symbols []model.SymbolFact, references []contextpack.Reference, maxNodes, maxEdges int,
 ) ([]model.GraphNode, []model.GraphEdge, error) {
+	return projectFacts(ctx, scope, serviceID, identity, symbols, references, maxNodes, maxEdges, func(name string) (string, bool) {
+		file, ok := captured.File(name)
+		return file.ContentHash(), ok
+	})
+}
+
+// ProjectFileFacts projects rows already checked against one captured file.
+func ProjectFileFacts(ctx context.Context, scope model.ScopeVector, identity model.GraphIdentity, name, hash string,
+	symbols []model.SymbolFact, references []contextpack.Reference, maxNodes, maxEdges int,
+) ([]model.GraphNode, []model.GraphEdge, error) {
+	return projectFacts(ctx, scope, nil, identity, symbols, references, maxNodes, maxEdges, func(candidate string) (string, bool) {
+		return hash, candidate == name
+	})
+}
+
+// ProjectCapturedFacts projects a bounded slice whose source ranges and hashes
+// have been checked by the snapshot reader.
+func ProjectCapturedFacts(ctx context.Context, scope model.ScopeVector, identity model.GraphIdentity, hashes map[string]string,
+	symbols []model.SymbolFact, references []contextpack.Reference, maxNodes, maxEdges int,
+) ([]model.GraphNode, []model.GraphEdge, error) {
+	return projectFacts(ctx, scope, nil, identity, symbols, references, maxNodes, maxEdges, func(name string) (string, bool) {
+		hash, ok := hashes[name]
+		return hash, ok
+	})
+}
+
+func projectFacts(ctx context.Context, scope model.ScopeVector, serviceID *string, identity model.GraphIdentity,
+	symbols []model.SymbolFact, references []contextpack.Reference, maxNodes, maxEdges int, sourceHash func(string) (string, bool),
+) ([]model.GraphNode, []model.GraphEdge, error) {
 	if len(symbols) > maxNodes || len(references) > maxEdges {
 		return nil, nil, search.ErrGraphPageLarge
 	}
@@ -156,11 +185,11 @@ func ProjectFacts(ctx context.Context, captured *snapshot.Snapshot, scope model.
 		}
 		var source *model.SourceRef
 		if symbol.Path != nil && symbol.Range != nil {
-			file, ok := captured.File(*symbol.Path)
+			hash, ok := sourceHash(*symbol.Path)
 			if !ok {
 				return nil, nil, ErrInput
 			}
-			ref := model.SourceRef{WorktreeID: identity.WorktreeID, ProfileID: identity.ProfileID, GenerationID: identity.GenerationID, Path: *symbol.Path, ContentHash: file.ContentHash(), Range: *symbol.Range}
+			ref := model.SourceRef{WorktreeID: identity.WorktreeID, ProfileID: identity.ProfileID, GenerationID: identity.GenerationID, Path: *symbol.Path, ContentHash: hash, Range: *symbol.Range}
 			if _, e := model.MatchPinnedSource(scope, ref, serviceID, 32768); e != nil {
 				return nil, nil, ErrInput
 			}

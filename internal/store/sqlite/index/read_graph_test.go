@@ -17,7 +17,7 @@ import (
 
 // This fixture uses the actual SQLite staging and publication APIs, with fake
 // leases and authority callbacks. No target workspace or process is executed.
-func publishedGraphFixture(t *testing.T, relations int) (context.Context, *Store, *sql.DB, PublishedGraphRequest, model.ScopeVector) {
+func publishedGraphFixture(t *testing.T, relations int, decorate ...func(*model.ProviderBatch)) (context.Context, *Store, *sql.DB, PublishedGraphRequest, model.ScopeVector) {
 	t.Helper()
 	store, stage := providerStageFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -34,6 +34,9 @@ func publishedGraphFixture(t *testing.T, relations int) (context.Context, *Store
 		stage.Batch.Relations = []model.RelationFact{}
 	}
 	stage.Batch.Diagnostics = []model.DiagnosticFact{{DiagnosticID: "warning", Code: "FIXTURE", Severity: "warning", Message: "Fixture diagnostic.", ScopeDescription: "workspace"}}
+	for _, apply := range decorate {
+		apply(&stage.Batch)
+	}
 	if _, err := store.StageProviderBatch(ctx, stage); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +60,96 @@ func publishedGraphFixture(t *testing.T, relations int) (context.Context, *Store
 	}
 	r := PublishedGraphRequest{Member: member, VectorDigest: scope.VectorDigest, AuthorizeGeneration: func(context.Context, string, string, string, int64) error { return nil }, AuthorizePath: stage.Capture.Authorize, Scanner: stage.Capture.Scanner, MaxManifestBytes: 8192, MaxFileBytes: 1024, MaxSourceBytes: 1024, MaxFactBytes: 65536, MaxFacts: 100}
 	return ctx, store, store.writer, r, scope
+}
+
+func TestRouteNeighborhoodCompletesHandlerPathBeforeSiblings(t *testing.T) {
+	ctx, store, _, graph, _ := publishedGraphFixture(t, 0, func(batch *model.ProviderBatch) {
+		batch.Symbols[0].Kind = "route"
+		template := batch.Symbols[0]
+		for _, id := range []string{"page", "button", "handler", "sibling-a", "sibling-b", "sibling-c"} {
+			symbol := template
+			symbol.SymbolID, symbol.Name, symbol.Kind = id, id, "function"
+			batch.Symbols = append(batch.Symbols, symbol)
+		}
+		add := func(id, from, to, kind, evidence string) {
+			relation := providerBatchFixture().Relations[0]
+			relation.RelationID, relation.SourceSymbolID, relation.TargetSymbolID = id, from, &to
+			relation.Kind, relation.EvidenceKind = kind, evidence
+			batch.Relations = append(batch.Relations, relation)
+		}
+		add("route", "symbol", "page", "ROUTE_COMPONENT", "type_resolved")
+		add("button", "page", "button", "RENDERS_JSX", "syntax_exact")
+		add("handler", "button", "handler", "BINDS_EVENT", "type_resolved")
+		for _, id := range []string{"sibling-a", "sibling-b", "sibling-c"} {
+			add(id, "page", id, "RENDERS_COMPONENT", "type_resolved")
+		}
+	})
+	input := PublishedFileRequest{ProfileID: graph.Member.ProfileID, GenerationID: graph.Member.GenerationID,
+		AuthorizeGeneration: graph.AuthorizeGeneration, AuthorizePath: graph.AuthorizePath, Scanner: graph.Scanner,
+		MaxManifestBytes: graph.MaxManifestBytes, MaxFileBytes: graph.MaxFileBytes}
+	result, err := store.ReadNeighborhood(ctx, NeighborhoodRequest{File: input, Root: "symbol", Direction: "outgoing",
+		Depth: 4, MaxNodes: 4, MaxEdges: 3, MaxSourceBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Limited || len(result.Relations) != 3 || result.Relations[2].Kind != "BINDS_EVENT" {
+		t.Fatal("viewport budget displaced the route's reachable handler")
+	}
+}
+
+func TestReadNeighborhoodBoundsRelationsAndAuthorizesCapturedSources(t *testing.T) {
+	ctx, store, _, graph, _ := publishedGraphFixture(t, 5)
+	request := NeighborhoodRequest{
+		File: PublishedFileRequest{ProfileID: graph.Member.ProfileID, GenerationID: graph.Member.GenerationID,
+			AuthorizeGeneration: graph.AuthorizeGeneration, AuthorizePath: graph.AuthorizePath, Scanner: graph.Scanner,
+			MaxManifestBytes: graph.MaxManifestBytes, MaxFileBytes: graph.MaxFileBytes},
+		Root: "symbol", Direction: "both", Depth: 2, MaxNodes: 3, MaxEdges: 2, MaxSourceBytes: 1024,
+	}
+	result, err := store.ReadNeighborhood(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Generation.SnapshotDigest != graph.Member.SnapshotDigest || len(result.Symbols) != 1 ||
+		len(result.Relations) != 2 || !result.Limited || result.Relations[0].RelationID == result.Relations[1].RelationID ||
+		len(result.Files) != 1 || len(result.Files["main.go"].Bytes) == 0 {
+		t.Fatal("neighborhood lost its snapshot, returned duplicate relations or exceeded its cap")
+	}
+	denied := errors.New("fixture denied")
+	request.File.AuthorizePath = func(context.Context, string, string, string, int64) error { return denied }
+	if result, err := store.ReadNeighborhood(ctx, request); !errors.Is(err, denied) || len(result.Symbols) != 0 {
+		t.Fatal("neighborhood disclosed facts for a denied source path")
+	}
+}
+
+func TestFocusedGraphSurvivesUnrelatedCatalogBudget(t *testing.T) {
+	ctx, store, _, request, scope := publishedGraphFixture(t, 0, func(batch *model.ProviderBatch) {
+		for i := range 5 {
+			unrelated := batch.Symbols[0]
+			unrelated.SymbolID = fmt.Sprintf("unrelated-%02d", i)
+			batch.Symbols = append(batch.Symbols, unrelated)
+		}
+	})
+	request.MaxFacts = 3
+	if _, err := store.ReadPublishedGraph(ctx, request); !errors.Is(err, ErrCaptureLimit) {
+		t.Fatalf("expected complete catalog to exceed the limit: %v", err)
+	}
+	request.Focus = &PublishedGraphFocus{SymbolID: "symbol"}
+	graph, err := store.ReadPublishedGraph(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Symbols) != 1 || len(graph.Packages) != 1 || len(graph.Relations) != 0 ||
+		graph.Snapshot.Manifest().SnapshotDigest != request.Member.SnapshotDigest {
+		t.Fatalf("focused graph changed identity or included unrelated facts: %+v", graph)
+	}
+	if err := graph.VerifyCatalog(ctx, scope.Members[0]); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("fixture path denied")
+	request.AuthorizePath = func(context.Context, string, string, string, int64) error { return denied }
+	if graph, err := store.ReadPublishedGraph(ctx, request); graph != nil || !errors.Is(err, denied) {
+		t.Fatalf("focused graph exposed denied source: %v", err)
+	}
 }
 
 func TestReadPublishedGraphFeedsProjectedTraversal(t *testing.T) {

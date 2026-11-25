@@ -164,7 +164,10 @@ func Select(ctx context.Context, in Input) (*Selection, error) {
 	h.Write([]byte{0})
 	h.Write(raw)
 	digest := hex.EncodeToString(h.Sum(nil))
-	s := &Selection{report: Report{Scope: scope, Target: in.Target, FactsDigest: digest, Coverage: c.Coverage, Nodes: []model.SymbolFact{}, Sources: []SourceRange{}, References: []Reference{}, Groups: []ReferenceGroup{}, Gaps: []model.Gap{}, CycleWitness: []string{}, EnumerationComplete: true}, member: member, snapshot: in.Snapshot, scanner: in.Scanner, scopeAuth: in.AuthorizeScope, pathAuth: in.AuthorizePath, verify: in.VerifyFacts, maxOutput: in.MaxOutputBytes}
+	s := &Selection{report: Report{Scope: scope, Target: in.Target, FactsDigest: digest, Coverage: c.Coverage, Nodes: []model.SymbolFact{}, Sources: []SourceRange{}, References: []Reference{}, Groups: []ReferenceGroup{}, Gaps: []model.Gap{}, CycleWitness: []string{}, EnumerationComplete: true}, member: member, snapshot: in.Snapshot, scanner: in.Scanner, scopeAuth: in.AuthorizeScope, pathAuth: in.AuthorizePath, verify: in.VerifyFacts, maxOutput: in.MaxOutputBytes, focused: in.Focused}
+	if in.Focused {
+		addGap(&s.report, "FOCUSED_CONTEXT", "Pagination covers only the selected symbol's bounded static neighborhood.")
+	}
 	if err := s.authorize(ctx); err != nil {
 		return nil, err
 	}

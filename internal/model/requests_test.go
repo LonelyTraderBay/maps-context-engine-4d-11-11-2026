@@ -42,8 +42,8 @@ func TestStatusRequestVerifyClosed(t *testing.T) {
 }
 
 func TestEvidenceLookupUsesExactNameWithoutContinuation(t *testing.T) {
-	req, err := DecodeLocateRequestJSON([]byte(`{"mode":"evidence","query":"total","path":"src/state.go"}`), 16384)
-	if err != nil || req.Path == nil || *req.Path != "src/state.go" {
+	req, err := DecodeLocateRequestJSON([]byte(`{"mode":"evidence","query":"total","path":"src/state.ts"}`), 16384)
+	if err != nil || req.Path == nil || *req.Path != "src/state.ts" {
 		t.Fatalf("invalid evidence request: %+v %v", req, err)
 	}
 	if _, err := DecodeLocateRequestJSON([]byte(`{"mode":"evidence","query":"total","cursor":"old-page"}`), 16384); err == nil {
@@ -51,8 +51,24 @@ func TestEvidenceLookupUsesExactNameWithoutContinuation(t *testing.T) {
 	}
 }
 
+func TestRouteFocusOnlyAppliesToEvidenceLookup(t *testing.T) {
+	req, err := DecodeLocateRequestJSON([]byte(`{"mode":"evidence","query":"Wrapper","focus":"route"}`), 16384)
+	if err != nil || req.Mode != "evidence" || req.Focus != "route" {
+		t.Fatalf("route focus rejected: %+v %v", req, err)
+	}
+	for _, raw := range []string{
+		`{"query":"Wrapper","focus":"route"}`,
+		`{"mode":"evidence","query":"Wrapper","focus":"other"}`,
+		`{"mode":"evidence","query":"Wrapper","focus":""}`,
+	} {
+		if _, err := DecodeLocateRequestJSON([]byte(raw), 16384); err == nil {
+			t.Fatalf("accepted invalid focus: %s", raw)
+		}
+	}
+}
+
 func TestQuestionMatchOnlyAppliesToEvidenceLookup(t *testing.T) {
-	raw := `{"mode":"evidence","match":"question","query":"Điều kiện nào kiểm tra thời điểm hết hạn?"}`
+	raw := `{"mode":"evidence","match":"question","query":"How does /settings save changes?"}`
 	if _, err := DecodeLocateRequestJSON([]byte(raw), 16384); err != nil {
 		t.Fatal(err)
 	}

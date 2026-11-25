@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { edgeRelationLabel, groupVariableEdges, traceFlowEdges } from '../../web/explorer/src/shell/map.ts';
 import {
   anchorDigest, bindingDigest, buildMapDigest, canonicalBytes, canonicalDigest,
   checkPagination, checkRelativePath, decodeBridgeMessage, decodeBuildManifest,
@@ -20,6 +21,33 @@ const limit = 131072;
 const at = '2026-11-21T04:00:00Z';
 const later = '2026-11-21T04:00:00.000000001Z';
 const fixed = { UUID: id, Hash: hash('a'), ID: 'x', Token: 'sample', Path: 'x.ts', Time: at };
+
+test('a grouped variable arrow retains each read and write occurrence', () => {
+  const occurrence = (relation_kind, index) => ({
+    edge_id: String(index), from_node_id: 'handler', to_node_id: 'variable',
+    relation_kind, resolution_status: 'exact_in_supported_scope',
+    evidence_refs: [{ evidence_id: String(index) }],
+  });
+  const [grouped, other] = groupVariableEdges([
+    occurrence('READS', 0), occurrence('WRITES', 1), occurrence('READS', 2), occurrence('REFERS_TO', 3),
+  ]);
+  assert.equal(grouped.edge_id, '0');
+  assert.equal(edgeRelationLabel(grouped), 'Đọc và ghi biến');
+  assert.deepEqual(grouped.accessKinds, ['READS', 'WRITES', 'READS']);
+  assert.deepEqual(grouped.evidence_refs.map(item => item.evidence_id), ['0', '1', '2']);
+  assert.equal(other.edge_id, '3');
+});
+
+test('a flow trace follows both directions through the selected node and excludes sibling branches', () => {
+  const edges = [
+    ['route', 'screen'], ['screen', 'button'], ['button', 'handleNext'], ['handleNext', 'condition'],
+    ['condition', 'true'], ['condition', 'false'], ['screen', 'handleExport'], ['screen', 'handleSaveDraft'],
+    ['true', 'condition'], ['unrelated', 'false'],
+  ].map(([from_node_id, to_node_id], index) => ({ edge_id: String(index), from_node_id, to_node_id }));
+  assert.deepEqual([...traceFlowEdges(edges, 'handleNext')].sort(), ['0', '1', '2', '3', '4', '5', '8']);
+  assert.deepEqual([...traceFlowEdges(edges, 'handleExport')].sort(), ['0', '6']);
+  assert.equal(traceFlowEdges(edges, null).size, 0);
+});
 
 function fixture(node) {
   if (node.$ref) {

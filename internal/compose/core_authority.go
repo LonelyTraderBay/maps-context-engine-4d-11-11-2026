@@ -303,8 +303,23 @@ func (a *BoundCoreAuthority) AuthorizeResponse(ctx context.Context, p app.CorePr
 			}
 		}
 	case model.GraphData:
-		if _, ok := request.(model.GraphQueryRequest); !ok || name != "POST /graph/query" {
+		wanted, ok := request.(model.GraphQueryRequest)
+		if !ok || name != "POST /graph/query" || (wanted.Directory == nil) != (data.Directory == nil) {
 			return ErrAuthority
+		}
+		if data.Directory != nil {
+			if *wanted.Directory != data.Directory.Path || response.Scope == nil {
+				return ErrAuthority
+			}
+			checkPath := a.CheckMetadataPath
+			if checkPath == nil {
+				checkPath = policy.CheckConfiguredPath
+			}
+			for _, entry := range data.Directory.Entries {
+				if err := checkPath(entry.Path, observation.Binding.Policy.DeniedGlobs); err != nil {
+					return err
+				}
+			}
 		}
 		for _, node := range data.Nodes {
 			if err := checkGraph(node.Ref); err != nil {

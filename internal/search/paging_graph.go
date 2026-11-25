@@ -193,6 +193,18 @@ func NewGraphPager(ctx context.Context, codec *contextpack.CursorCodec, binding 
 	return p, nil
 }
 
+// PrioritizeNode promotes a root before the pager is published or used.
+// The remaining nodes keep their canonical order.
+func (p *GraphPager) PrioritizeNode(nodeID string) {
+	for i, id := range p.nodeIDs {
+		if id == nodeID {
+			copy(p.nodeIDs[1:i+1], p.nodeIDs[:i])
+			p.nodeIDs[0] = id
+			return
+		}
+	}
+}
+
 // Page limits its node/edge arrays and their serialized bytes. The transport
 // owner must additionally measure the entire envelope and delivery blocks.
 func (p *GraphPager) Page(ctx context.Context, cursor, principal string, currentGuard contextpack.CursorGuard, nodeLimit, edgeLimit, maxItemBytes int) (GraphPage, error) {

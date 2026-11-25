@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 )
 
 type GraphNode struct {
@@ -25,10 +26,27 @@ type GraphEdge struct {
 	ExpandRef        *string       `json:"expand_ref"`
 }
 type GraphData struct {
-	Operation      string      `json:"operation"`
-	Nodes          []GraphNode `json:"nodes"`
-	Edges          []GraphEdge `json:"edges"`
-	SubgraphDigest string      `json:"subgraph_digest"`
+	Operation      string          `json:"operation"`
+	Nodes          []GraphNode     `json:"nodes"`
+	Edges          []GraphEdge     `json:"edges"`
+	SubgraphDigest string          `json:"subgraph_digest"`
+	Directory      *GraphDirectory `json:"directory,omitempty"`
+}
+
+type GraphDirectory struct {
+	Path    string                `json:"path"`
+	Indexed int64                 `json:"indexed"`
+	Skipped int64                 `json:"skipped"`
+	Entries []GraphDirectoryEntry `json:"entries"`
+}
+
+type GraphDirectoryEntry struct {
+	Path        string  `json:"path"`
+	Kind        string  `json:"kind"`
+	Indexed     int64   `json:"indexed"`
+	Skipped     int64   `json:"skipped"`
+	ContentHash *string `json:"content_hash"`
+	ReasonCode  *string `json:"reason_code"`
 }
 
 func decodeSourceRefs(raw json.RawMessage, limit, maxBytes int) ([]SourceRef, error) {
@@ -136,10 +154,7 @@ func DecodeGraphEdgeJSON(data []byte, maxBytes int) (GraphEdge, error) {
 // validate the subgraph digest, provider evidence, capability or authorization.
 func DecodeGraphDataJSON(data []byte, maxBytes int) (GraphData, error) {
 	var g GraphData
-	if _, err := DecodeIdentityJSON(data, maxBytes); err != nil {
-		return g, err
-	}
-	f, err := scopeObject(data, []string{"operation", "nodes", "edges", "subgraph_digest"}, nil)
+	f, err := optionalObject(data, maxBytes, "operation", "nodes", "edges", "subgraph_digest", "directory")
 	if err != nil {
 		return g, err
 	}
@@ -161,6 +176,13 @@ func DecodeGraphDataJSON(data []byte, maxBytes int) (GraphData, error) {
 	}
 	if g.Operation != "graph_query" || !lowerHex(g.SubgraphDigest, 64) {
 		return GraphData{}, fmt.Errorf("invalid graph data")
+	}
+	if raw, ok := f["directory"]; ok {
+		directory, err := decodeGraphDirectory(raw)
+		if err != nil || len(nodes) != 0 || len(edges) != 0 {
+			return GraphData{}, fmt.Errorf("invalid graph directory page")
+		}
+		g.Directory = &directory
 	}
 	g.Nodes = make([]GraphNode, 0, len(nodes))
 	g.Edges = make([]GraphEdge, 0, len(edges))
@@ -189,4 +211,58 @@ func DecodeGraphDataJSON(data []byte, maxBytes int) (GraphData, error) {
 		g.Edges = append(g.Edges, e)
 	}
 	return g, nil
+}
+
+func decodeGraphDirectory(raw []byte) (GraphDirectory, error) {
+	var directory GraphDirectory
+	fields, err := scopeObject(raw, []string{"path", "indexed", "skipped", "entries"}, nil)
+	if err != nil {
+		return directory, err
+	}
+	if err := json.Unmarshal(raw, &directory); err != nil || directory.Entries == nil || len(directory.Entries) > 100 ||
+		directory.Indexed < 0 || directory.Skipped < 0 || directory.Indexed > 100000 || directory.Skipped > 100000 ||
+		directory.Path != "" && !validSourcePath(directory.Path) {
+		return GraphDirectory{}, fmt.Errorf("invalid directory summary")
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(fields["entries"], &items); err != nil {
+		return GraphDirectory{}, err
+	}
+	parent := directory.Path
+	if parent == "" {
+		parent = "."
+	}
+	seen := make(map[string]bool, len(items))
+	var indexed, skipped int64
+	for i, item := range items {
+		if _, err := scopeObject(item, []string{"path", "kind", "indexed", "skipped", "content_hash", "reason_code"},
+			map[string]bool{"content_hash": true, "reason_code": true}); err != nil {
+			return GraphDirectory{}, err
+		}
+		entry := directory.Entries[i]
+		if !validSourcePath(entry.Path) || path.Dir(entry.Path) != parent || seen[entry.Path] ||
+			entry.Indexed < 0 || entry.Skipped < 0 || entry.Indexed > directory.Indexed-indexed || entry.Skipped > directory.Skipped-skipped {
+			return GraphDirectory{}, fmt.Errorf("invalid directory entry")
+		}
+		indexed += entry.Indexed
+		skipped += entry.Skipped
+		seen[entry.Path] = true
+		switch entry.Kind {
+		case "directory":
+			if entry.ContentHash != nil || entry.ReasonCode != nil || entry.Indexed+entry.Skipped == 0 {
+				return GraphDirectory{}, fmt.Errorf("invalid directory entry counts")
+			}
+		case "file":
+			if entry.Indexed == 1 && entry.Skipped == 0 && entry.ContentHash != nil && lowerHex(*entry.ContentHash, 64) && entry.ReasonCode == nil {
+				continue
+			}
+			if entry.Indexed == 0 && entry.Skipped == 1 && entry.ContentHash == nil && entry.ReasonCode != nil && validID(*entry.ReasonCode) {
+				continue
+			}
+			return GraphDirectory{}, fmt.Errorf("invalid file entry")
+		default:
+			return GraphDirectory{}, fmt.Errorf("unknown directory entry kind")
+		}
+	}
+	return directory, nil
 }

@@ -8,7 +8,8 @@ const path = disk.posix;
 const workspace = '/capture';
 const library = '/compiler/lib';
 const maxSourceBytes = 64 << 20;
-const maxFacts = 50000;
+const maxFacts = 100000;
+const maxVariableReferences = 40000;
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const identity = (kind, ...parts) => kind + '-' + sha(JSON.stringify(parts));
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
@@ -224,6 +225,8 @@ function analyzeProject(ts, projectPath, program, capture, request, facts, allGa
     .sort((a, b) => order(a.fileName, b.fileName));
   const declarations = new Map();
   const checks = new Map();
+  const mappedBranches = new Set();
+  const variableNames = new Set();
   const typed = request.profile.analysis_mode === 'typed_when_available';
   const checker = typed ? program.getTypeChecker() : null;
   const gaps = new Set();
@@ -241,19 +244,25 @@ function analyzeProject(ts, projectPath, program, capture, request, facts, allGa
     declarations.set(source, file);
     append(facts, 'symbols', file);
     walk(ts, source, node => {
-      const kind = declarationKind(ts, node);
+      if (typed && (ts.isImportSpecifier(node) || ts.isImportClause(node)) && !node.isTypeOnly && node.name) {
+        variableNames.add(node.name.text);
+      }
+      const kind = typed && ts.isBindingElement(node) ? 'variable' : declarationKind(ts, node);
       if (!kind || !node.name || !(ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name))) return;
       const owner = enclosing(node);
-      const range = renderRange(node.name);
+      const anchor = renderRange(node.name);
+      const definition = ts.isBindingElement(node) ? node.parent.parent : node;
+      const range = typed && (kind === 'function' || kind === 'method' || kind === 'variable') ? renderRange(definition) : anchor;
       const name = node.name.text.slice(0, 512);
       const signature = kind === 'function' || kind === 'method' ? 'arity:' + node.parameters.length : '';
-      const id = identity('tssym', packageKey, filename, kind, owner.symbol_id, range.start_byte);
+      const id = identity('tssym', packageKey, filename, kind, owner.symbol_id, anchor.start_byte);
       const exported = !!node.modifiers?.some(part => part.kind === ts.SyntaxKind.ExportKeyword) ||
         !!node.parent?.parent?.modifiers?.some(part => part.kind === ts.SyntaxKind.ExportKeyword);
       const item = { symbol_id: id, path: filename, package_key: packageKey, kind, name,
         qualified_name: (owner.qualified_name + '#' + name).slice(0, 2048),
         scope_key: lexicalScope(node, owner, renderRange), range, signature, exported };
       declarations.set(node, item);
+      if (typed && (kind === 'variable' || kind === 'parameter')) variableNames.add(node.name.text);
       append(facts, 'symbols', item);
       edge(source, node.name, owner, item, 'CONTAINS', 'syntax_exact');
     });
@@ -277,22 +286,166 @@ function analyzeProject(ts, projectPath, program, capture, request, facts, allGa
     }
     return owner.symbol_id;
   }
-  function targetOf(symbol) {
+  function capturedDeclaration(symbol) {
     if (!symbol) return null;
     if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-    const targets = [...new Set((symbol?.declarations ?? []).map(node => declarations.get(node)).filter(Boolean))];
+    const targets = (symbol?.declarations ?? []).filter(node => declarations.has(node));
     return targets.length === 1 ? targets[0] : null;
   }
+  function targetOf(symbol) { return declarations.get(capturedDeclaration(symbol)) ?? null; }
   function edge(source, site, owner, target, kind, evidence, label = null) {
     const range = checks.get(source)(site);
-    append(facts, 'relations', { relation_id: identity('tsrel', packageKey, owner.symbol_id, target?.symbol_id ?? '',
+    const relation = { relation_id: identity('tsrel', packageKey, owner.symbol_id, target?.symbol_id ?? '',
       kind, range.start_byte, range.end_byte, owner.path), source_symbol_id: owner.symbol_id,
       target_symbol_id: target?.symbol_id ?? null, kind, evidence_kind: evidence,
       site_path: source.fileName.slice(workspace.length + 1), range, reason: label === null ? '' : 'binding_not_proven',
-      unresolved_label: label });
+      unresolved_label: label };
+    if (kind === 'READS' || kind === 'WRITES') {
+      if (facts.variableReferences.length === maxVariableReferences) gaps.add('TS_VARIABLE_REFERENCE_LIMIT');
+      else facts.variableReferences.push(relation);
+    } else append(facts, 'relations', relation);
+  }
+  function variableReference(source, node) {
+    if (!ts.isIdentifier(node) || !variableNames.has(node.text) || ts.isPartOfTypeNode(node)) return;
+    const parent = node.parent;
+    const shorthand = ts.isShorthandPropertyAssignment(parent) && parent.name === node;
+    if (!shorthand && (ts.isDeclarationName(node) || !ts.isInExpressionContext(node))) return;
+    const target = targetOf(shorthand ? checker.getShorthandAssignmentValueSymbol(parent) : checker.getSymbolAtLocation(node));
+    if (target?.kind !== 'variable' && target?.kind !== 'parameter') return;
+    const owner = enclosing(node);
+    if (owner.symbol_id === target.symbol_id) return;
+    const assignment = ts.getAssignmentTargetKind(node);
+    if (assignment !== ts.AssignmentKind.None) edge(source, node, owner, target, 'WRITES', 'type_resolved');
+    if (assignment !== ts.AssignmentKind.Definite ||
+        ts.isBinaryExpression(parent) && parent.left === node &&
+        [ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.BarBarEqualsToken,
+          ts.SyntaxKind.QuestionQuestionEqualsToken].includes(parent.operatorToken.kind)) {
+      edge(source, node, owner, target, 'READS', 'type_resolved');
+    }
+  }
+  function siteSymbol(source, site, kind, name, owner) {
+    const range = checks.get(source)(site);
+    const filename = source.fileName.slice(workspace.length + 1);
+    const symbol = { symbol_id: identity('tssite', packageKey, filename, kind, range.start_byte, range.end_byte),
+      path: filename, package_key: packageKey, kind, name: name.slice(0, 512),
+      qualified_name: (owner.qualified_name + '#' + name).slice(0, 2048), scope_key: owner.symbol_id,
+      range, signature: '', exported: false };
+    append(facts, 'symbols', symbol);
+    return symbol;
+  }
+  function reactRouterCall(node) {
+    if (!ts.isIdentifier(node.expression)) return false;
+    const symbol = checker.getSymbolAtLocation(node.expression);
+    const declaration = symbol?.declarations?.length === 1 ? symbol.declarations[0] : null;
+    if (!declaration || !ts.isImportSpecifier(declaration) || declaration.isTypeOnly || declaration.parent.parent.isTypeOnly ||
+        (declaration.propertyName ?? declaration.name).text !== 'createBrowserRouter') return false;
+    const module = declaration.parent.parent.parent.moduleSpecifier;
+    return !!module && ts.isStringLiteral(module) && ['react-router', 'react-router-dom'].includes(module.text);
+  }
+  function routeProperties(node) {
+    const properties = new Map();
+    for (const property of node.properties) {
+      if (!ts.isPropertyAssignment(property) || !(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) ||
+          properties.has(property.name.text)) return null;
+      properties.set(property.name.text, property);
+    }
+    return properties;
+  }
+  function reactRoutes(source, array, parent, depth) {
+    if (depth > 16 || !ts.isArrayLiteralExpression(array)) return;
+    for (const item of array.elements) {
+      if (!ts.isObjectLiteralExpression(item)) continue;
+      const properties = routeProperties(item);
+      if (!properties) continue;
+      const pathProperty = properties.get('path');
+      const component = properties.get('Component');
+      const children = properties.get('children');
+      let route = parent;
+      if (pathProperty) {
+        const value = pathProperty.initializer;
+        if (!ts.isStringLiteral(value) || !/^[\w./:*?-]{0,480}$/.test(value.text) ||
+            value.text.split('/').some(segment => segment === '.' || segment === '..')) continue;
+        if (value.text.startsWith('/') && parent && parent !== '/' &&
+            value.text !== parent && !value.text.startsWith(parent.replace(/\/$/, '') + '/')) continue;
+        route = value.text.startsWith('/') ? value.text : parent.replace(/\/$/, '') + '/' + value.text;
+        if (route.length > 512) continue;
+      }
+      if (pathProperty && component && ts.isIdentifier(component.initializer)) {
+        const target = targetOf(checker.getSymbolAtLocation(component.initializer));
+        if (target) {
+          const owner = enclosing(item);
+          const entry = siteSymbol(source, pathProperty, 'route', route, owner);
+          edge(source, pathProperty, owner, entry, 'CONTAINS', 'syntax_exact');
+          edge(source, component, entry, target, 'ROUTE_COMPONENT', 'type_resolved');
+        } else gaps.add('TS_UNRESOLVED_ROUTE');
+      }
+      if (children) reactRoutes(source, children.initializer, route, depth + 1);
+    }
+  }
+  function handlerBranches(declaration, handler) {
+    if (mappedBranches.has(declaration)) return;
+    mappedBranches.add(declaration);
+    const callable = ts.isVariableDeclaration(declaration) ? declaration.initializer : declaration;
+    if (!callable || !(ts.isFunctionDeclaration(callable) || ts.isArrowFunction(callable) || ts.isFunctionExpression(callable)) ||
+        !callable.body || !ts.isBlock(callable.body)) return;
+    const source = declaration.getSourceFile();
+    for (const statement of callable.body.statements) {
+      if (!ts.isIfStatement(statement)) continue;
+      const test = siteSymbol(source, statement.expression, 'branch_condition',
+        'if (' + statement.expression.getText(source).replace(/\s+/g, ' ').slice(0, 116) + ')', handler);
+      edge(source, statement.expression, handler, test, 'CHECKS_CONDITION', 'syntax_exact');
+      for (const [arm, kind, fallback] of [[statement.thenStatement, 'BRANCH_TRUE', 'Nhánh đúng'],
+        [statement.elseStatement, 'BRANCH_FALSE', 'Nhánh sai']]) {
+        if (!arm) continue;
+        const first = ts.isBlock(arm) ? arm.statements[0] : arm;
+        let name = fallback;
+        if (first && ts.isReturnStatement(first)) name = 'return';
+        if (first && ts.isExpressionStatement(first) && ts.isCallExpression(first.expression) &&
+            ts.isIdentifier(first.expression.expression)) name = first.expression.expression.text;
+        const branch = siteSymbol(source, arm, 'branch_arm', name, test);
+        edge(source, arm, test, branch, kind, 'syntax_exact');
+      }
+    }
+  }
+  function reactElement(source, node) {
+    const owner = enclosing(node);
+    const tag = node.tagName;
+    const target = targetOf(checker.getSymbolAtLocation(tag));
+    // An explicit attribute before a later spread may be overridden.
+    const properties = node.attributes.properties;
+    const bindings = new Map();
+    for (const item of properties) {
+      if (ts.isJsxSpreadAttribute(item)) {
+        bindings.clear();
+      } else if (ts.isIdentifier(item.name) && /^on[A-Z]/.test(item.name.text)) {
+        bindings.set(item.name.text, item);
+      }
+    }
+    const events = [];
+    for (const item of bindings.values()) {
+      const value = item.initializer;
+      if (!value || !ts.isJsxExpression(value) || !value.expression || !ts.isIdentifier(value.expression)) continue;
+      const definition = capturedDeclaration(checker.getSymbolAtLocation(value.expression));
+      const handler = declarations.get(definition);
+      if (handler) events.push({ item, handler, definition });
+      else gaps.add('TS_UNRESOLVED_EVENT');
+    }
+    if (events.length) {
+      const element = siteSymbol(source, node, 'jsx_site', tag.getText(source), owner);
+      edge(source, tag, owner, element, 'RENDERS_JSX', 'syntax_exact');
+      for (const { item, handler, definition } of events) {
+        edge(source, item, element, handler, 'BINDS_EVENT', 'type_resolved');
+        handlerBranches(definition, handler);
+      }
+    }
+    if (target && /^[A-Z]/.test(tag.getText(source))) {
+      edge(source, tag, owner, target, 'RENDERS_COMPONENT', 'type_resolved');
+    }
   }
   if (typed) for (const source of sources) {
     walk(ts, source, node => {
+      variableReference(source, node);
+      if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) reactElement(source, node);
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
         const resolved = targetOf(checker.getSymbolAtLocation(node.moduleSpecifier));
         if (resolved) edge(source, node.moduleSpecifier, enclosing(node), resolved, 'IMPORTS', 'type_resolved');
@@ -306,6 +459,7 @@ function analyzeProject(ts, projectPath, program, capture, request, facts, allGa
         if (resolved) edge(source, node.name, enclosing(node), resolved, 'REFERS_TO', 'type_resolved');
       }
       if (!ts.isCallExpression(node)) return;
+      if (node.arguments.length && reactRouterCall(node)) reactRoutes(source, node.arguments[0], '', 0);
       const site = node.expression;
       if (site.kind === ts.SyntaxKind.ImportKeyword) {
         gaps.add('TS_DYNAMIC_IMPORT');
@@ -314,8 +468,14 @@ function analyzeProject(ts, projectPath, program, capture, request, facts, allGa
       }
       const type = checker.getTypeAtLocation(site);
       const declaration = checker.getResolvedSignature(node)?.declaration;
-      const target = declaration ? declarations.get(declaration) : null;
-      if (!(type.flags & ts.TypeFlags.Any) && target && ts.isFunctionDeclaration(declaration)) {
+      const directFunction = declaration && ts.isFunctionDeclaration(declaration);
+      const directVariable = declaration && ts.isIdentifier(site) &&
+        (ts.isArrowFunction(declaration) || ts.isFunctionExpression(declaration)) &&
+        ts.isVariableDeclaration(declaration.parent) && declaration.parent.initializer === declaration &&
+        (declaration.parent.parent.flags & ts.NodeFlags.Const) !== 0 &&
+        targetOf(checker.getSymbolAtLocation(site)) === declarations.get(declaration.parent);
+      const target = directFunction ? declarations.get(declaration) : directVariable ? declarations.get(declaration.parent) : null;
+      if (!(type.flags & ts.TypeFlags.Any) && target) {
         edge(source, site, enclosing(node), target, 'CALLS_DIRECT', 'type_resolved');
       } else {
         gaps.add('TS_UNRESOLVED_CALL');
@@ -404,7 +564,7 @@ function main() {
       request.profile.language !== 'typescript_javascript') throw new Error('PROVIDER_PROFILE');
   const capture = loadCapture(request);
   const host = compilerHost(ts, compilerRoot, capture.files);
-  const facts = { count: 0, packages: [], symbols: [], relations: [], diagnostics: [] };
+  const facts = { count: 0, packages: [], symbols: [], relations: [], diagnostics: [], variableReferences: [] };
   const gaps = new Set();
   const frontend = process.env.MCE4D_PROVIDER_MODE === 'frontend';
   const routes = [];
@@ -436,6 +596,13 @@ function main() {
       input_digest: capture.manifest.snapshot_digest, routes, clients, gaps: [...gaps].sort(order) };
     sendFrame(Buffer.from(JSON.stringify(output)), request.max_frame_bytes);
     return;
+  }
+  for (const relation of facts.variableReferences) {
+    if (facts.count === maxFacts) {
+      gaps.add('TS_VARIABLE_REFERENCE_LIMIT');
+      break;
+    }
+    append(facts, 'relations', relation);
   }
   response(request, capture.manifest.snapshot_digest, facts, gaps, ts.version);
 }

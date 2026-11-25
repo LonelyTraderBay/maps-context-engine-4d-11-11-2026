@@ -72,7 +72,7 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 		}
 	}
 	if request.Path != "" {
-		if (request.Mode != "exact" && request.Mode != "prefix") || policy.CheckPath(request.Path) != nil {
+		if request.Mode != "exact" && request.Mode != "prefix" && request.Mode != "question" && request.Mode != "question_route" || policy.CheckPath(request.Path) != nil {
 			return output, ErrInvalidSearch
 		}
 		if err := request.Scanner.CheckContent([]byte(request.Path)); err != nil {
@@ -89,8 +89,11 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 		}
 	}
 	switch request.Mode {
-	case "exact", "prefix", "text", "file":
+	case "exact", "prefix", "text", "file", "question", "question_route":
 		if request.Position != nil || len(request.Query) < 1 || len(request.Query) > 2048 || !utf8.ValidString(request.Query) || utf8.RuneCountInString(request.Query) > 512 || strings.TrimSpace(request.Query) == "" || request.Mode == "text" && (len(request.Query) > 512 || request.Qualified) || request.Mode == "file" && request.Qualified {
+			return output, ErrInvalidSearch
+		}
+		if request.Keyset && (request.Mode == "question" || request.Mode == "question_route") {
 			return output, ErrInvalidSearch
 		}
 		for _, r := range request.Query {
@@ -211,6 +214,11 @@ func (s *Store) Search(ctx context.Context, request search.Request) (output sear
 			return output, err
 		}
 		if err := validateSearchPosition(ctx, tx, generation, entries, request); err != nil {
+			return output, err
+		}
+	}
+	if request.Mode == "question_route" {
+		if err := checkQuestionRoutePaths(ctx, tx, generation, request.Query, checkPath); err != nil {
 			return output, err
 		}
 	}
@@ -366,6 +374,7 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 	where := "s.generation_id=?"
 	args := []any{generation}
 	order := column + ",s.symbol_id"
+	var orderArgs []any
 	switch request.Mode {
 	case "exact":
 		where += " AND " + column + "=?"
@@ -384,6 +393,19 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 		where += " AND s.path=? AND s.kind<>'file' AND s.start_byte<=? AND s.end_byte>?"
 		args = append(args, request.Position.Path, request.Position.ByteOffset, request.Position.ByteOffset)
 		order = "s.start_byte,s.end_byte,s.symbol_id"
+	case "question_route":
+		// Resolve the literal route to its indexed component in this generation.
+		where += ` AND s.symbol_id IN (
+			SELECT r.target_symbol_id FROM symbols route JOIN relations r
+			ON r.generation_id=route.generation_id AND r.source_symbol_id=route.symbol_id
+			WHERE route.generation_id=? AND route.kind='route' AND route.name=? AND r.kind='ROUTE_COMPONENT'
+		)`
+		args = append(args, generation, request.Query)
+	case "question":
+		predicate, predicateArgs, rank, rankArgs := questionSymbolOrder(request.Query)
+		where += " AND " + predicate
+		args = append(args, predicateArgs...)
+		order, orderArgs = rank, rankArgs
 	}
 	if len(request.Kinds) != 0 {
 		where += " AND s.kind IN (" + strings.TrimSuffix(strings.Repeat("?,", len(request.Kinds)), ",") + ")"
@@ -408,6 +430,7 @@ func symbolSearchQuery(request search.Request, generation string) (string, []any
 			args = append(args, request.AfterID)
 		}
 	}
+	args = append(args, orderArgs...)
 	args = append(args, request.Limit+1)
 	return `SELECT ` + searchSymbolFields + ` FROM symbols s LEFT JOIN files f ON f.generation_id=s.generation_id AND f.path=s.path WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ?`, args
 }

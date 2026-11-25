@@ -103,6 +103,14 @@ mce4d --worktree-id <id> --profile-id <hash> query expand --input-json expand.js
 mce4d --worktree-id <id> --profile-id <hash> query validate --input-json validate.json
 ```
 
+For a known route wrapper, set the locate request to
+`{"mode":"evidence","query":"WebHome","focus":"route"}`. The same request works
+in MCP and in `query locate`. It returns line-numbered indexed excerpts for
+the route and direct render sites. Omit `focus` to trace events and logic.
+An automation with an exact symbol can run the CLI before opening an AI turn
+and pass the relevant `data.excerpts` as source evidence. Treat them as
+snapshot evidence and use workspace validation before editing.
+
 Index/watch write progress to stderr and leave stdout empty. Watch stays in the
 foreground until cancelled. Use a located candidate's exact `ref` in a context
 selector: `{"kind":"ref","ref":<candidate.ref>,"service_id":null}`. A context

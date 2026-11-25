@@ -71,7 +71,7 @@ func DecodeSymbolFactJSON(data []byte, maxBytes int) (SymbolFact, error) {
 		return SymbolFact{}, fmt.Errorf("invalid symbol")
 	}
 	switch s.Kind {
-	case "file", "package", "function", "method", "type", "interface", "field", "variable", "parameter", "receiver", "result", "constant", "closure", "external":
+	case "file", "package", "function", "method", "type", "interface", "field", "variable", "parameter", "receiver", "result", "constant", "closure", "external", "route", "jsx_site", "branch_condition", "branch_arm":
 	default:
 		return SymbolFact{}, fmt.Errorf("invalid symbol kind")
 	}
@@ -121,7 +121,8 @@ func DecodeRelationFactJSON(data []byte, maxBytes int) (RelationFact, error) {
 
 func ValidRelationKind(kind string) bool {
 	switch kind {
-	case "CONTAINS", "IMPORTS", "REFERS_TO", "READS", "WRITES", "CALLS_DIRECT", "CALLS_INTERFACE", "MAY_DISPATCH_TO", "UNRESOLVED_REF", "UNRESOLVED_CALL", "TEST_REF", "DOC_LINK":
+	case "CONTAINS", "IMPORTS", "REFERS_TO", "READS", "WRITES", "CALLS_DIRECT", "CALLS_INTERFACE", "MAY_DISPATCH_TO", "UNRESOLVED_REF", "UNRESOLVED_CALL", "TEST_REF", "DOC_LINK",
+		"ROUTE_COMPONENT", "RENDERS_COMPONENT", "RENDERS_JSX", "BINDS_EVENT", "CHECKS_CONDITION", "BRANCH_TRUE", "BRANCH_FALSE":
 		return true
 	default:
 		return false
