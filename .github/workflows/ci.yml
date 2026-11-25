@@ -237,6 +237,7 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/mce4d-browser
         run: node node_modules/playwright/cli.js install --no-shell chromium
       - name: Run sandboxed Explorer browser fixture
+        id: explorer-browser
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/mce4d-browser
           MCE4D_CHROME_SHA256: ${{ matrix.chromium-sha256 }}
@@ -247,6 +248,7 @@ jobs:
           if ((Get-FileHash -LiteralPath $browser).Hash -ne $env:MCE4D_CHROME_SHA256) {
             throw 'Chromium executable differs from the pinned SHA-256'
           }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "path=$browser"
           if ($IsLinux -and (Test-Path /proc/sys/kernel/apparmor_restrict_unprivileged_userns) -and
               (Get-Content /proc/sys/kernel/apparmor_restrict_unprivileged_userns) -eq '1') {
             # Grant user namespaces only to this Chromium executable on the hosted runner.
@@ -258,3 +260,12 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           npm run test:e2e -w '@mce4d/explorer'
+      - name: Verify Explorer TS/JS Watch on isolated Windows SQLite
+        if: runner.os == 'Windows'
+        timeout-minutes: 8
+        env:
+          CGO_ENABLED: '0'
+          GOPROXY: 'off'
+          MCE4D_CHROME_PATH: ${{ steps.explorer-browser.outputs.path }}
+          MCE4D_CHROME_SHA256: ${{ matrix.chromium-sha256 }}
+        run: .\tests\integration\run_windows_restore_ci.ps1 -ExplorerWatchBrowser $env:MCE4D_CHROME_PATH

@@ -1,18 +1,33 @@
 # This launcher provisions a disposable local account on the hosted Windows VM.
-param([string]$S18Output = '')
+param([string]$S18Output = '', [string]$ExplorerWatchBrowser = '')
 
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     throw 'Run this launcher on a GitHub-hosted Windows runner'
 }
 
-$bundle = Join-Path $env:RUNNER_TEMP ($S18Output ? 'mce-s18-live-bin' : 'mce-restore-bin')
+if ($S18Output -and $ExplorerWatchBrowser) {
+    throw 'Select one packaged fixture scenario'
+}
+
+$bundleName = 'mce-restore-bin'
+$binaryName = 'mce4d.exe'
+if ($S18Output) {
+    $bundleName = 'mce-s18-live-bin'
+} elseif ($ExplorerWatchBrowser) {
+    $bundleName = 'mce-explorer-watch-bin'
+    $binaryName = 'mce4d-explorer.exe'
+}
+$bundle = Join-Path $env:RUNNER_TEMP $bundleName
 $logs = Join-Path $bundle 'logs'
 New-Item -ItemType Directory -Path $bundle, $logs | Out-Null
-Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'mce4d.exe') -Destination $bundle
+Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP $binaryName) -Destination (Join-Path $bundle 'mce4d.exe')
 if ($S18Output) {
     Copy-Item -LiteralPath (Join-Path $S18Output 'source') -Destination (Join-Path $bundle 's18-source') -Recurse
     Copy-Item -LiteralPath (Join-Path $S18Output 'live-requests.json') -Destination $bundle
+} elseif ($ExplorerWatchBrowser) {
+    & (Join-Path $PSScriptRoot 'prepare_windows_explorer_watch_ci.ps1') -Bundle $bundle `
+        -Browser $ExplorerWatchBrowser -BrowserSHA256 $env:MCE4D_CHROME_SHA256
 }
 go build -trimpath -o (Join-Path $bundle 'state-profile.exe') ./tools/state_profile
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -41,6 +56,12 @@ try {
     $env:MCE4D_WIN_PACKAGE_FIXTURE = $PSScriptRoot
     if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'live-requests.json')) {
         $env:MCE4D_WIN_S18_BUNDLE = $PSScriptRoot
+    }
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'explorer_windows_watch.mjs')) {
+        $env:MCE4D_WIN_TS_FIXTURE = Join-Path $PSScriptRoot 'typescript'
+        $env:MCE4D_WIN_EXPLORER_NODE = Join-Path $env:MCE4D_WIN_TS_FIXTURE 'node.exe'
+        $env:MCE4D_WIN_EXPLORER_BROWSER = Join-Path $PSScriptRoot 'browser\chrome.exe'
+        $env:MCE4D_WIN_EXPLORER_DRIVER = Join-Path $PSScriptRoot 'explorer_windows_watch.mjs'
     }
     & (Join-Path $PSScriptRoot 'integration.test.exe') '-test.v' '-test.run=^TestWindowsPackagedProfileRoleVerification$' '-test.timeout=4m' *> $log
     exit $LASTEXITCODE
@@ -86,6 +107,22 @@ if ($S18Output) {
         "- Tested commit $env:GITHUB_SHA"
         "- Opened a published Maps index of $($live.maps_index_bytes) bytes (> 4 MiB)."
         '- All 30 live C prompts matched the recorded prompt hashes.'
+    ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+    return
+}
+
+if ($ExplorerWatchBrowser) {
+    foreach ($phase in 'initial', 'add', 'edit', 'delete') {
+        if (-not ($result -match "Windows Explorer ${phase}: automatic SQLite graph/source at ")) {
+            throw "Explorer browser evidence missing for $phase"
+        }
+    }
+    @(
+        '### GU0/C082 - Windows Explorer TS/JS Watch'
+        ''
+        "- Tested commit $env:GITHUB_SHA"
+        '- One Explorer tab followed the initial SQLite generation and all three Watch updates (add, edit, delete).'
+        '- Graph and captured source matched the isolated TS/JS worktree and the generations seen by CLI/MCP.'
     ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
     return
 }
